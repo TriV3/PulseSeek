@@ -1,0 +1,37 @@
+# Local product specifications
+/spec/
+
+# Rust build output
+/target/
+
+# Rust tooling
+**/*.rs.bk
+*.pdb
+
+# JavaScript / TypeScript tooling
+node_modules/
+dist/
+.vite/
+
+# Tauri-generated bundles and local configuration
+src-tauri/target/
+
+# Environment and local configuration
+.env
+.env.*
+!.env.example
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Test and coverage output
+coverage/
