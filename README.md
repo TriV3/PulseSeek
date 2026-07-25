@@ -54,9 +54,12 @@ browse, listen to, select, organize, and use audio files.
 
 ## Technology
 
-The application core will be developed in Rust. Desktop UI and supporting
-library choices will be validated through prototypes before the architecture is
-fixed.
+PulseSeek uses Tauri 2 with React and TypeScript for the desktop interface. The
+audio engine, filesystem access, persistence, analysis, and plugin
+infrastructure are implemented in Rust.
+
+The accepted stack, testing strategy, workflow, and architecture decisions are
+documented under [`docs/`](docs/).
 
 ## Project status
 
@@ -64,4 +67,5 @@ PulseSeek is at the specification and project-initialization stage.
 
 ## License
 
-The project is intended to be open source. A license has not yet been selected.
+PulseSeek is licensed under the Mozilla Public License 2.0. See
+[`LICENSE`](LICENSE).
