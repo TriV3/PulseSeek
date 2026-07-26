@@ -117,6 +117,80 @@ not weaken these rules.
 - Prefer independently reviewable PRs, ideally below 400 changed lines of
   production logic.
 
+## PR review command
+
+When the user invokes `/review <PR_NUMBER>`, immediately start reviewing that
+GitHub pull request by first reading and then following
+[`docs/PR-REVIEW.md`](docs/PR-REVIEW.md). A review request authorizes inspection
+and non-destructive verification only; do not modify code, push changes,
+retarget, close, or merge the pull request without the user's explicit
+approval.
+
+## Implementation command
+
+When the user invokes:
+
+```text
+/implement <TYPE> [SHORT_NAME] — <DESCRIPTION>
+```
+
+immediately prepare and implement the requested change. Supported types and
+their branch prefixes are:
+
+| Type | Branch |
+| --- | --- |
+| `feature` | `feature/<SHORT_NAME>` |
+| `bugfix` | `fix/<SHORT_NAME>` |
+| `hotfix` | `hotfix/<SHORT_NAME>` |
+| `refactor` | `refactor/<SHORT_NAME>` |
+| `chore` | `chore/<SHORT_NAME>` |
+| `docs` | `docs/<SHORT_NAME>` |
+
+`SHORT_NAME` is optional. When omitted, derive a concise lowercase kebab-case
+name from the description and show the resulting branch name before creating
+it.
+
+Before editing, inspect the working tree and fetch the current remote state.
+Preserve all existing user changes. Create the new branch from an up-to-date
+`develop` unless `hotfix` explicitly requires the latest released `main`. If
+the requested branch already exists, inspect it and continue only when doing
+so cannot overwrite or mix unrelated work.
+
+Then clarify acceptance criteria from the description and repository
+documentation, implement the smallest complete change using the TDD rules in
+this file, and run every applicable required check. Finish by reporting the
+changed files, test evidence, remaining risks, and the suggested Conventional
+Commit message.
+
+Invoking `/implement` authorizes creating and switching local branches,
+editing files within the requested scope, and running non-destructive
+validation. It does not authorize committing, pushing, creating or modifying a
+pull request, merging, editing `spec/`, adding a structural dependency, or
+changing an accepted architecture decision without the separate approvals
+required by this document.
+
+## Release command
+
+When the user invokes:
+
+```text
+/release <VERSION>
+```
+
+immediately start preparing that PulseSeek version by first reading and then
+following [`docs/RELEASE.md`](docs/RELEASE.md). If the user omits the version,
+inspect the changes since the latest tag, propose the appropriate Semantic
+Version, and wait for approval before creating a release branch.
+
+Invoking `/release <VERSION>` authorizes creating and switching to the matching
+local `release/<VERSION>` branch, but no remote or publishing action.
+
+When the user asks to prepare, publish, or otherwise perform a release, first
+read and follow [`docs/RELEASE.md`](docs/RELEASE.md). Drafting a release does
+not authorize pushing a branch, merging a pull request, creating a tag,
+publishing a GitHub Release, or uploading artifacts; each public release action
+requires the user's explicit approval as described in that playbook.
+
 ## Agent authority
 
 Agents may, without additional permission:

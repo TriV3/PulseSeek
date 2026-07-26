@@ -5,7 +5,9 @@
 - `main` contains releasable versions.
 - `develop` is the integration branch.
 - `feature/*` branches target `develop`.
+- `fix/*`, `refactor/*`, `chore/*`, and `docs/*` branches target `develop`.
 - `release/*` branches target `main`.
+- `hotfix/*` branches start from the latest released `main`.
 - `hotfix/*` branches are reserved for urgent production fixes.
 
 The repository owner has a direct-push exception on `develop`, but production
