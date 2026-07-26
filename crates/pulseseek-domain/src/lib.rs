@@ -1,4 +1,5 @@
 pub mod error;
+pub mod playback;
 
 pub fn placeholder() -> &'static str {
     "PulseSeek"
