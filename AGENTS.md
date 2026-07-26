@@ -139,7 +139,7 @@ The request may reference a PR-sized item, issue, acceptance criteria, or a
 local document, for example:
 
 ```text
-/implement feature Implement PR-002 from @spec/implementation-plan.md using a dedicated workspace
+/implement feature Implement PR-002 from @spec/implementation-plan.md
 ```
 
 Supported types and their branch prefixes are:
@@ -158,7 +158,7 @@ Supported types and their branch prefixes are:
 
 Derive a concise lowercase kebab-case branch name from the referenced item and
 request. Prefer an identifier plus a short purpose when available, such as
-`feature/pr-002-audio-folder-browser`. Show the proposed branch and workspace
+`feature/pr-002-audio-folder-browser`. Show the proposed branch
 names before creating them.
 
 ### Preparation and planning
@@ -177,18 +177,14 @@ The command starts with preparation and planning, not immediate coding:
    stashing, or overwriting user changes.
 5. Create the branch from the latest appropriate base: `develop` for ordinary
    work, or the latest released `main` for an explicitly urgent `hotfix`.
-6. Use a dedicated isolated workspace. Prefer the host application's native
-   workspace or worktree mechanism when available; otherwise create a safe Git
-   worktree dedicated to the new branch. Do not switch the user's primary
-   checkout away from its current branch merely to implement the task.
-7. If the branch or workspace already exists, inspect and reuse it only when it
+6. If the branch already exists, inspect and reuse it only when it
    belongs to the same requested item and contains no unrelated work.
-8. Propose a complete implementation plan before editing production files.
+7. Propose a complete implementation plan before editing production files.
 
 The proposed plan must identify:
 
 - The requirement, acceptance criteria, and explicit non-goals.
-- The branch, base branch, and dedicated workspace.
+- The branch and base branch.
 - The affected domain, application, adapter, Tauri, and React boundaries.
 - The sequence of small implementation steps.
 - The failing tests to write first and the expected Red → Green progression.
@@ -220,7 +216,7 @@ Finish by reporting:
 - Remaining risks, follow-up work, and suggested Conventional Commit message.
 
 Invoking `/implement` authorizes reading referenced files, creating the local
-branch and dedicated workspace, editing files within the requested scope, and
+branch, editing files within the requested scope, and
 running non-destructive validation. It does not authorize committing, pushing,
 creating or modifying a pull request, merging, editing `spec/`, adding a
 structural dependency, or changing an accepted architecture decision without
