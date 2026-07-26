@@ -131,43 +131,97 @@ approval.
 When the user invokes:
 
 ```text
-/implement <TYPE> [SHORT_NAME] — <DESCRIPTION>
+/implement <TYPE> <REQUEST>
 ```
 
-immediately prepare and implement the requested change. Supported types and
-their branch prefixes are:
+interpret everything after `<TYPE>` as a free-form implementation request.
+The request may reference a PR-sized item, issue, acceptance criteria, or a
+local document, for example:
+
+```text
+/implement feature Implement PR-002 from @spec/implementation-plan.md using a dedicated workspace
+```
+
+Supported types and their branch prefixes are:
 
 | Type | Branch |
 | --- | --- |
-| `feature` | `feature/<SHORT_NAME>` |
-| `bugfix` | `fix/<SHORT_NAME>` |
-| `hotfix` | `hotfix/<SHORT_NAME>` |
-| `refactor` | `refactor/<SHORT_NAME>` |
-| `chore` | `chore/<SHORT_NAME>` |
-| `docs` | `docs/<SHORT_NAME>` |
+| `feature` | `feature/<derived-name>` |
+| `bugfix` | `fix/<derived-name>` |
+| `hotfix` | `hotfix/<derived-name>` |
+| `refactor` | `refactor/<derived-name>` |
+| `chore` | `chore/<derived-name>` |
+| `docs` | `docs/<derived-name>` |
 
-`SHORT_NAME` is optional. When omitted, derive a concise lowercase kebab-case
-name from the description and show the resulting branch name before creating
-it.
+Derive a concise lowercase kebab-case branch name from the referenced item and
+request. Prefer an identifier plus a short purpose when available, such as
+`feature/pr-002-audio-folder-browser`. Show the proposed branch and workspace
+names before creating them.
 
-Before editing, inspect the working tree and fetch the current remote state.
-Preserve all existing user changes. Create the new branch from an up-to-date
-`develop` unless `hotfix` explicitly requires the latest released `main`. If
-the requested branch already exists, inspect it and continue only when doing
-so cannot overwrite or mix unrelated work.
+### Preparation and planning
 
-Then clarify acceptance criteria from the description and repository
-documentation, implement the smallest complete change using the TDD rules in
-this file, and run every applicable required check. Finish by reporting the
-changed files, test evidence, remaining risks, and the suggested Conventional
-Commit message.
+The command starts with preparation and planning, not immediate coding:
 
-Invoking `/implement` authorizes creating and switching local branches,
-editing files within the requested scope, and running non-destructive
-validation. It does not authorize committing, pushing, creating or modifying a
-pull request, merging, editing `spec/`, adding a structural dependency, or
-changing an accepted architecture decision without the separate approvals
-required by this document.
+1. Read `AGENTS.md` and every document explicitly referenced by the request.
+   Resolve references such as `@spec/implementation-plan.md` relative to the
+   repository root.
+2. Locate the exact requested item inside the document and read enough
+   surrounding context to understand its dependencies, acceptance criteria,
+   exclusions, and intended PR boundary.
+3. Inspect the repository and current implementation. Do not assume the plan
+   document matches the code.
+4. Inspect the working tree and fetch current remote state without discarding,
+   stashing, or overwriting user changes.
+5. Create the branch from the latest appropriate base: `develop` for ordinary
+   work, or the latest released `main` for an explicitly urgent `hotfix`.
+6. Use a dedicated isolated workspace. Prefer the host application's native
+   workspace or worktree mechanism when available; otherwise create a safe Git
+   worktree dedicated to the new branch. Do not switch the user's primary
+   checkout away from its current branch merely to implement the task.
+7. If the branch or workspace already exists, inspect and reuse it only when it
+   belongs to the same requested item and contains no unrelated work.
+8. Propose a complete implementation plan before editing production files.
+
+The proposed plan must identify:
+
+- The requirement, acceptance criteria, and explicit non-goals.
+- The branch, base branch, and dedicated workspace.
+- The affected domain, application, adapter, Tauri, and React boundaries.
+- The sequence of small implementation steps.
+- The failing tests to write first and the expected Red → Green progression.
+- Audio-thread, filesystem, database, privacy, accessibility, and theme risks
+  that apply.
+- Any dependency or ADR decision requiring separate approval.
+- The validation commands and manual checks to run.
+- The expected commit and PR boundary.
+
+Present the plan and wait for the user's confirmation before editing production
+files. Clearly call out any ambiguity, architectural choice, structural
+dependency, requested edit to `spec/`, destructive behavior, or scope
+materially larger than one reviewable PR. Resolve those points explicitly
+before implementation.
+
+### Implementation and handoff
+
+Implement only the referenced item and its necessary tests and documentation.
+Follow Red → Green → Refactor for production behavior, run focused checks
+during development, then run every applicable required command before
+handoff.
+
+Finish by reporting:
+
+- The completed plan items and any justified deviation.
+- Changed files and user-visible behavior.
+- Red and Green test evidence.
+- Full validation and manual-check results.
+- Remaining risks, follow-up work, and suggested Conventional Commit message.
+
+Invoking `/implement` authorizes reading referenced files, creating the local
+branch and dedicated workspace, editing files within the requested scope, and
+running non-destructive validation. It does not authorize committing, pushing,
+creating or modifying a pull request, merging, editing `spec/`, adding a
+structural dependency, or changing an accepted architecture decision without
+the separate approvals required by this document.
 
 ## Release command
 
