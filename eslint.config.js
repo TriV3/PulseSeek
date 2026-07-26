@@ -20,7 +20,7 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ["**/*.{ts,tsx}"],
+    files: ["src/**/*.{ts,tsx}"],
     languageOptions: {
       ecmaVersion: "latest",
       globals: globals.browser,
@@ -40,7 +40,11 @@ export default tseslint.config(
   {
     files: ["*.config.{js,ts}"],
     languageOptions: {
+      ecmaVersion: "latest",
       globals: globals.node,
+    },
+    rules: {
+      "no-undef": "error",
     },
   },
 );
