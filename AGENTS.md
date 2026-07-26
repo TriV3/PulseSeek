@@ -152,6 +152,9 @@ Supported types and their branch prefixes are:
 | `refactor` | `refactor/<derived-name>` |
 | `chore` | `chore/<derived-name>` |
 | `docs` | `docs/<derived-name>` |
+| `test` | `test/<derived-name>` |
+| `ci` | `ci/<derived-name>` |
+| `build` | `build/<derived-name>` |
 
 Derive a concise lowercase kebab-case branch name from the referenced item and
 request. Prefer an identifier plus a short purpose when available, such as
