@@ -1,0 +1,6 @@
+{
+  "command": "pnpm tauri dev",
+  "url": "http://localhost:1420/",
+  "hotReload": true,
+  "disableInspect": false
+}
