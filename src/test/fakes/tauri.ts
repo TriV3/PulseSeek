@@ -53,38 +53,48 @@ export class FakeTauriCommands<Commands> implements TauriCommandPort<Commands> {
   }
 }
 
+type EventHandler<Events> = (event: TauriEvent<Events[keyof Events]>) => void;
+
+type EventRegistration<Events> = {
+  id: number;
+  handler: EventHandler<Events>;
+};
+
 export class FakeTauriEvents<Events> implements TauriEventPort<Events> {
-  private nextEventId = 1;
-  private readonly handlers = new Map<
+  private nextListenerId = 1;
+  private readonly registrations = new Map<
     keyof Events,
-    Set<(event: TauriEvent<Events[keyof Events]>) => void>
+    Array<EventRegistration<Events>>
   >();
 
   async listen<Event extends keyof Events>(
     event: Event,
     handler: (event: TauriEvent<Events[Event]>) => void,
   ): Promise<UnlistenFn> {
-    const handlers = this.handlers.get(event) ?? new Set();
-    handlers.add(handler as (event: TauriEvent<Events[keyof Events]>) => void);
-    this.handlers.set(event, handlers);
+    const registrations = this.registrations.get(event) ?? [];
+    const registration = {
+      id: this.nextListenerId,
+      handler: handler as EventHandler<Events>,
+    };
+    this.nextListenerId += 1;
+    registrations.push(registration);
+    this.registrations.set(event, registrations);
 
     return () => {
-      handlers.delete(
-        handler as (event: TauriEvent<Events[keyof Events]>) => void,
-      );
+      const index = registrations.indexOf(registration);
+      if (index >= 0) {
+        registrations.splice(index, 1);
+      }
     };
   }
 
   emit<Event extends keyof Events>(event: Event, payload: Events[Event]): void {
-    const emittedEvent: TauriEvent<Events[Event]> = {
-      event: String(event),
-      id: this.nextEventId,
-      payload,
-    };
-    this.nextEventId += 1;
-
-    for (const handler of this.handlers.get(event) ?? []) {
-      handler(emittedEvent);
+    for (const registration of this.registrations.get(event) ?? []) {
+      registration.handler({
+        event: String(event),
+        id: registration.id,
+        payload,
+      });
     }
   }
 }

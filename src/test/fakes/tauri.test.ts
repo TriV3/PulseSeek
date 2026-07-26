@@ -25,19 +25,42 @@ describe("typed Tauri fakes", () => {
     ]);
   });
 
-  it("emits events until the listener unsubscribes", async () => {
+  it("keeps a stable listener id across event emissions", async () => {
     const events = new FakeTauriEvents<Events>();
     const listener = vi.fn();
     const unsubscribe = await events.listen("status", listener);
 
     events.emit("status", { state: "ready" });
-    unsubscribe();
     events.emit("status", { state: "stopped" });
+    unsubscribe();
+    events.emit("status", { state: "ready" });
+
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(listener).toHaveBeenNthCalledWith(1, {
+      event: "status",
+      id: 1,
+      payload: { state: "ready" },
+    });
+    expect(listener).toHaveBeenNthCalledWith(2, {
+      event: "status",
+      id: 1,
+      payload: { state: "stopped" },
+    });
+  });
+
+  it("unsubscribes duplicate callback registrations independently", async () => {
+    const events = new FakeTauriEvents<Events>();
+    const listener = vi.fn();
+    const unsubscribeFirst = await events.listen("status", listener);
+    await events.listen("status", listener);
+
+    unsubscribeFirst();
+    events.emit("status", { state: "ready" });
 
     expect(listener).toHaveBeenCalledOnce();
     expect(listener).toHaveBeenCalledWith({
       event: "status",
-      id: 1,
+      id: 2,
       payload: { state: "ready" },
     });
   });
