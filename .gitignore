@@ -13,8 +13,9 @@ node_modules/
 dist/
 .vite/
 
-# Tauri-generated bundles and local configuration
+# Tauri-generated bundles, schemas, and local configuration
 src-tauri/target/
+src-tauri/gen/
 
 # Environment and local configuration
 .env

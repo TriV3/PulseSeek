@@ -1,0 +1,18 @@
+{
+  "productName": "PulseSeek",
+  "version": "0.1.0",
+  "identifier": "com.pulseseek.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "PulseSeek",
+        "width": 1200,
+        "height": 800
+      }
+    ]
+  }
+}
