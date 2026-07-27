@@ -1,3 +1,4 @@
+pub mod command_envelope;
 pub mod diagnostics;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -5,7 +6,10 @@ pub fn run() {
     let _diagnostics_guard = diagnostics::init(DiagnosticsConfig::default());
 
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![diagnostics::report_error])
+        .invoke_handler(tauri::generate_handler![
+            diagnostics::report_error,
+            command_envelope::invoke_command
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

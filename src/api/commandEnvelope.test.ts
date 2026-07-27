@@ -1,0 +1,105 @@
+import { describe, expect, it, vi } from "vitest";
+import type { CommandResponse } from "./commandEnvelope";
+import { CommandError, healthCheck, invokeCommand } from "./commandEnvelope";
+
+const mockInvoke = vi.hoisted(() => vi.fn());
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: mockInvoke,
+}));
+
+describe("invokeCommand", () => {
+  it("returns data on successful response", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: true,
+      data: { ready: true },
+    } satisfies CommandResponse<{ ready: boolean }>);
+
+    const result = await invokeCommand<{ ready: boolean }>("health", {});
+
+    expect(result).toEqual({ ready: true });
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: { version: 1, command: "health", payload: {} },
+    });
+  });
+
+  it("throws CommandError when response is not ok", async () => {
+    mockInvoke.mockResolvedValue({
+      version: 1,
+      ok: false,
+      error: {
+        category: "Unsupported",
+        message: "Unknown command: nonexistent",
+        diagnostic_code: "command.unknown",
+      },
+    } satisfies CommandResponse);
+
+    await expect(invokeCommand("nonexistent", {})).rejects.toThrow(
+      CommandError,
+    );
+
+    await expect(invokeCommand("nonexistent", {})).rejects.toThrow(
+      "Unknown command: nonexistent",
+    );
+  });
+
+  it("throws CommandError with category and diagnostic code", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: false,
+      error: {
+        category: "InvalidInput",
+        message: "Invalid payload",
+        diagnostic_code: "command.payload",
+      },
+    } satisfies CommandResponse);
+
+    try {
+      await invokeCommand("health", "bad_payload");
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(CommandError);
+      if (error instanceof CommandError) {
+        expect(error.category).toBe("InvalidInput");
+        expect(error.diagnosticCode).toBe("command.payload");
+        expect(error.message).toBe("Invalid payload");
+      }
+    }
+  });
+
+  it("throws CommandError when error field is missing on non-ok response", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: false,
+    } satisfies CommandResponse);
+
+    await expect(invokeCommand("health", {})).rejects.toThrow(CommandError);
+  });
+});
+
+describe("healthCheck", () => {
+  it("returns true when backend responds", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: true,
+      data: { ready: true },
+    } satisfies CommandResponse<{ ready: boolean }>);
+
+    await expect(healthCheck()).resolves.toBe(true);
+  });
+
+  it("throws CommandError on backend failure", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: false,
+      error: {
+        category: "Unsupported",
+        message: "Unsupported command version",
+        diagnostic_code: "command.version",
+      },
+    } satisfies CommandResponse);
+
+    await expect(healthCheck()).rejects.toThrow(CommandError);
+  });
+});
