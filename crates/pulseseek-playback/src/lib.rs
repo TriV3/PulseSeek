@@ -7,6 +7,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration as ThreadDuration;
 
 use pulseseek_domain::decoder::{DecodeError, Decoder};
+use pulseseek_domain::playback::mode::PlaybackMode;
 use pulseseek_domain::playback::position::{Position, SeekTarget};
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
@@ -39,6 +40,7 @@ enum PlaybackErrorKind {
     Decode(DecodeError),
     InvalidFrameCount { returned: usize, capacity: usize },
     WorkerStopped,
+    NoFrames,
 }
 
 impl fmt::Display for PlaybackError {
@@ -49,6 +51,7 @@ impl fmt::Display for PlaybackError {
                 write!(f, "decoder returned {returned} frames for buffer capacity {capacity}")
             },
             PlaybackErrorKind::WorkerStopped => write!(f, "playback worker stopped"),
+            PlaybackErrorKind::NoFrames => write!(f, "playback source produced no frames"),
         }
     }
 }
@@ -59,6 +62,7 @@ impl std::error::Error for PlaybackError {
             PlaybackErrorKind::Decode(error) => Some(error),
             PlaybackErrorKind::InvalidFrameCount { .. } => None,
             PlaybackErrorKind::WorkerStopped => None,
+            PlaybackErrorKind::NoFrames => None,
         }
     }
 }
@@ -81,6 +85,8 @@ pub struct PlaybackEngine {
     control: PlaybackControl,
     resampler: Option<SampleRateConverter>,
     pending: VecDeque<f32>,
+    mode: PlaybackMode,
+    cycle_produced: bool,
     /// Total frames written to the ring buffer so far.
     pub frames_written: u64,
 }
@@ -201,6 +207,7 @@ pub struct PlaybackWorker {
 
 enum WorkerCommand {
     Seek { target: SeekTarget, response: SyncSender<Result<Position, PlaybackError>> },
+    SetMode { mode: PlaybackMode, response: SyncSender<Result<(), PlaybackError>> },
 }
 
 fn execute_worker_command(engine: &mut PlaybackEngine, command: WorkerCommand) -> bool {
@@ -227,6 +234,11 @@ fn execute_worker_command(engine: &mut PlaybackEngine, command: WorkerCommand) -
             let _ = response.send(result);
             succeeded
         },
+        WorkerCommand::SetMode { mode, response } => {
+            engine.mode = mode;
+            let _ = response.send(Ok(()));
+            mode == PlaybackMode::LoopCurrent
+        },
     }
 }
 
@@ -235,13 +247,22 @@ impl PlaybackEngine {
     ///
     /// `buffer_frames` is the capacity of the internal ring buffer in frames.
     pub fn new(decoder: Box<dyn Decoder>, buffer_frames: usize) -> (Self, PlaybackConsumer) {
-        Self::new_with_resampler(decoder, buffer_frames, None)
+        Self::new_with_mode(decoder, buffer_frames, PlaybackMode::OneShot)
     }
 
-    fn new_with_resampler(
+    fn new_with_mode(
+        decoder: Box<dyn Decoder>,
+        buffer_frames: usize,
+        mode: PlaybackMode,
+    ) -> (Self, PlaybackConsumer) {
+        Self::new_with_resampler_mode(decoder, buffer_frames, None, mode)
+    }
+
+    fn new_with_resampler_mode(
         decoder: Box<dyn Decoder>,
         buffer_frames: usize,
         resampler: Option<SampleRateConverter>,
+        mode: PlaybackMode,
     ) -> (Self, PlaybackConsumer) {
         assert!(buffer_frames > 0, "playback buffer must contain at least one frame");
         let (producer, consumer) = HeapRb::new(buffer_frames).split();
@@ -261,6 +282,8 @@ impl PlaybackEngine {
                 control: control.clone(),
                 resampler,
                 pending: VecDeque::new(),
+                mode,
+                cycle_produced: false,
                 frames_written: 0,
             },
             PlaybackConsumer { consumer, control },
@@ -319,6 +342,7 @@ impl PlaybackEngine {
             buf[..frames].iter().copied().map(|value| BufferedSample { value, generation }),
         );
         self.frames_written += pushed as u64;
+        self.cycle_produced |= pushed > 0;
 
         Ok(true)
     }
@@ -343,6 +367,30 @@ impl PlaybackEngine {
             let Some(value) = self.pending.pop_front() else { break };
             let _ = self.producer.try_push(BufferedSample { value, generation });
             self.frames_written += 1;
+            self.cycle_produced = true;
+        }
+    }
+
+    fn restart_current(&mut self) -> Result<(), PlaybackError> {
+        let target = pulseseek_domain::playback::position::Duration::Unknown
+            .seek_to(Position::from_millis(0))
+            .expect("zero is valid seek target");
+        self.control.begin_seek();
+        match self.decoder.seek(target) {
+            Ok(_) => {
+                self.eof = false;
+                self.pending.clear();
+                self.cycle_produced = false;
+                if let Some(resampler) = &mut self.resampler {
+                    resampler.reset();
+                }
+                self.control.complete_seek();
+                Ok(())
+            },
+            Err(error) => {
+                self.control.cancel_seek();
+                Err(PlaybackError::from(error))
+            },
         }
     }
 }
@@ -350,7 +398,16 @@ impl PlaybackEngine {
 impl PlaybackWorker {
     /// Starts decoder work on a dedicated non-audio thread.
     pub fn start(decoder: Box<dyn Decoder>, buffer_frames: usize) -> (Self, PlaybackConsumer) {
-        let (engine, consumer) = PlaybackEngine::new(decoder, buffer_frames);
+        Self::start_with_mode(decoder, buffer_frames, PlaybackMode::OneShot)
+    }
+
+    /// Starts decoder work with the selected end-of-file mode.
+    pub fn start_with_mode(
+        decoder: Box<dyn Decoder>,
+        buffer_frames: usize,
+        mode: PlaybackMode,
+    ) -> (Self, PlaybackConsumer) {
+        let (engine, consumer) = PlaybackEngine::new_with_mode(decoder, buffer_frames, mode);
         Self::start_engine(engine, consumer)
     }
 
@@ -362,6 +419,25 @@ impl PlaybackWorker {
         source_rate: u32,
         target_rate: u32,
     ) -> Result<(Self, PlaybackConsumer), DecodeError> {
+        Self::start_resampled_with_mode(
+            decoder,
+            buffer_frames,
+            channels,
+            source_rate,
+            target_rate,
+            PlaybackMode::OneShot,
+        )
+    }
+
+    /// Starts decoder work with resampling and the selected end-of-file mode.
+    pub fn start_resampled_with_mode(
+        decoder: Box<dyn Decoder>,
+        buffer_frames: usize,
+        channels: usize,
+        source_rate: u32,
+        target_rate: u32,
+        mode: PlaybackMode,
+    ) -> Result<(Self, PlaybackConsumer), DecodeError> {
         SampleRateConverter::validate(channels, source_rate, target_rate)?;
         let resampler = if source_rate == target_rate {
             None
@@ -369,7 +445,7 @@ impl PlaybackWorker {
             Some(SampleRateConverter::new(channels, source_rate, target_rate)?)
         };
         let (engine, consumer) =
-            PlaybackEngine::new_with_resampler(decoder, buffer_frames, resampler);
+            PlaybackEngine::new_with_resampler_mode(decoder, buffer_frames, resampler, mode);
         Ok(Self::start_engine(engine, consumer))
     }
 
@@ -396,6 +472,37 @@ impl PlaybackWorker {
                     }
                 }
                 if reached_eof {
+                    if engine.mode == PlaybackMode::LoopCurrent {
+                        if engine.is_finished() {
+                            if !engine.cycle_produced {
+                                if engine.control.claim_failure() {
+                                    let _ = event_tx.send(PlaybackEvent::Failed);
+                                    *worker_error.lock().expect("playback error mutex poisoned") =
+                                        Some(PlaybackError { kind: PlaybackErrorKind::NoFrames });
+                                }
+                                break;
+                            }
+                            match engine.restart_current() {
+                                Ok(()) => {
+                                    reached_eof = false;
+                                    worker_finished.store(false, Ordering::Release);
+                                },
+                                Err(playback_error) => {
+                                    if engine.control.claim_failure() {
+                                        let _ = event_tx.send(PlaybackEvent::Failed);
+                                        *worker_error
+                                            .lock()
+                                            .expect("playback error mutex poisoned") =
+                                            Some(playback_error);
+                                    }
+                                    break;
+                                },
+                            }
+                        } else {
+                            thread::yield_now();
+                        }
+                        continue;
+                    }
                     if engine.is_finished() && engine.control.claim_completion() {
                         let _ = event_tx.send(PlaybackEvent::Completed);
                         break;
@@ -483,6 +590,15 @@ impl PlaybackWorker {
         let (response_tx, response_rx) = mpsc::sync_channel(1);
         self.commands
             .send(WorkerCommand::Seek { target, response: response_tx })
+            .map_err(|_| PlaybackError { kind: PlaybackErrorKind::WorkerStopped })?;
+        response_rx.recv().map_err(|_| PlaybackError { kind: PlaybackErrorKind::WorkerStopped })?
+    }
+
+    /// Changes end-of-file behavior on worker thread.
+    pub fn set_mode(&self, mode: PlaybackMode) -> Result<(), PlaybackError> {
+        let (response_tx, response_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::SetMode { mode, response: response_tx })
             .map_err(|_| PlaybackError { kind: PlaybackErrorKind::WorkerStopped })?;
         response_rx.recv().map_err(|_| PlaybackError { kind: PlaybackErrorKind::WorkerStopped })?
     }
@@ -1273,6 +1389,79 @@ mod tests {
 
         assert!(matches!(wait_for_event(&worker), PlaybackEvent::Completed));
         let _ = worker.join();
+    }
+
+    #[test]
+    fn loop_current_replays_multiple_cycles_without_stale_frames() {
+        let (worker, mut consumer) = PlaybackWorker::start_with_mode(
+            Box::new(RampDecoder::new(4)),
+            4,
+            pulseseek_domain::playback::mode::PlaybackMode::LoopCurrent,
+        );
+        let mut output = Vec::new();
+        let mut scratch = [0.0f32; 2];
+        for _ in 0..100_000 {
+            let count = consumer.consume(&mut scratch);
+            output.extend_from_slice(&scratch[..count]);
+            if output.len() >= 12 {
+                break;
+            }
+            std::thread::yield_now();
+        }
+
+        assert_eq!(output, vec![0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0]);
+        assert!(worker.poll_event().is_none());
+        control_stop_and_join(worker, consumer);
+    }
+
+    #[test]
+    fn changing_loop_to_one_shot_near_boundary_completes_once() {
+        let (worker, mut consumer) = PlaybackWorker::start_with_mode(
+            Box::new(RampDecoder::new(4)),
+            4,
+            pulseseek_domain::playback::mode::PlaybackMode::LoopCurrent,
+        );
+        let mut first_cycle = [0.0f32; 4];
+        while consumer.consume(&mut first_cycle) != 4 {
+            std::thread::yield_now();
+        }
+
+        worker.set_mode(pulseseek_domain::playback::mode::PlaybackMode::OneShot).unwrap();
+        let mut scratch = [0.0f32; 2];
+        for _ in 0..100_000 {
+            let _ = consumer.consume(&mut scratch);
+            if let Some(PlaybackEvent::Completed) = worker.poll_event() {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert!(worker.poll_event().is_none());
+        let _ = worker.join();
+    }
+
+    #[test]
+    fn stop_during_loop_prevents_restart_and_completion() {
+        let (worker, consumer) = PlaybackWorker::start_with_mode(
+            Box::new(RampDecoder::new(4)),
+            4,
+            pulseseek_domain::playback::mode::PlaybackMode::LoopCurrent,
+        );
+        consumer.control().stop();
+
+        assert!(worker.poll_event().is_none());
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn empty_loop_fails_instead_of_spinning_forever() {
+        let (worker, consumer) = PlaybackWorker::start_with_mode(
+            Box::new(RampDecoder::new(0)),
+            4,
+            pulseseek_domain::playback::mode::PlaybackMode::LoopCurrent,
+        );
+
+        assert!(matches!(wait_for_event(&worker), PlaybackEvent::Failed));
+        control_stop_and_join(worker, consumer);
     }
 
     #[test]
