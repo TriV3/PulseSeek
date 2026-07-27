@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::fmt;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Sender, SyncSender};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration as ThreadDuration;
@@ -25,6 +25,13 @@ pub fn apply_volume(sample: f32, gain: f32) -> f32 {
 #[derive(Debug)]
 pub struct PlaybackError {
     kind: PlaybackErrorKind,
+}
+
+/// Terminal playback outcome for one-shot playback.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlaybackEvent {
+    Completed,
+    Failed,
 }
 
 #[derive(Debug)]
@@ -97,7 +104,13 @@ pub struct PlaybackControl {
     stopped: Arc<AtomicBool>,
     seeking: Arc<AtomicBool>,
     generation: Arc<AtomicU64>,
+    terminal: Arc<AtomicU8>,
 }
+
+const TERMINAL_ACTIVE: u8 = 0;
+const TERMINAL_STOPPED: u8 = 1;
+const TERMINAL_COMPLETED: u8 = 2;
+const TERMINAL_FAILED: u8 = 3;
 
 impl PlaybackControl {
     /// Pauses consumption without discarding buffered frames.
@@ -112,6 +125,12 @@ impl PlaybackControl {
 
     /// Stops playback permanently for this consumer and worker session.
     pub fn stop(&self) {
+        let _ = self.terminal.compare_exchange(
+            TERMINAL_ACTIVE,
+            TERMINAL_STOPPED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
         self.stopped.store(true, Ordering::Release);
     }
 
@@ -137,6 +156,37 @@ impl PlaybackControl {
     fn cancel_seek(&self) {
         self.seeking.store(false, Ordering::Release);
     }
+
+    fn claim_completion(&self) -> bool {
+        if self
+            .terminal
+            .compare_exchange(
+                TERMINAL_ACTIVE,
+                TERMINAL_COMPLETED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+        {
+            self.stopped.store(true, Ordering::Release);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn claim_failure(&self) -> bool {
+        if self
+            .terminal
+            .compare_exchange(TERMINAL_ACTIVE, TERMINAL_FAILED, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            self.stopped.store(true, Ordering::Release);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// Decoder worker that keeps the producer half fed until EOF or shutdown.
@@ -145,6 +195,7 @@ pub struct PlaybackWorker {
     finished: Arc<AtomicBool>,
     error: Arc<Mutex<Option<PlaybackError>>>,
     commands: Sender<WorkerCommand>,
+    events: Receiver<PlaybackEvent>,
     join: Option<JoinHandle<()>>,
 }
 
@@ -199,6 +250,7 @@ impl PlaybackEngine {
             stopped: Arc::new(AtomicBool::new(false)),
             seeking: Arc::new(AtomicBool::new(false)),
             generation: Arc::new(AtomicU64::new(0)),
+            terminal: Arc::new(AtomicU8::new(TERMINAL_ACTIVE)),
         };
         (
             Self {
@@ -332,6 +384,7 @@ impl PlaybackWorker {
         let worker_finished = Arc::clone(&finished);
         let worker_error = Arc::clone(&error);
         let (command_tx, command_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::channel();
 
         let join = thread::spawn(move || {
             let mut reached_eof = false;
@@ -343,6 +396,10 @@ impl PlaybackWorker {
                     }
                 }
                 if reached_eof {
+                    if engine.is_finished() && engine.control.claim_completion() {
+                        let _ = event_tx.send(PlaybackEvent::Completed);
+                        break;
+                    }
                     match command_rx.recv_timeout(ThreadDuration::from_millis(10)) {
                         Ok(command) => {
                             if execute_worker_command(&mut engine, command) {
@@ -363,8 +420,11 @@ impl PlaybackWorker {
                     Ok(true) if engine.is_buffer_full() => thread::yield_now(),
                     Ok(true) => {},
                     Err(playback_error) => {
-                        *worker_error.lock().expect("playback error mutex poisoned") =
-                            Some(playback_error);
+                        if engine.control.claim_failure() {
+                            let _ = event_tx.send(PlaybackEvent::Failed);
+                            *worker_error.lock().expect("playback error mutex poisoned") =
+                                Some(playback_error);
+                        }
                         break;
                     },
                 }
@@ -372,12 +432,27 @@ impl PlaybackWorker {
             worker_finished.store(true, Ordering::Release);
         });
 
-        (Self { stop, finished, error, commands: command_tx, join: Some(join) }, consumer)
+        (
+            Self {
+                stop,
+                finished,
+                error,
+                commands: command_tx,
+                events: event_rx,
+                join: Some(join),
+            },
+            consumer,
+        )
     }
 
     /// Returns `true` after worker reached EOF, failed, or was stopped.
     pub fn is_finished(&self) -> bool {
         self.finished.load(Ordering::Acquire)
+    }
+
+    /// Returns the next terminal event without blocking.
+    pub fn poll_event(&self) -> Option<PlaybackEvent> {
+        self.events.try_recv().ok()
     }
 
     /// Waits for worker to reach EOF and returns decoder error, if any.
@@ -653,6 +728,43 @@ mod tests {
         }
     }
 
+    struct CorruptTailDecoder {
+        emitted: bool,
+    }
+
+    impl Decoder for CorruptTailDecoder {
+        fn probe(&self) -> pulseseek_domain::decoder::ProbeResult {
+            pulseseek_domain::decoder::ProbeResult::Supported
+        }
+
+        fn metadata(&mut self) -> Result<pulseseek_domain::decoder::StreamMetadata, DecodeError> {
+            unimplemented!("not used in tests")
+        }
+
+        fn read(&mut self, buf: &mut [f32]) -> Result<usize, DecodeError> {
+            if !self.emitted {
+                self.emitted = true;
+                let count = 4.min(buf.len());
+                buf[..count].fill(0.25);
+                Ok(count)
+            } else {
+                Err(DecodeError::new(
+                    pulseseek_domain::error::DiagnosticContext::new(
+                        pulseseek_domain::error::DiagnosticCode::AudioOutput,
+                    ),
+                    std::io::Error::other("corrupt tail"),
+                ))
+            }
+        }
+
+        fn seek(
+            &mut self,
+            _target: pulseseek_domain::playback::position::SeekTarget,
+        ) -> Result<pulseseek_domain::playback::position::Position, DecodeError> {
+            unimplemented!("not used in tests")
+        }
+    }
+
     #[test]
     fn frames_output_in_order() {
         let decoder = Box::new(RampDecoder::new(100));
@@ -790,7 +902,7 @@ mod tests {
         let mut output = Vec::new();
         let mut scratch = [0.0f32; 16];
 
-        for _ in 0..10_000 {
+        for _ in 0..100_000 {
             let count = consumer.consume(&mut scratch);
             output.extend_from_slice(&scratch[..count]);
             if worker.is_finished() && consumer.available() == 0 {
@@ -1019,7 +1131,7 @@ mod tests {
 
     fn control_stop_and_join(worker: PlaybackWorker, consumer: PlaybackConsumer) {
         consumer.control().stop();
-        worker.join().unwrap();
+        let _ = worker.join();
     }
 
     fn seek_target(milliseconds: u64) -> pulseseek_domain::playback::position::SeekTarget {
@@ -1097,6 +1209,89 @@ mod tests {
         .is_err());
         assert!(PlaybackWorker::start_resampled(Box::new(RampDecoder::new(4)), 16, 1, 0, 48_000,)
             .is_err());
+    }
+
+    #[test]
+    fn one_shot_completion_waits_for_buffer_drain_and_emits_once() {
+        let (worker, mut consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(4)), 16);
+        while !worker.is_finished() {
+            std::thread::yield_now();
+        }
+        assert!(worker.poll_event().is_none());
+
+        let mut output = [0.0f32; 4];
+        assert_eq!(consumer.consume(&mut output), 4);
+
+        let event = wait_for_event(&worker);
+        assert!(matches!(event, PlaybackEvent::Completed));
+        assert!(worker.poll_event().is_none());
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn empty_decoder_emits_one_completion_event() {
+        let (worker, consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(0)), 16);
+        while !worker.is_finished() {
+            std::thread::yield_now();
+        }
+
+        let event = wait_for_event(&worker);
+        assert!(matches!(event, PlaybackEvent::Completed));
+        assert!(worker.poll_event().is_none());
+        control_stop_and_join(worker, consumer);
+    }
+
+    #[test]
+    fn corrupt_tail_emits_failure_without_completion() {
+        let (worker, consumer) =
+            PlaybackWorker::start(Box::new(CorruptTailDecoder { emitted: false }), 16);
+        let event = wait_for_event(&worker);
+
+        assert!(matches!(event, PlaybackEvent::Failed));
+        assert!(worker.poll_event().is_none());
+        control_stop_and_join(worker, consumer);
+    }
+
+    #[test]
+    fn resampled_eof_completes_after_converted_tail_drains() {
+        let (worker, mut consumer) = PlaybackWorker::start_resampled(
+            Box::new(RampDecoder::new(441)),
+            256,
+            1,
+            44_100,
+            48_000,
+        )
+        .unwrap();
+        let mut output = [0.0f32; 64];
+        for _ in 0..100_000 {
+            let _ = consumer.consume(&mut output);
+            if worker.is_finished() && consumer.available() == 0 {
+                break;
+            }
+            std::thread::yield_now();
+        }
+
+        assert!(matches!(wait_for_event(&worker), PlaybackEvent::Completed));
+        let _ = worker.join();
+    }
+
+    #[test]
+    fn stop_race_does_not_emit_completion() {
+        let (worker, consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(1_000_000)), 16);
+        consumer.control().stop();
+
+        assert!(worker.poll_event().is_none());
+        worker.join().unwrap();
+    }
+
+    fn wait_for_event(worker: &PlaybackWorker) -> PlaybackEvent {
+        for _ in 0..100_000 {
+            if let Some(event) = worker.poll_event() {
+                return event;
+            }
+            std::thread::sleep(ThreadDuration::from_millis(1));
+        }
+        panic!("playback event not emitted");
     }
 
     fn collect_worker_output(worker: PlaybackWorker, consumer: &mut PlaybackConsumer) -> Vec<f32> {
