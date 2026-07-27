@@ -75,6 +75,8 @@ fn valid_pcm_wav_metadata() {
     let meta = decoder.metadata().unwrap();
     assert_eq!(meta.sample_rate, 48000);
     assert_eq!(meta.channels, 1);
+    assert!(meta.bit_depth.is_some(), "WAV should have bit depth");
+    assert_eq!(meta.codec, "PCM");
 }
 
 #[test]

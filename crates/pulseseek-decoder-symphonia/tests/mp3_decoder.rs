@@ -33,6 +33,8 @@ fn valid_mp3_metadata() {
     let meta = decoder.metadata().unwrap();
     assert_eq!(meta.sample_rate, 44100);
     assert_eq!(meta.channels, 2);
+    assert!(meta.bit_depth.is_none(), "MP3 should have no bit depth");
+    assert_eq!(meta.codec, "MP3");
 }
 
 #[test]
