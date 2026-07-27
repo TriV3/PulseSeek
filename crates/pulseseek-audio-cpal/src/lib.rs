@@ -100,6 +100,25 @@ impl CpalAudioOutput {
     pub fn stream_error(&self) -> Option<String> {
         self.stream.as_ref().and_then(StreamControl::stream_error)
     }
+
+    /// Returns active device's default output sample rate.
+    ///
+    /// Playback workers use this value as their resampling target.
+    pub fn output_sample_rate(&self) -> Result<u32, AudioOutputError> {
+        let device = self.active_device.as_ref().ok_or_else(|| {
+            AudioOutputError::new(
+                DiagnosticContext::new(DiagnosticCode::AudioOutput),
+                std::io::Error::other("output device is not open"),
+            )
+        })?;
+        Ok(device
+            .default_output_config()
+            .map_err(|error| {
+                AudioOutputError::new(DiagnosticContext::new(DiagnosticCode::AudioOutput), error)
+            })?
+            .sample_rate()
+            .0)
+    }
 }
 
 impl Default for CpalAudioOutput {
@@ -580,5 +599,11 @@ mod tests {
 
         assert_eq!(f32::from_bits(output.volume_gain.load(Ordering::Relaxed)), 0.25);
         assert!(output.stream.is_none(), "volume update must not create a stream");
+    }
+
+    #[test]
+    fn output_sample_rate_requires_open_device() {
+        let output = CpalAudioOutput::new();
+        assert!(output.output_sample_rate().is_err());
     }
 }
