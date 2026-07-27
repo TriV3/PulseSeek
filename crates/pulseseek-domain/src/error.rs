@@ -57,6 +57,7 @@ impl fmt::Display for UserErrorDescriptor {
 pub enum DiagnosticCode {
     BrowserRead,
     AudioOutput,
+    PlaybackControl,
 }
 
 impl DiagnosticCode {
@@ -64,6 +65,7 @@ impl DiagnosticCode {
         match self {
             Self::BrowserRead => "browser.read",
             Self::AudioOutput => "audio.output",
+            Self::PlaybackControl => "playback.control",
         }
     }
 }
