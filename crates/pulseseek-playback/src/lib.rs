@@ -1,9 +1,12 @@
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::Duration as ThreadDuration;
 
 use pulseseek_domain::decoder::{DecodeError, Decoder};
+use pulseseek_domain::playback::position::{Position, SeekTarget};
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
 
@@ -24,6 +27,7 @@ pub struct PlaybackError {
 enum PlaybackErrorKind {
     Decode(DecodeError),
     InvalidFrameCount { returned: usize, capacity: usize },
+    WorkerStopped,
 }
 
 impl fmt::Display for PlaybackError {
@@ -33,6 +37,7 @@ impl fmt::Display for PlaybackError {
             PlaybackErrorKind::InvalidFrameCount { returned, capacity } => {
                 write!(f, "decoder returned {returned} frames for buffer capacity {capacity}")
             },
+            PlaybackErrorKind::WorkerStopped => write!(f, "playback worker stopped"),
         }
     }
 }
@@ -42,6 +47,7 @@ impl std::error::Error for PlaybackError {
         match &self.kind {
             PlaybackErrorKind::Decode(error) => Some(error),
             PlaybackErrorKind::InvalidFrameCount { .. } => None,
+            PlaybackErrorKind::WorkerStopped => None,
         }
     }
 }
@@ -58,7 +64,7 @@ impl From<DecodeError> for PlaybackError {
 /// for a real-time audio callback to consume.
 pub struct PlaybackEngine {
     decoder: Box<dyn Decoder>,
-    producer: HeapProd<f32>,
+    producer: HeapProd<BufferedSample>,
     buffer_size: usize,
     eof: bool,
     control: PlaybackControl,
@@ -66,9 +72,15 @@ pub struct PlaybackEngine {
     pub frames_written: u64,
 }
 
+#[derive(Clone, Copy)]
+struct BufferedSample {
+    value: f32,
+    generation: u64,
+}
+
 /// Consumer half intended for use by a real-time audio callback.
 pub struct PlaybackConsumer {
-    consumer: HeapCons<f32>,
+    consumer: HeapCons<BufferedSample>,
     control: PlaybackControl,
 }
 
@@ -77,6 +89,8 @@ pub struct PlaybackConsumer {
 pub struct PlaybackControl {
     paused: Arc<AtomicBool>,
     stopped: Arc<AtomicBool>,
+    seeking: Arc<AtomicBool>,
+    generation: Arc<AtomicU64>,
 }
 
 impl PlaybackControl {
@@ -104,6 +118,19 @@ impl PlaybackControl {
     pub fn is_stopped(&self) -> bool {
         self.stopped.load(Ordering::Acquire)
     }
+
+    fn begin_seek(&self) {
+        self.seeking.store(true, Ordering::Release);
+    }
+
+    fn complete_seek(&self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
+        self.seeking.store(false, Ordering::Release);
+    }
+
+    fn cancel_seek(&self) {
+        self.seeking.store(false, Ordering::Release);
+    }
 }
 
 /// Decoder worker that keeps the producer half fed until EOF or shutdown.
@@ -111,7 +138,35 @@ pub struct PlaybackWorker {
     stop: Arc<AtomicBool>,
     finished: Arc<AtomicBool>,
     error: Arc<Mutex<Option<PlaybackError>>>,
+    commands: Sender<WorkerCommand>,
     join: Option<JoinHandle<()>>,
+}
+
+enum WorkerCommand {
+    Seek { target: SeekTarget, response: SyncSender<Result<Position, PlaybackError>> },
+}
+
+fn execute_worker_command(engine: &mut PlaybackEngine, command: WorkerCommand) -> bool {
+    match command {
+        WorkerCommand::Seek { target, response } => {
+            engine.control.begin_seek();
+            let result = engine.decoder.seek(target);
+            let succeeded = result.is_ok();
+            let result = match result {
+                Ok(position) => {
+                    engine.eof = false;
+                    engine.control.complete_seek();
+                    Ok(position)
+                },
+                Err(error) => {
+                    engine.control.cancel_seek();
+                    Err(PlaybackError::from(error))
+                },
+            };
+            let _ = response.send(result);
+            succeeded
+        },
+    }
 }
 
 impl PlaybackEngine {
@@ -124,6 +179,8 @@ impl PlaybackEngine {
         let control = PlaybackControl {
             paused: Arc::new(AtomicBool::new(false)),
             stopped: Arc::new(AtomicBool::new(false)),
+            seeking: Arc::new(AtomicBool::new(false)),
+            generation: Arc::new(AtomicU64::new(0)),
         };
         (
             Self {
@@ -171,7 +228,10 @@ impl PlaybackEngine {
         }
 
         // Push available frames into the ring buffer (non-blocking).
-        let pushed = self.producer.push_slice(&buf[..frames]);
+        let generation = self.control.generation.load(Ordering::Acquire);
+        let pushed = self.producer.push_iter(
+            buf[..frames].iter().copied().map(|value| BufferedSample { value, generation }),
+        );
         self.frames_written += pushed as u64;
 
         Ok(true)
@@ -202,11 +262,35 @@ impl PlaybackWorker {
         let worker_stop = Arc::clone(&stop);
         let worker_finished = Arc::clone(&finished);
         let worker_error = Arc::clone(&error);
+        let (command_tx, command_rx) = mpsc::channel();
 
         let join = thread::spawn(move || {
+            let mut reached_eof = false;
             while !worker_stop.load(Ordering::Acquire) && !engine.control.is_stopped() {
+                while let Ok(command) = command_rx.try_recv() {
+                    if execute_worker_command(&mut engine, command) {
+                        reached_eof = false;
+                        worker_finished.store(false, Ordering::Release);
+                    }
+                }
+                if reached_eof {
+                    match command_rx.recv_timeout(ThreadDuration::from_millis(10)) {
+                        Ok(command) => {
+                            if execute_worker_command(&mut engine, command) {
+                                reached_eof = false;
+                                worker_finished.store(false, Ordering::Release);
+                            }
+                        },
+                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
+                    continue;
+                }
                 match engine.process_chunk() {
-                    Ok(false) => break,
+                    Ok(false) => {
+                        reached_eof = true;
+                        worker_finished.store(true, Ordering::Release);
+                    },
                     Ok(true) if engine.is_buffer_full() => thread::yield_now(),
                     Ok(true) => {},
                     Err(playback_error) => {
@@ -219,7 +303,7 @@ impl PlaybackWorker {
             worker_finished.store(true, Ordering::Release);
         });
 
-        (Self { stop, finished, error, join: Some(join) }, consumer)
+        (Self { stop, finished, error, commands: command_tx, join: Some(join) }, consumer)
     }
 
     /// Returns `true` after worker reached EOF, failed, or was stopped.
@@ -229,6 +313,10 @@ impl PlaybackWorker {
 
     /// Waits for worker to reach EOF and returns decoder error, if any.
     pub fn wait(mut self) -> Result<(), PlaybackError> {
+        while !self.finished.load(Ordering::Acquire) && !self.stop.load(Ordering::Acquire) {
+            thread::yield_now();
+        }
+        self.stop.store(true, Ordering::Release);
         self.join
             .take()
             .expect("playback worker already joined")
@@ -244,6 +332,15 @@ impl PlaybackWorker {
     pub fn join(self) -> Result<(), PlaybackError> {
         self.stop.store(true, Ordering::Release);
         self.wait()
+    }
+
+    /// Seeks decoder worker to validated target and refills from there.
+    pub fn seek(&self, target: SeekTarget) -> Result<Position, PlaybackError> {
+        let (response_tx, response_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::Seek { target, response: response_tx })
+            .map_err(|_| PlaybackError { kind: PlaybackErrorKind::WorkerStopped })?;
+        response_rx.recv().map_err(|_| PlaybackError { kind: PlaybackErrorKind::WorkerStopped })?
     }
 }
 
@@ -262,15 +359,23 @@ impl PlaybackConsumer {
     /// Returns the number of frames actually read (may be less than `buf.len()`).
     /// Intended for the audio callback: no allocation, locking, I/O, or logging.
     pub fn consume(&mut self, buf: &mut [f32]) -> usize {
-        if self.control.is_stopped() || self.control.is_paused() {
+        if self.control.is_stopped()
+            || self.control.is_paused()
+            || self.control.seeking.load(Ordering::Acquire)
+        {
             buf.fill(0.0);
             return 0;
         }
-        let available = self.consumer.occupied_len().min(buf.len());
-        if available == 0 {
-            return 0;
+        let mut written = 0;
+        for sample in buf.iter_mut() {
+            let mut buffered = [BufferedSample { value: 0.0, generation: 0 }];
+            if self.consume_current(&mut buffered) == 0 {
+                break;
+            }
+            *sample = buffered[0].value;
+            written += 1;
         }
-        self.consumer.pop_slice(&mut buf[..available])
+        written
     }
 
     /// Consumes interleaved source frames and maps them to output channels.
@@ -287,7 +392,10 @@ impl PlaybackConsumer {
         if source_channels == 0 || output_channels == 0 {
             return 0;
         }
-        if self.control.is_stopped() || self.control.is_paused() {
+        if self.control.is_stopped()
+            || self.control.is_paused()
+            || self.control.seeking.load(Ordering::Acquire)
+        {
             buf.fill(0.0);
             return 0;
         }
@@ -339,6 +447,16 @@ impl PlaybackConsumer {
     /// Returns a handle for pausing and resuming this consumer.
     pub fn control(&self) -> PlaybackControl {
         self.control.clone()
+    }
+
+    fn consume_current(&mut self, output: &mut [BufferedSample]) -> usize {
+        let generation = self.control.generation.load(Ordering::Acquire);
+        while self.consumer.pop_slice(output) == 1 {
+            if output[0].generation == generation {
+                return 1;
+            }
+        }
+        0
     }
 
     /// Maps source channels and applies volume to samples for an output callback.
@@ -406,9 +524,10 @@ mod tests {
 
         fn seek(
             &mut self,
-            _target: pulseseek_domain::playback::position::SeekTarget,
+            target: pulseseek_domain::playback::position::SeekTarget,
         ) -> Result<pulseseek_domain::playback::position::Position, DecodeError> {
-            unimplemented!("not used in tests")
+            self.position = (target.position().as_millis() as usize).min(self.data.len());
+            Ok(target.position())
         }
     }
 
@@ -432,6 +551,36 @@ mod tests {
             _target: pulseseek_domain::playback::position::SeekTarget,
         ) -> Result<pulseseek_domain::playback::position::Position, DecodeError> {
             unimplemented!("not used in tests")
+        }
+    }
+
+    struct RejectingSeekDecoder {
+        inner: RampDecoder,
+    }
+
+    impl Decoder for RejectingSeekDecoder {
+        fn probe(&self) -> pulseseek_domain::decoder::ProbeResult {
+            self.inner.probe()
+        }
+
+        fn metadata(&mut self) -> Result<pulseseek_domain::decoder::StreamMetadata, DecodeError> {
+            unimplemented!("not used in tests")
+        }
+
+        fn read(&mut self, buf: &mut [f32]) -> Result<usize, DecodeError> {
+            self.inner.read(buf)
+        }
+
+        fn seek(
+            &mut self,
+            _target: pulseseek_domain::playback::position::SeekTarget,
+        ) -> Result<pulseseek_domain::playback::position::Position, DecodeError> {
+            Err(DecodeError::new(
+                pulseseek_domain::error::DiagnosticContext::new(
+                    pulseseek_domain::error::DiagnosticCode::AudioOutput,
+                ),
+                std::io::Error::other("seek unsupported"),
+            ))
         }
     }
 
@@ -698,5 +847,115 @@ mod tests {
 
         worker.wait().unwrap();
         assert!(control.is_stopped());
+    }
+
+    #[test]
+    fn seek_while_playing_discards_stale_frames() {
+        let (worker, mut consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(1_000)), 16);
+        while consumer.available() < 16 {
+            std::thread::yield_now();
+        }
+
+        worker.seek(seek_target(50)).unwrap();
+
+        let mut output = [0.0f32; 4];
+        for _ in 0..10_000 {
+            if consumer.consume(&mut output) == 4 {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert_eq!(output, [50.0, 51.0, 52.0, 53.0]);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn seek_while_paused_preserves_pause_and_resumes_at_target() {
+        let (worker, mut consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(1_000)), 16);
+        let control = consumer.control();
+        control.pause();
+
+        worker.seek(seek_target(75)).unwrap();
+
+        let mut paused_output = [9.0f32; 2];
+        assert_eq!(consumer.consume(&mut paused_output), 0);
+        assert_eq!(paused_output, [0.0, 0.0]);
+
+        control.resume();
+        let mut output = [0.0f32; 4];
+        for _ in 0..10_000 {
+            if consumer.consume(&mut output) == 4 {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert_eq!(output, [75.0, 76.0, 77.0, 78.0]);
+        control.stop();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn repeated_seek_ends_at_latest_target() {
+        let (worker, mut consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(1_000)), 16);
+        while consumer.available() < 16 {
+            std::thread::yield_now();
+        }
+
+        worker.seek(seek_target(20)).unwrap();
+        worker.seek(seek_target(90)).unwrap();
+
+        let mut output = [0.0f32; 2];
+        for _ in 0..10_000 {
+            if consumer.consume(&mut output) == 2 {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert_eq!(output, [90.0, 91.0]);
+        control_stop_and_join(worker, consumer);
+    }
+
+    #[test]
+    fn unsupported_seek_returns_decoder_error() {
+        let (worker, consumer) = PlaybackWorker::start(
+            Box::new(RejectingSeekDecoder { inner: RampDecoder::new(1_000) }),
+            16,
+        );
+        while consumer.available() < 16 {
+            std::thread::yield_now();
+        }
+
+        assert!(worker.seek(seek_target(20)).is_err());
+        control_stop_and_join(worker, consumer);
+    }
+
+    #[test]
+    fn seek_after_decoder_eof_reopens_playback_position() {
+        let (worker, mut consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(4)), 16);
+        while !worker.is_finished() {
+            std::thread::yield_now();
+        }
+
+        worker.seek(seek_target(2)).unwrap();
+        let mut output = [0.0f32; 2];
+        for _ in 0..10_000 {
+            if consumer.consume(&mut output) == 2 {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert_eq!(output, [2.0, 3.0]);
+        control_stop_and_join(worker, consumer);
+    }
+
+    fn control_stop_and_join(worker: PlaybackWorker, consumer: PlaybackConsumer) {
+        consumer.control().stop();
+        worker.join().unwrap();
+    }
+
+    fn seek_target(milliseconds: u64) -> pulseseek_domain::playback::position::SeekTarget {
+        pulseseek_domain::playback::position::Duration::Unknown
+            .seek_to(pulseseek_domain::playback::position::Position::from_millis(milliseconds))
+            .unwrap()
     }
 }
