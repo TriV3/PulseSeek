@@ -6,4 +6,5 @@ license = "MPL-2.0"
 
 [dependencies]
 pulseseek-domain = { path = "../pulseseek-domain" }
+pulseseek-playback = { path = "../pulseseek-playback" }
 cpal = "0.15"

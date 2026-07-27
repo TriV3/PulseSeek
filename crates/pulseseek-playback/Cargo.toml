@@ -1,0 +1,13 @@
+[package]
+name = "pulseseek-playback"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+pulseseek-domain = { path = "../pulseseek-domain" }
+ringbuf = "0.4"
+
+[dev-dependencies]
+pulseseek-decoder-symphonia = { path = "../pulseseek-decoder-symphonia" }
+tempfile = "3"

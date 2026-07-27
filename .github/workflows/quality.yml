@@ -26,6 +26,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes \
             libayatana-appindicator3-dev \
+            libasound2-dev \
             librsvg2-dev \
             libwebkit2gtk-4.1-dev
       - name: Install Rust toolchain
