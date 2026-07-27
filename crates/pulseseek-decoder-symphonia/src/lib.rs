@@ -12,8 +12,8 @@ use pulseseek_domain::decoder::{DecodeError, Decoder, ProbeResult, StreamMetadat
 use pulseseek_domain::error::{DiagnosticCode, DiagnosticContext};
 use pulseseek_domain::playback::position::{Duration, Position, SeekTarget};
 
-/// A Symphonia-based decoder for WAV audio files.
-pub struct WavDecoder {
+/// Shared internal state for Symphonia-based decoders.
+struct SymphoniaDecoder {
     format: Box<dyn symphonia::core::formats::FormatReader>,
     decoder: Box<dyn symphonia::core::codecs::Decoder>,
     track_id: u32,
@@ -23,11 +23,8 @@ pub struct WavDecoder {
     sample_buf: SampleBuffer<f32>,
 }
 
-impl WavDecoder {
-    /// Opens and probes a WAV file.
-    ///
-    /// Returns an error if the file cannot be read or the format is unsupported.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, DecodeError> {
+impl SymphoniaDecoder {
+    fn open(path: impl AsRef<Path>, extension: &str) -> Result<Self, DecodeError> {
         let file = std::fs::File::open(path.as_ref()).map_err(|e| {
             DecodeError::new(DiagnosticContext::new(DiagnosticCode::BrowserRead), e)
         })?;
@@ -35,7 +32,7 @@ impl WavDecoder {
         let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
         let mut hint = Hint::new();
-        hint.with_extension("wav");
+        hint.with_extension(extension);
 
         let probed = symphonia::default::get_probe()
             .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
@@ -45,7 +42,6 @@ impl WavDecoder {
 
         let format = probed.format;
 
-        // Find the first audio track by checking for a non-null codec.
         let track = format
             .tracks()
             .iter()
@@ -62,7 +58,6 @@ impl WavDecoder {
         let sample_rate = codec_params.sample_rate.unwrap_or(0);
         let channels = codec_params.channels.map(|c| c.count() as u16).unwrap_or(0);
 
-        // Calculate duration in milliseconds.
         let duration_ms = codec_params
             .n_frames
             .zip(codec_params.sample_rate)
@@ -75,7 +70,6 @@ impl WavDecoder {
                 DecodeError::new(DiagnosticContext::new(DiagnosticCode::BrowserRead), e)
             })?;
 
-        // Pre-allocate sample buffer for decoding.
         let spec = symphonia::core::audio::SignalSpec::new(
             sample_rate,
             codec_params.channels.unwrap_or(
@@ -90,7 +84,7 @@ impl WavDecoder {
     }
 }
 
-impl Decoder for WavDecoder {
+impl Decoder for SymphoniaDecoder {
     fn probe(&self) -> ProbeResult {
         ProbeResult::Supported
     }
@@ -126,7 +120,6 @@ impl Decoder for WavDecoder {
                 DecodeError::new(DiagnosticContext::new(DiagnosticCode::BrowserRead), e)
             })?;
 
-            // Convert decoded audio to f32 interleaved buffer.
             self.sample_buf.clear();
             self.sample_buf.copy_interleaved_ref(decoded);
 
@@ -136,7 +129,6 @@ impl Decoder for WavDecoder {
             total_written += to_copy;
 
             if to_copy < samples.len() {
-                // Buffer full, remaining samples will be lost — OK.
                 break;
             }
         }
@@ -158,7 +150,6 @@ impl Decoder for WavDecoder {
                 DecodeError::new(DiagnosticContext::new(DiagnosticCode::BrowserRead), e)
             })?;
 
-        // Reset decoder state after seek.
         let dec_opts = DecoderOptions { verify: true };
         self.decoder = symphonia::default::get_codecs()
             .make(
@@ -172,5 +163,53 @@ impl Decoder for WavDecoder {
             })?;
 
         Ok(target.position())
+    }
+}
+
+/// A Symphonia-based decoder for WAV audio files.
+pub struct WavDecoder(SymphoniaDecoder);
+
+impl WavDecoder {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, DecodeError> {
+        SymphoniaDecoder::open(path, "wav").map(WavDecoder)
+    }
+}
+
+impl Decoder for WavDecoder {
+    fn probe(&self) -> ProbeResult {
+        self.0.probe()
+    }
+    fn metadata(&mut self) -> Result<StreamMetadata, DecodeError> {
+        self.0.metadata()
+    }
+    fn read(&mut self, buf: &mut [f32]) -> Result<usize, DecodeError> {
+        self.0.read(buf)
+    }
+    fn seek(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
+        self.0.seek(target)
+    }
+}
+
+/// A Symphonia-based decoder for FLAC audio files.
+pub struct FlacDecoder(SymphoniaDecoder);
+
+impl FlacDecoder {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, DecodeError> {
+        SymphoniaDecoder::open(path, "flac").map(FlacDecoder)
+    }
+}
+
+impl Decoder for FlacDecoder {
+    fn probe(&self) -> ProbeResult {
+        self.0.probe()
+    }
+    fn metadata(&mut self) -> Result<StreamMetadata, DecodeError> {
+        self.0.metadata()
+    }
+    fn read(&mut self, buf: &mut [f32]) -> Result<usize, DecodeError> {
+        self.0.read(buf)
+    }
+    fn seek(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
+        self.0.seek(target)
     }
 }
