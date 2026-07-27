@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -20,6 +21,7 @@ pub struct CpalAudioOutput {
     state: StreamState,
     #[allow(dead_code)]
     volume: Volume,
+    volume_gain: Arc<AtomicU32>,
     #[allow(dead_code)]
     device_lost: bool,
 }
@@ -107,6 +109,7 @@ impl Default for CpalAudioOutput {
             stream: None,
             state: StreamState::Stopped,
             volume: Volume::new(Gain::new(1.0)),
+            volume_gain: Arc::new(AtomicU32::new(1.0f32.to_bits())),
             device_lost: false,
         }
     }
@@ -206,6 +209,7 @@ impl CpalAudioOutput {
         let sample_format = supported.sample_format();
         let stream_error = Arc::new(Mutex::new(None));
         let callback_error = Arc::clone(&stream_error);
+        let volume_gain = Arc::clone(&self.volume_gain);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let (command_tx, command_rx) = mpsc::channel();
         let join = std::thread::spawn(move || {
@@ -216,6 +220,7 @@ impl CpalAudioOutput {
                     consumer,
                     source_channels,
                     output_channels,
+                    Arc::clone(&volume_gain),
                     callback_error.clone(),
                 ),
                 cpal::SampleFormat::I16 => Self::build_stream::<i16>(
@@ -224,6 +229,7 @@ impl CpalAudioOutput {
                     consumer,
                     source_channels,
                     output_channels,
+                    Arc::clone(&volume_gain),
                     callback_error.clone(),
                 ),
                 cpal::SampleFormat::U16 => Self::build_stream::<u16>(
@@ -232,6 +238,7 @@ impl CpalAudioOutput {
                     consumer,
                     source_channels,
                     output_channels,
+                    Arc::clone(&volume_gain),
                     callback_error.clone(),
                 ),
                 format => Err(AudioOutputError::new(
@@ -304,6 +311,7 @@ impl CpalAudioOutput {
         mut consumer: PlaybackConsumer,
         source_channels: usize,
         output_channels: usize,
+        volume_gain: Arc<AtomicU32>,
         stream_error: Arc<Mutex<Option<String>>>,
     ) -> Result<cpal::Stream, AudioOutputError>
     where
@@ -314,6 +322,7 @@ impl CpalAudioOutput {
                 config,
                 move |data: &mut [T], _| {
                     let mut mapped = [0.0f32; 32];
+                    let gain = f32::from_bits(volume_gain.load(Ordering::Relaxed));
                     for frame in data.chunks_mut(output_channels) {
                         if output_channels > mapped.len() {
                             for output in frame {
@@ -321,10 +330,11 @@ impl CpalAudioOutput {
                             }
                             continue;
                         }
-                        consumer.consume_channels(
+                        consumer.consume_channels_with_volume(
                             &mut mapped[..output_channels],
                             source_channels,
                             output_channels,
+                            gain,
                         );
                         for (output, sample) in frame.iter_mut().zip(&mapped[..output_channels]) {
                             *output = T::from_sample(*sample);
@@ -432,8 +442,10 @@ impl AudioOutput for CpalAudioOutput {
         Ok(())
     }
 
-    fn set_volume(&mut self, _volume: Volume) -> Result<(), AudioOutputError> {
-        unimplemented!("volume control not yet implemented")
+    fn set_volume(&mut self, volume: Volume) -> Result<(), AudioOutputError> {
+        self.volume = volume;
+        self.volume_gain.store((volume.effective_gain() as f32).to_bits(), Ordering::Release);
+        Ok(())
     }
 
     fn is_device_lost(&self) -> bool {
@@ -531,5 +543,15 @@ mod tests {
         output.stop().expect("stop should be safe before stream creation");
         output.stop().expect("stop should remain idempotent");
         assert_eq!(output.state(), StreamState::Stopped);
+    }
+
+    #[test]
+    fn set_volume_updates_callback_gain_without_creating_stream() {
+        let mut output = CpalAudioOutput::new();
+
+        output.set_volume(Volume::new(Gain::new(0.25))).expect("volume update should succeed");
+
+        assert_eq!(f32::from_bits(output.volume_gain.load(Ordering::Relaxed)), 0.25);
+        assert!(output.stream.is_none(), "volume update must not create a stream");
     }
 }
