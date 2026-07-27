@@ -39,6 +39,32 @@ export interface HealthResponse {
 /** Current version of the command envelope protocol. */
 export const CURRENT_COMMAND_VERSION = 1;
 
+// ── Playback command types ────────────────────────────────────────────
+
+export interface PlayRequest {
+  path: string;
+}
+
+export type PlayResponse = Record<string, never>;
+export type PauseResponse = Record<string, never>;
+export type ResumeResponse = Record<string, never>;
+export type StopResponse = Record<string, never>;
+
+export interface SeekRequest {
+  position_ms: number;
+}
+
+export interface SeekResponse {
+  position_ms: number;
+}
+
+export interface VolumeRequest {
+  gain: number;
+  muted: boolean;
+}
+
+export type VolumeResponse = Record<string, never>;
+
 // ── Typed invoke wrapper ──────────────────────────────────────────────
 
 /**
@@ -71,10 +97,48 @@ export async function invokeCommand<T>(
   return response.data as T;
 }
 
+// ── Typed playback command wrappers ───────────────────────────────────
+
 /**
  * Health check command. Returns `true` when the Rust backend responds.
  */
 export async function healthCheck(): Promise<boolean> {
   const response = await invokeCommand<HealthResponse>("health", {});
   return response.ready;
+}
+
+/** Starts playback of the given file path. */
+export async function play(path: string): Promise<void> {
+  await invokeCommand<PlayResponse>("play", { path } satisfies PlayRequest);
+}
+
+/** Pauses current playback. */
+export async function pause(): Promise<void> {
+  await invokeCommand<PauseResponse>("pause", {});
+}
+
+/** Resumes paused playback. */
+export async function resume(): Promise<void> {
+  await invokeCommand<ResumeResponse>("resume", {});
+}
+
+/** Stops current playback. */
+export async function stop(): Promise<void> {
+  await invokeCommand<StopResponse>("stop", {});
+}
+
+/** Seeks to the given millisecond position. */
+export async function seek(position_ms: number): Promise<number> {
+  const response = await invokeCommand<SeekResponse>("seek", {
+    position_ms,
+  } satisfies SeekRequest);
+  return response.position_ms;
+}
+
+/** Sets volume gain and mute state. */
+export async function setVolume(gain: number, muted: boolean): Promise<void> {
+  await invokeCommand<VolumeResponse>("volume", {
+    gain,
+    muted,
+  } satisfies VolumeRequest);
 }
