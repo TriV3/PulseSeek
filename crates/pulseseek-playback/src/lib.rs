@@ -7,6 +7,13 @@ use pulseseek_domain::decoder::{DecodeError, Decoder};
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
 
+/// Applies linear gain to one sample and hard-clips the result to audio range.
+///
+/// Intended for the real-time output callback: constant-time arithmetic only.
+pub fn apply_volume(sample: f32, gain: f32) -> f32 {
+    (sample * gain).clamp(-1.0, 1.0)
+}
+
 /// Error produced by playback operations.
 #[derive(Debug)]
 pub struct PlaybackError {
@@ -274,6 +281,23 @@ impl PlaybackConsumer {
         written
     }
 
+    /// Maps source channels and applies volume to samples for an output callback.
+    ///
+    /// Performs only bounded buffer work and arithmetic; no allocation or locking.
+    pub fn consume_channels_with_volume(
+        &mut self,
+        buf: &mut [f32],
+        source_channels: usize,
+        output_channels: usize,
+        gain: f32,
+    ) -> usize {
+        let written = self.consume_channels(buf, source_channels, output_channels);
+        for sample in buf.iter_mut() {
+            *sample = apply_volume(*sample, gain);
+        }
+        written
+    }
+
     /// Returns the number of frames currently available to the callback.
     pub fn available(&self) -> usize {
         self.consumer.occupied_len()
@@ -496,5 +520,41 @@ mod tests {
 
         worker.join().unwrap();
         assert_eq!(output, (0..300).map(|i| i as f32).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn volume_at_unity_preserves_samples() {
+        assert_eq!(apply_volume(0.25, 1.0), 0.25);
+        assert_eq!(apply_volume(-0.75, 1.0), -0.75);
+    }
+
+    #[test]
+    fn volume_attenuates_samples() {
+        assert_eq!(apply_volume(0.8, 0.5), 0.4);
+        assert_eq!(apply_volume(-0.8, 0.5), -0.4);
+    }
+
+    #[test]
+    fn muted_volume_outputs_silence() {
+        assert_eq!(apply_volume(0.8, 0.0), 0.0);
+        assert_eq!(apply_volume(-0.8, 0.0), 0.0);
+    }
+
+    #[test]
+    fn over_unity_volume_hard_clips_samples() {
+        assert_eq!(apply_volume(0.75, 2.0), 1.0);
+        assert_eq!(apply_volume(-0.75, 2.0), -1.0);
+    }
+
+    #[test]
+    fn callback_render_applies_volume_to_mapped_samples() {
+        let (mut engine, mut consumer) = PlaybackEngine::new(Box::new(RampDecoder::new(2)), 16);
+        assert!(engine.process_chunk().unwrap());
+
+        let mut output = [0.0f32; 4];
+        let written = consumer.consume_channels_with_volume(&mut output, 1, 2, 0.5);
+
+        assert_eq!(written, 4);
+        assert_eq!(output, [0.0, 0.0, 0.5, 0.5]);
     }
 }
