@@ -61,6 +61,7 @@ pub struct PlaybackEngine {
     producer: HeapProd<f32>,
     buffer_size: usize,
     eof: bool,
+    control: PlaybackControl,
     /// Total frames written to the ring buffer so far.
     pub frames_written: u64,
 }
@@ -75,6 +76,7 @@ pub struct PlaybackConsumer {
 #[derive(Clone)]
 pub struct PlaybackControl {
     paused: Arc<AtomicBool>,
+    stopped: Arc<AtomicBool>,
 }
 
 impl PlaybackControl {
@@ -88,9 +90,19 @@ impl PlaybackControl {
         self.paused.store(false, Ordering::Release);
     }
 
+    /// Stops playback permanently for this consumer and worker session.
+    pub fn stop(&self) {
+        self.stopped.store(true, Ordering::Release);
+    }
+
     /// Returns whether consumption is paused.
     pub fn is_paused(&self) -> bool {
         self.paused.load(Ordering::Acquire)
+    }
+
+    /// Returns whether this playback session has been stopped.
+    pub fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::Acquire)
     }
 }
 
@@ -109,9 +121,19 @@ impl PlaybackEngine {
     pub fn new(decoder: Box<dyn Decoder>, buffer_frames: usize) -> (Self, PlaybackConsumer) {
         assert!(buffer_frames > 0, "playback buffer must contain at least one frame");
         let (producer, consumer) = HeapRb::new(buffer_frames).split();
-        let control = PlaybackControl { paused: Arc::new(AtomicBool::new(false)) };
+        let control = PlaybackControl {
+            paused: Arc::new(AtomicBool::new(false)),
+            stopped: Arc::new(AtomicBool::new(false)),
+        };
         (
-            Self { decoder, producer, buffer_size: buffer_frames, eof: false, frames_written: 0 },
+            Self {
+                decoder,
+                producer,
+                buffer_size: buffer_frames,
+                eof: false,
+                control: control.clone(),
+                frames_written: 0,
+            },
             PlaybackConsumer { consumer, control },
         )
     }
@@ -182,7 +204,7 @@ impl PlaybackWorker {
         let worker_error = Arc::clone(&error);
 
         let join = thread::spawn(move || {
-            while !worker_stop.load(Ordering::Acquire) {
+            while !worker_stop.load(Ordering::Acquire) && !engine.control.is_stopped() {
                 match engine.process_chunk() {
                     Ok(false) => break,
                     Ok(true) if engine.is_buffer_full() => thread::yield_now(),
@@ -240,7 +262,7 @@ impl PlaybackConsumer {
     /// Returns the number of frames actually read (may be less than `buf.len()`).
     /// Intended for the audio callback: no allocation, locking, I/O, or logging.
     pub fn consume(&mut self, buf: &mut [f32]) -> usize {
-        if self.control.is_paused() {
+        if self.control.is_stopped() || self.control.is_paused() {
             buf.fill(0.0);
             return 0;
         }
@@ -265,7 +287,7 @@ impl PlaybackConsumer {
         if source_channels == 0 || output_channels == 0 {
             return 0;
         }
-        if self.control.is_paused() {
+        if self.control.is_stopped() || self.control.is_paused() {
             buf.fill(0.0);
             return 0;
         }
@@ -338,6 +360,9 @@ impl PlaybackConsumer {
 
     /// Returns the number of frames currently available to the callback.
     pub fn available(&self) -> usize {
+        if self.control.is_stopped() {
+            return 0;
+        }
         self.consumer.occupied_len()
     }
 }
@@ -646,5 +671,32 @@ mod tests {
         let mut resumed_output = [0.0f32; 4];
         assert_eq!(consumer.consume(&mut resumed_output), 4);
         assert_eq!(resumed_output, [0.0, 1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn stop_discards_visible_position_and_silences_consumer() {
+        let (mut engine, mut consumer) = PlaybackEngine::new(Box::new(RampDecoder::new(4)), 16);
+        assert!(engine.process_chunk().unwrap());
+        let control = consumer.control();
+
+        control.stop();
+        let mut output = [9.0f32; 4];
+        assert_eq!(consumer.consume(&mut output), 0);
+        assert_eq!(output, [0.0; 4]);
+        assert_eq!(consumer.available(), 0);
+        assert!(control.is_stopped());
+
+        control.stop();
+        assert!(control.is_stopped());
+    }
+
+    #[test]
+    fn stop_terminates_decoder_worker() {
+        let (worker, consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(1_000_000)), 16);
+        let control = consumer.control();
+        control.stop();
+
+        worker.wait().unwrap();
+        assert!(control.is_stopped());
     }
 }

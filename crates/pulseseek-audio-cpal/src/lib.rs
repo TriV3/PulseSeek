@@ -187,6 +187,9 @@ impl CpalAudioOutput {
                 std::io::Error::other("source channel count must be greater than zero"),
             ));
         }
+        if let Some(control) = &self.playback_control {
+            control.stop();
+        }
         if let Some(stream) = self.stream.take() {
             stream.stop()?;
         }
@@ -387,6 +390,9 @@ impl AudioOutput for CpalAudioOutput {
     }
 
     fn open(&mut self, device_id: &DeviceId) -> Result<(), AudioOutputError> {
+        if let Some(control) = &self.playback_control {
+            control.stop();
+        }
         if let Some(stream) = self.stream.take() {
             stream.stop()?;
         }
@@ -452,6 +458,9 @@ impl AudioOutput for CpalAudioOutput {
     }
 
     fn stop(&mut self) -> Result<(), AudioOutputError> {
+        if let Some(control) = &self.playback_control {
+            control.stop();
+        }
         if let Some(stream) = self.stream.take() {
             stream.stop()?;
         }
