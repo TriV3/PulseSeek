@@ -36,6 +36,8 @@ fn valid_flac_metadata() {
     let meta = decoder.metadata().unwrap();
     assert_eq!(meta.sample_rate, 44100);
     assert_eq!(meta.channels, 1);
+    assert!(meta.bit_depth.is_some(), "FLAC should have bit depth");
+    assert_eq!(meta.codec, "FLAC");
 }
 
 #[test]

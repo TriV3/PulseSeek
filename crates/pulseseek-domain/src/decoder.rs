@@ -17,6 +17,10 @@ pub struct StreamMetadata {
     pub sample_rate: u32,
     pub channels: u16,
     pub duration: Duration,
+    /// Bits per sample, `None` for lossy formats (e.g., MP3).
+    pub bit_depth: Option<u32>,
+    /// Human-readable codec name (e.g., "PCM", "FLAC", "MP3").
+    pub codec: &'static str,
 }
 
 /// Error produced by decoder operations.

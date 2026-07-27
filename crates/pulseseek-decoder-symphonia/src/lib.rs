@@ -20,6 +20,8 @@ struct SymphoniaDecoder {
     sample_rate: u32,
     channels: u16,
     duration_ms: u64,
+    bit_depth: Option<u32>,
+    codec_name: &'static str,
     sample_buf: SampleBuffer<f32>,
 }
 
@@ -64,6 +66,18 @@ impl SymphoniaDecoder {
             .map(|(frames, rate)| (frames * 1000) / rate as u64)
             .unwrap_or(0);
 
+        let codec = track.codec_params.codec;
+        let bit_depth = track.codec_params.bits_per_sample;
+        let codec_name = if is_pcm_codec(codec) {
+            "PCM"
+        } else if codec == symphonia::core::codecs::CODEC_TYPE_FLAC {
+            "FLAC"
+        } else if codec == symphonia::core::codecs::CODEC_TYPE_MP3 {
+            "MP3"
+        } else {
+            "Unknown"
+        };
+
         let dec_opts = DecoderOptions { verify: true };
         let decoder =
             symphonia::default::get_codecs().make(&track.codec_params, &dec_opts).map_err(|e| {
@@ -80,8 +94,36 @@ impl SymphoniaDecoder {
         let cap_frames: u64 = 65536;
         let sample_buf = SampleBuffer::<f32>::new(cap_frames, spec);
 
-        Ok(Self { format, decoder, track_id, sample_rate, channels, duration_ms, sample_buf })
+        Ok(Self {
+            format,
+            decoder,
+            track_id,
+            sample_rate,
+            channels,
+            duration_ms,
+            bit_depth,
+            codec_name,
+            sample_buf,
+        })
     }
+}
+
+/// Returns true for known PCM codec types (range check).
+fn is_pcm_codec(codec: symphonia::core::codecs::CodecType) -> bool {
+    codec == symphonia::core::codecs::CODEC_TYPE_PCM_S16LE
+        || codec == symphonia::core::codecs::CODEC_TYPE_PCM_S16BE
+        || codec == symphonia::core::codecs::CODEC_TYPE_PCM_S24LE
+        || codec == symphonia::core::codecs::CODEC_TYPE_PCM_S24BE
+        || codec == symphonia::core::codecs::CODEC_TYPE_PCM_S32LE
+        || codec == symphonia::core::codecs::CODEC_TYPE_PCM_S32BE
+        || codec == symphonia::core::codecs::CODEC_TYPE_PCM_F32LE
+        || codec == symphonia::core::codecs::CODEC_TYPE_PCM_F32BE
+        || codec == symphonia::core::codecs::CODEC_TYPE_PCM_S16LE_PLANAR
+        || codec == symphonia::core::codecs::CODEC_TYPE_PCM_S24LE_PLANAR
+        || codec == symphonia::core::codecs::CODEC_TYPE_PCM_S32LE_PLANAR
+        || codec == symphonia::core::codecs::CODEC_TYPE_PCM_F32LE_PLANAR
+        || codec == symphonia::core::codecs::CODEC_TYPE_PCM_U8
+        || codec == symphonia::core::codecs::CODEC_TYPE_PCM_S8
 }
 
 impl Decoder for SymphoniaDecoder {
@@ -94,6 +136,8 @@ impl Decoder for SymphoniaDecoder {
             sample_rate: self.sample_rate,
             channels: self.channels,
             duration: Duration::from_millis(self.duration_ms),
+            bit_depth: self.bit_depth,
+            codec: self.codec_name,
         })
     }
 

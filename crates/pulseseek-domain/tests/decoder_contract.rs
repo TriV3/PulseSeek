@@ -17,6 +17,8 @@ impl FakeDecoder {
                 sample_rate,
                 channels,
                 duration: Duration::from_millis(duration_ms),
+                bit_depth: None,
+                codec: "test",
             },
         }
     }
