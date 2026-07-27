@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender, SyncSender};
@@ -9,6 +10,9 @@ use pulseseek_domain::decoder::{DecodeError, Decoder};
 use pulseseek_domain::playback::position::{Position, SeekTarget};
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
+
+mod resampling;
+use resampling::SampleRateConverter;
 
 /// Applies linear gain to one sample and hard-clips the result to audio range.
 ///
@@ -68,6 +72,8 @@ pub struct PlaybackEngine {
     buffer_size: usize,
     eof: bool,
     control: PlaybackControl,
+    resampler: Option<SampleRateConverter>,
+    pending: VecDeque<f32>,
     /// Total frames written to the ring buffer so far.
     pub frames_written: u64,
 }
@@ -155,6 +161,10 @@ fn execute_worker_command(engine: &mut PlaybackEngine, command: WorkerCommand) -
             let result = match result {
                 Ok(position) => {
                     engine.eof = false;
+                    engine.pending.clear();
+                    if let Some(resampler) = &mut engine.resampler {
+                        resampler.reset();
+                    }
                     engine.control.complete_seek();
                     Ok(position)
                 },
@@ -174,6 +184,14 @@ impl PlaybackEngine {
     ///
     /// `buffer_frames` is the capacity of the internal ring buffer in frames.
     pub fn new(decoder: Box<dyn Decoder>, buffer_frames: usize) -> (Self, PlaybackConsumer) {
+        Self::new_with_resampler(decoder, buffer_frames, None)
+    }
+
+    fn new_with_resampler(
+        decoder: Box<dyn Decoder>,
+        buffer_frames: usize,
+        resampler: Option<SampleRateConverter>,
+    ) -> (Self, PlaybackConsumer) {
         assert!(buffer_frames > 0, "playback buffer must contain at least one frame");
         let (producer, consumer) = HeapRb::new(buffer_frames).split();
         let control = PlaybackControl {
@@ -189,6 +207,8 @@ impl PlaybackEngine {
                 buffer_size: buffer_frames,
                 eof: false,
                 control: control.clone(),
+                resampler,
+                pending: VecDeque::new(),
                 frames_written: 0,
             },
             PlaybackConsumer { consumer, control },
@@ -205,9 +225,23 @@ impl PlaybackEngine {
             return Ok(false);
         }
 
+        self.drain_pending();
+        if !self.pending.is_empty() {
+            return Ok(true);
+        }
+
         let available = self.producer.vacant_len();
         if available == 0 {
             return Ok(true);
+        }
+
+        if let Some(resampler) = &mut self.resampler {
+            match resampler.next_chunk(&mut *self.decoder)? {
+                Some(samples) => self.pending.extend(samples),
+                None => self.eof = true,
+            }
+            self.drain_pending();
+            return Ok(!self.eof || !self.pending.is_empty());
         }
 
         let mut buf = vec![0.0f32; self.buffer_size.min(available)];
@@ -250,12 +284,47 @@ impl PlaybackEngine {
     fn is_buffer_full(&self) -> bool {
         self.producer.vacant_len() == 0
     }
+
+    fn drain_pending(&mut self) {
+        let generation = self.control.generation.load(Ordering::Acquire);
+        while self.producer.vacant_len() > 0 {
+            let Some(value) = self.pending.pop_front() else { break };
+            let _ = self.producer.try_push(BufferedSample { value, generation });
+            self.frames_written += 1;
+        }
+    }
 }
 
 impl PlaybackWorker {
     /// Starts decoder work on a dedicated non-audio thread.
     pub fn start(decoder: Box<dyn Decoder>, buffer_frames: usize) -> (Self, PlaybackConsumer) {
-        let (mut engine, consumer) = PlaybackEngine::new(decoder, buffer_frames);
+        let (engine, consumer) = PlaybackEngine::new(decoder, buffer_frames);
+        Self::start_engine(engine, consumer)
+    }
+
+    /// Starts decoder work with worker-side sample-rate conversion.
+    pub fn start_resampled(
+        decoder: Box<dyn Decoder>,
+        buffer_frames: usize,
+        channels: usize,
+        source_rate: u32,
+        target_rate: u32,
+    ) -> Result<(Self, PlaybackConsumer), DecodeError> {
+        SampleRateConverter::validate(channels, source_rate, target_rate)?;
+        let resampler = if source_rate == target_rate {
+            None
+        } else {
+            Some(SampleRateConverter::new(channels, source_rate, target_rate)?)
+        };
+        let (engine, consumer) =
+            PlaybackEngine::new_with_resampler(decoder, buffer_frames, resampler);
+        Ok(Self::start_engine(engine, consumer))
+    }
+
+    fn start_engine(
+        mut engine: PlaybackEngine,
+        consumer: PlaybackConsumer,
+    ) -> (Self, PlaybackConsumer) {
         let stop = Arc::new(AtomicBool::new(false));
         let finished = Arc::new(AtomicBool::new(false));
         let error = Arc::new(Mutex::new(None));
@@ -957,5 +1026,91 @@ mod tests {
         pulseseek_domain::playback::position::Duration::Unknown
             .seek_to(pulseseek_domain::playback::position::Position::from_millis(milliseconds))
             .unwrap()
+    }
+
+    #[test]
+    fn equal_sample_rates_bypass_resampling_without_losing_samples() {
+        let (worker, mut consumer) =
+            PlaybackWorker::start_resampled(Box::new(RampDecoder::new(64)), 128, 1, 48_000, 48_000)
+                .unwrap();
+        let output = collect_worker_output(worker, &mut consumer);
+
+        assert_eq!(output, (0..64).map(|value| value as f32).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn resampling_44100_to_48000_preserves_duration_ratio() {
+        let (worker, mut consumer) = PlaybackWorker::start_resampled(
+            Box::new(RampDecoder::new(441)),
+            256,
+            1,
+            44_100,
+            48_000,
+        )
+        .unwrap();
+        let output = collect_worker_output(worker, &mut consumer);
+
+        assert_eq!(output.len(), 480);
+        assert!(output.iter().any(|sample| *sample > 0.0));
+    }
+
+    #[test]
+    fn resampling_48000_to_44100_preserves_duration_ratio() {
+        let (worker, mut consumer) = PlaybackWorker::start_resampled(
+            Box::new(RampDecoder::new(480)),
+            256,
+            1,
+            48_000,
+            44_100,
+        )
+        .unwrap();
+        let output = collect_worker_output(worker, &mut consumer);
+
+        assert_eq!(output.len(), 441);
+        assert!(output.iter().any(|sample| *sample > 0.0));
+    }
+
+    #[test]
+    fn resampling_stereo_keeps_interleaved_channel_sample_count() {
+        let (worker, mut consumer) = PlaybackWorker::start_resampled(
+            Box::new(RampDecoder::new(882)),
+            256,
+            2,
+            44_100,
+            48_000,
+        )
+        .unwrap();
+        let output = collect_worker_output(worker, &mut consumer);
+
+        assert_eq!(output.len(), 960);
+    }
+
+    #[test]
+    fn resampling_rejects_invalid_configuration() {
+        assert!(PlaybackWorker::start_resampled(
+            Box::new(RampDecoder::new(4)),
+            16,
+            0,
+            44_100,
+            48_000,
+        )
+        .is_err());
+        assert!(PlaybackWorker::start_resampled(Box::new(RampDecoder::new(4)), 16, 1, 0, 48_000,)
+            .is_err());
+    }
+
+    fn collect_worker_output(worker: PlaybackWorker, consumer: &mut PlaybackConsumer) -> Vec<f32> {
+        let mut output = Vec::new();
+        let mut scratch = [0.0f32; 64];
+        for _ in 0..100_000 {
+            let count = consumer.consume(&mut scratch);
+            output.extend_from_slice(&scratch[..count]);
+            if worker.is_finished() && consumer.available() == 0 {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        worker.join().unwrap();
+        output
     }
 }
