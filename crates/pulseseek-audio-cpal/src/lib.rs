@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::sync::mpsc::{self, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -19,12 +19,112 @@ pub struct CpalAudioOutput {
     active_device: Option<cpal::Device>,
     stream: Option<StreamControl>,
     playback_control: Option<PlaybackControl>,
-    state: StreamState,
+    status: StreamStatus,
     #[allow(dead_code)]
     volume: Volume,
     volume_gain: Arc<AtomicU32>,
-    #[allow(dead_code)]
-    device_lost: bool,
+}
+
+const STATE_PLAYING: u8 = 0;
+const STATE_PAUSED: u8 = 1;
+const STATE_STOPPED: u8 = 2;
+const STATE_LOST_PAUSED: u8 = 3;
+const STATE_LOST_STOPPED: u8 = 4;
+
+#[derive(Clone)]
+struct StreamStatus {
+    state: Arc<AtomicU8>,
+}
+
+impl StreamStatus {
+    fn new() -> Self {
+        Self { state: Arc::new(AtomicU8::new(STATE_STOPPED)) }
+    }
+
+    fn set_playing(&self) {
+        loop {
+            let current = self.state.load(Ordering::Acquire);
+            if self.is_lost_state(current) {
+                return;
+            }
+            if self
+                .state
+                .compare_exchange(current, STATE_PLAYING, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                return;
+            }
+        }
+    }
+
+    fn set_paused(&self) {
+        loop {
+            let current = self.state.load(Ordering::Acquire);
+            if current == STATE_LOST_PAUSED || current == STATE_LOST_STOPPED {
+                return;
+            }
+            if self
+                .state
+                .compare_exchange(current, STATE_PAUSED, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                return;
+            }
+        }
+    }
+
+    fn set_stopped(&self) {
+        loop {
+            let current = self.state.load(Ordering::Acquire);
+            let stopped =
+                if self.is_lost_state(current) { STATE_LOST_STOPPED } else { STATE_STOPPED };
+            if self
+                .state
+                .compare_exchange(current, stopped, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                return;
+            }
+        }
+    }
+
+    fn mark_device_lost(&self) {
+        loop {
+            let current = self.state.load(Ordering::Acquire);
+            let lost = if current == STATE_STOPPED || current == STATE_LOST_STOPPED {
+                STATE_LOST_STOPPED
+            } else {
+                STATE_LOST_PAUSED
+            };
+            if self
+                .state
+                .compare_exchange(current, lost, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                return;
+            }
+        }
+    }
+
+    fn reset_after_open(&self) {
+        self.state.store(STATE_STOPPED, Ordering::Release);
+    }
+
+    fn is_device_lost(&self) -> bool {
+        self.is_lost_state(self.state.load(Ordering::Acquire))
+    }
+
+    fn is_lost_state(&self, state: u8) -> bool {
+        state == STATE_LOST_PAUSED || state == STATE_LOST_STOPPED
+    }
+
+    fn state(&self) -> StreamState {
+        match self.state.load(Ordering::Acquire) {
+            STATE_PLAYING => StreamState::Playing,
+            STATE_PAUSED | STATE_LOST_PAUSED => StreamState::Paused,
+            _ => StreamState::Stopped,
+        }
+    }
 }
 
 enum StreamCommand {
@@ -37,6 +137,14 @@ struct StreamControl {
     commands: Sender<StreamCommand>,
     error: Arc<Mutex<Option<String>>>,
     join: Option<JoinHandle<()>>,
+}
+
+#[derive(Clone)]
+struct StreamCallbackContext {
+    status: StreamStatus,
+    playback_control: PlaybackControl,
+    volume_gain: Arc<AtomicU32>,
+    stream_error: Arc<Mutex<Option<String>>>,
 }
 
 impl StreamControl {
@@ -128,10 +236,9 @@ impl Default for CpalAudioOutput {
             active_device: None,
             stream: None,
             playback_control: None,
-            state: StreamState::Stopped,
+            status: StreamStatus::new(),
             volume: Volume::new(Gain::new(1.0)),
             volume_gain: Arc::new(AtomicU32::new(1.0f32.to_bits())),
-            device_lost: false,
         }
     }
 }
@@ -233,9 +340,16 @@ impl CpalAudioOutput {
         }
         let sample_format = supported.sample_format();
         let stream_error = Arc::new(Mutex::new(None));
-        let callback_error = Arc::clone(&stream_error);
+        let stream_status = self.status.clone();
         let volume_gain = Arc::clone(&self.volume_gain);
         let playback_control = consumer.control();
+        let callback_control = playback_control.clone();
+        let callback_context = StreamCallbackContext {
+            status: stream_status,
+            playback_control: callback_control,
+            volume_gain,
+            stream_error: Arc::clone(&stream_error),
+        };
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let (command_tx, command_rx) = mpsc::channel();
         let join = std::thread::spawn(move || {
@@ -246,8 +360,7 @@ impl CpalAudioOutput {
                     consumer,
                     source_channels,
                     output_channels,
-                    Arc::clone(&volume_gain),
-                    callback_error.clone(),
+                    callback_context.clone(),
                 ),
                 cpal::SampleFormat::I16 => Self::build_stream::<i16>(
                     &device,
@@ -255,8 +368,7 @@ impl CpalAudioOutput {
                     consumer,
                     source_channels,
                     output_channels,
-                    Arc::clone(&volume_gain),
-                    callback_error.clone(),
+                    callback_context.clone(),
                 ),
                 cpal::SampleFormat::U16 => Self::build_stream::<u16>(
                     &device,
@@ -264,8 +376,7 @@ impl CpalAudioOutput {
                     consumer,
                     source_channels,
                     output_channels,
-                    Arc::clone(&volume_gain),
-                    callback_error.clone(),
+                    callback_context,
                 ),
                 format => Err(AudioOutputError::new(
                     DiagnosticContext::new(DiagnosticCode::AudioOutput),
@@ -338,18 +449,21 @@ impl CpalAudioOutput {
         mut consumer: PlaybackConsumer,
         source_channels: usize,
         output_channels: usize,
-        volume_gain: Arc<AtomicU32>,
-        stream_error: Arc<Mutex<Option<String>>>,
+        context: StreamCallbackContext,
     ) -> Result<cpal::Stream, AudioOutputError>
     where
         T: cpal::SizedSample + cpal::FromSample<f32>,
     {
+        let data_volume_gain = Arc::clone(&context.volume_gain);
+        let error_status = context.status;
+        let error_control = context.playback_control;
+        let stream_error = context.stream_error;
         let stream = device
             .build_output_stream(
                 config,
                 move |data: &mut [T], _| {
                     let mut mapped = [0.0f32; 32];
-                    let gain = f32::from_bits(volume_gain.load(Ordering::Relaxed));
+                    let gain = f32::from_bits(data_volume_gain.load(Ordering::Relaxed));
                     for frame in data.chunks_mut(output_channels) {
                         if output_channels > mapped.len() {
                             for output in frame {
@@ -369,6 +483,8 @@ impl CpalAudioOutput {
                     }
                 },
                 move |error| {
+                    error_status.mark_device_lost();
+                    error_control.pause();
                     if let Ok(mut slot) = stream_error.lock() {
                         *slot = Some(error.to_string());
                     }
@@ -437,11 +553,17 @@ impl AudioOutput for CpalAudioOutput {
             Some(device_id.clone())
         };
         self.active_device = Some(device);
-        self.state = StreamState::Stopped;
+        self.status.reset_after_open();
         Ok(())
     }
 
     fn play(&mut self) -> Result<(), AudioOutputError> {
+        if self.status.is_device_lost() {
+            return Err(AudioOutputError::new(
+                DiagnosticContext::new(DiagnosticCode::AudioOutput),
+                std::io::Error::other("output device was lost; open a device before playing"),
+            ));
+        }
         let stream = self.stream.as_ref().ok_or_else(|| {
             AudioOutputError::new(
                 DiagnosticContext::new(DiagnosticCode::AudioOutput),
@@ -452,11 +574,18 @@ impl AudioOutput for CpalAudioOutput {
         if let Some(control) = &self.playback_control {
             control.resume();
         }
-        self.state = StreamState::Playing;
+        self.status.set_playing();
         Ok(())
     }
 
     fn pause(&mut self) -> Result<(), AudioOutputError> {
+        if self.status.is_device_lost() {
+            self.status.set_paused();
+            if let Some(control) = &self.playback_control {
+                control.pause();
+            }
+            return Ok(());
+        }
         let stream = self.stream.as_ref().ok_or_else(|| {
             AudioOutputError::new(
                 DiagnosticContext::new(DiagnosticCode::AudioOutput),
@@ -472,7 +601,7 @@ impl AudioOutput for CpalAudioOutput {
             }
             return Err(error);
         }
-        self.state = StreamState::Paused;
+        self.status.set_paused();
         Ok(())
     }
 
@@ -484,7 +613,7 @@ impl AudioOutput for CpalAudioOutput {
             stream.stop()?;
         }
         self.playback_control = None;
-        self.state = StreamState::Stopped;
+        self.status.set_stopped();
         Ok(())
     }
 
@@ -495,7 +624,7 @@ impl AudioOutput for CpalAudioOutput {
     }
 
     fn is_device_lost(&self) -> bool {
-        self.device_lost
+        self.status.is_device_lost()
     }
 
     fn current_device(&self) -> Option<DeviceId> {
@@ -503,7 +632,7 @@ impl AudioOutput for CpalAudioOutput {
     }
 
     fn state(&self) -> StreamState {
-        self.state
+        self.status.state()
     }
 }
 
@@ -605,5 +734,39 @@ mod tests {
     fn output_sample_rate_requires_open_device() {
         let output = CpalAudioOutput::new();
         assert!(output.output_sample_rate().is_err());
+    }
+
+    #[test]
+    fn device_loss_pauses_output_and_is_idempotent() {
+        let status = StreamStatus::new();
+        status.set_playing();
+
+        status.mark_device_lost();
+        status.mark_device_lost();
+
+        assert!(status.is_device_lost());
+        assert_eq!(status.state(), StreamState::Paused);
+    }
+
+    #[test]
+    fn opening_recovered_device_clears_loss_and_stops_output() {
+        let status = StreamStatus::new();
+        status.set_playing();
+        status.mark_device_lost();
+
+        status.reset_after_open();
+
+        assert!(!status.is_device_lost());
+        assert_eq!(status.state(), StreamState::Stopped);
+    }
+
+    #[test]
+    fn play_rejects_lost_device_instead_of_restoring_playing_state() {
+        let mut output = CpalAudioOutput::new();
+        output.status.set_playing();
+        output.status.mark_device_lost();
+
+        assert!(output.play().is_err());
+        assert_eq!(output.state(), StreamState::Paused);
     }
 }
