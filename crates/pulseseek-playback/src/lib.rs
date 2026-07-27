@@ -68,6 +68,30 @@ pub struct PlaybackEngine {
 /// Consumer half intended for use by a real-time audio callback.
 pub struct PlaybackConsumer {
     consumer: HeapCons<f32>,
+    control: PlaybackControl,
+}
+
+/// Lock-free playback control shared by the audio owner and callback consumer.
+#[derive(Clone)]
+pub struct PlaybackControl {
+    paused: Arc<AtomicBool>,
+}
+
+impl PlaybackControl {
+    /// Pauses consumption without discarding buffered frames.
+    pub fn pause(&self) {
+        self.paused.store(true, Ordering::Release);
+    }
+
+    /// Resumes consumption from the current buffered position.
+    pub fn resume(&self) {
+        self.paused.store(false, Ordering::Release);
+    }
+
+    /// Returns whether consumption is paused.
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Acquire)
+    }
 }
 
 /// Decoder worker that keeps the producer half fed until EOF or shutdown.
@@ -85,9 +109,10 @@ impl PlaybackEngine {
     pub fn new(decoder: Box<dyn Decoder>, buffer_frames: usize) -> (Self, PlaybackConsumer) {
         assert!(buffer_frames > 0, "playback buffer must contain at least one frame");
         let (producer, consumer) = HeapRb::new(buffer_frames).split();
+        let control = PlaybackControl { paused: Arc::new(AtomicBool::new(false)) };
         (
             Self { decoder, producer, buffer_size: buffer_frames, eof: false, frames_written: 0 },
-            PlaybackConsumer { consumer },
+            PlaybackConsumer { consumer, control },
         )
     }
 
@@ -215,6 +240,10 @@ impl PlaybackConsumer {
     /// Returns the number of frames actually read (may be less than `buf.len()`).
     /// Intended for the audio callback: no allocation, locking, I/O, or logging.
     pub fn consume(&mut self, buf: &mut [f32]) -> usize {
+        if self.control.is_paused() {
+            buf.fill(0.0);
+            return 0;
+        }
         let available = self.consumer.occupied_len().min(buf.len());
         if available == 0 {
             return 0;
@@ -234,6 +263,10 @@ impl PlaybackConsumer {
         output_channels: usize,
     ) -> usize {
         if source_channels == 0 || output_channels == 0 {
+            return 0;
+        }
+        if self.control.is_paused() {
+            buf.fill(0.0);
             return 0;
         }
 
@@ -279,6 +312,11 @@ impl PlaybackConsumer {
             written += frame.len();
         }
         written
+    }
+
+    /// Returns a handle for pausing and resuming this consumer.
+    pub fn control(&self) -> PlaybackControl {
+        self.control.clone()
     }
 
     /// Maps source channels and applies volume to samples for an output callback.
@@ -556,5 +594,57 @@ mod tests {
 
         assert_eq!(written, 4);
         assert_eq!(output, [0.0, 0.0, 0.5, 0.5]);
+    }
+
+    #[test]
+    fn pause_preserves_buffer_position_until_resume() {
+        let (mut engine, mut consumer) = PlaybackEngine::new(Box::new(RampDecoder::new(4)), 16);
+        assert!(engine.process_chunk().unwrap());
+        let control = consumer.control();
+
+        control.pause();
+        let mut paused_output = [9.0f32; 2];
+        assert_eq!(consumer.consume(&mut paused_output), 0);
+        assert_eq!(paused_output, [0.0, 0.0]);
+        assert!(control.is_paused());
+        assert_eq!(consumer.available(), 4);
+
+        control.resume();
+        let mut resumed_output = [0.0f32; 2];
+        assert_eq!(consumer.consume(&mut resumed_output), 2);
+        assert_eq!(resumed_output, [0.0, 1.0]);
+        assert!(!control.is_paused());
+    }
+
+    #[test]
+    fn repeated_pause_is_idempotent() {
+        let (mut engine, consumer) = PlaybackEngine::new(Box::new(RampDecoder::new(1)), 16);
+        assert!(engine.process_chunk().unwrap());
+        let control = consumer.control();
+
+        control.pause();
+        control.pause();
+        assert!(control.is_paused());
+        control.resume();
+        control.resume();
+        assert!(!control.is_paused());
+    }
+
+    #[test]
+    fn end_while_paused_keeps_buffered_frames_for_resume() {
+        let (worker, mut consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(4)), 16);
+        let control = consumer.control();
+        control.pause();
+        worker.wait().unwrap();
+
+        let mut paused_output = [9.0f32; 4];
+        assert_eq!(consumer.consume(&mut paused_output), 0);
+        assert_eq!(paused_output, [0.0; 4]);
+        assert_eq!(consumer.available(), 4);
+
+        control.resume();
+        let mut resumed_output = [0.0f32; 4];
+        assert_eq!(consumer.consume(&mut resumed_output), 4);
+        assert_eq!(resumed_output, [0.0, 1.0, 2.0, 3.0]);
     }
 }
