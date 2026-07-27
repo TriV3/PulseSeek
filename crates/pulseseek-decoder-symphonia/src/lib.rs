@@ -225,3 +225,5 @@ impl Decoder for Mp3Decoder {
         self.0.seek(target)
     }
 }
+
+pub mod registry;
