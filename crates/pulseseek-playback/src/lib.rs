@@ -87,6 +87,9 @@ pub struct PlaybackEngine {
     pending: VecDeque<f32>,
     mode: PlaybackMode,
     cycle_produced: bool,
+    loop_cache: Vec<f32>,
+    loop_cache_overflowed: bool,
+    loop_cache_offset: usize,
     /// Total frames written to the ring buffer so far.
     pub frames_written: u64,
 }
@@ -220,6 +223,9 @@ fn execute_worker_command(engine: &mut PlaybackEngine, command: WorkerCommand) -
                 Ok(position) => {
                     engine.eof = false;
                     engine.pending.clear();
+                    engine.loop_cache.clear();
+                    engine.loop_cache_overflowed = false;
+                    engine.loop_cache_offset = 0;
                     if let Some(resampler) = &mut engine.resampler {
                         resampler.reset();
                     }
@@ -284,6 +290,9 @@ impl PlaybackEngine {
                 pending: VecDeque::new(),
                 mode,
                 cycle_produced: false,
+                loop_cache: Vec::new(),
+                loop_cache_overflowed: false,
+                loop_cache_offset: 0,
                 frames_written: 0,
             },
             PlaybackConsumer { consumer, control },
@@ -341,6 +350,7 @@ impl PlaybackEngine {
         let pushed = self.producer.push_iter(
             buf[..frames].iter().copied().map(|value| BufferedSample { value, generation }),
         );
+        self.cache_cycle_samples(&buf[..pushed]);
         self.frames_written += pushed as u64;
         self.cycle_produced |= pushed > 0;
 
@@ -366,9 +376,46 @@ impl PlaybackEngine {
         while self.producer.vacant_len() > 0 {
             let Some(value) = self.pending.pop_front() else { break };
             let _ = self.producer.try_push(BufferedSample { value, generation });
+            self.cache_cycle_sample(value);
             self.frames_written += 1;
             self.cycle_produced = true;
         }
+    }
+
+    fn cache_cycle_samples(&mut self, samples: &[f32]) {
+        if self.loop_cache_overflowed {
+            return;
+        }
+        if self.loop_cache.len() + samples.len() > self.buffer_size {
+            self.loop_cache.clear();
+            self.loop_cache_overflowed = true;
+            return;
+        }
+        self.loop_cache.extend_from_slice(samples);
+    }
+
+    fn cache_cycle_sample(&mut self, sample: f32) {
+        self.cache_cycle_samples(std::slice::from_ref(&sample));
+    }
+
+    fn has_cached_cycle(&self) -> bool {
+        !self.loop_cache.is_empty() && !self.loop_cache_overflowed
+    }
+
+    fn replay_cached_cycle(&mut self) -> bool {
+        if !self.has_cached_cycle() {
+            return false;
+        }
+        let generation = self.control.generation.load(Ordering::Acquire);
+        let mut pushed = false;
+        while self.producer.vacant_len() > 0 {
+            let value = self.loop_cache[self.loop_cache_offset];
+            self.loop_cache_offset = (self.loop_cache_offset + 1) % self.loop_cache.len();
+            let _ = self.producer.try_push(BufferedSample { value, generation });
+            self.frames_written += 1;
+            pushed = true;
+        }
+        pushed
     }
 
     fn restart_current(&mut self) -> Result<(), PlaybackError> {
@@ -473,6 +520,13 @@ impl PlaybackWorker {
                 }
                 if reached_eof {
                     if engine.mode == PlaybackMode::LoopCurrent {
+                        if engine.has_cached_cycle() {
+                            worker_finished.store(false, Ordering::Release);
+                            if !engine.replay_cached_cycle() {
+                                thread::yield_now();
+                            }
+                            continue;
+                        }
                         if engine.is_finished() {
                             if !engine.cycle_produced {
                                 if engine.control.claim_failure() {
@@ -1411,6 +1465,88 @@ mod tests {
 
         assert_eq!(output, vec![0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0]);
         assert!(worker.poll_event().is_none());
+        control_stop_and_join(worker, consumer);
+    }
+
+    #[test]
+    fn short_loop_replays_from_prebuffer_without_decoder_seek() {
+        let (worker, mut consumer) = PlaybackWorker::start_with_mode(
+            Box::new(RejectingSeekDecoder { inner: RampDecoder::new(1) }),
+            1,
+            pulseseek_domain::playback::mode::PlaybackMode::LoopCurrent,
+        );
+        let mut output = [0.0f32; 8];
+
+        let mut produced = 0;
+        for _ in 0..100_000 {
+            let count = consumer.consume(&mut output[produced..]);
+            produced += count;
+            assert!(worker.poll_event().is_none(), "short loop terminated early");
+            if produced == output.len() {
+                break;
+            }
+            std::thread::yield_now();
+        }
+
+        assert_eq!(produced, output.len());
+        assert_eq!(output, [0.0; 8]);
+        assert!(worker.poll_event().is_none());
+        control_stop_and_join(worker, consumer);
+    }
+
+    #[test]
+    fn short_loop_keeps_four_sample_cycle_contiguous() {
+        let (worker, mut consumer) = PlaybackWorker::start_with_mode(
+            Box::new(RejectingSeekDecoder { inner: RampDecoder::new(4) }),
+            4,
+            pulseseek_domain::playback::mode::PlaybackMode::LoopCurrent,
+        );
+        let mut output = [0.0f32; 16];
+        let mut produced = 0;
+
+        for _ in 0..100_000 {
+            let count = consumer.consume(&mut output[produced..]);
+            produced += count;
+            assert!(worker.poll_event().is_none(), "short loop terminated early");
+            if produced == output.len() {
+                break;
+            }
+            std::thread::yield_now();
+        }
+
+        assert_eq!(produced, output.len());
+        assert_eq!(
+            output,
+            [0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0]
+        );
+        control_stop_and_join(worker, consumer);
+    }
+
+    #[test]
+    fn loop_longer_than_buffer_keeps_seek_fallback() {
+        let (worker, mut consumer) = PlaybackWorker::start_with_mode(
+            Box::new(RampDecoder::new(8)),
+            4,
+            pulseseek_domain::playback::mode::PlaybackMode::LoopCurrent,
+        );
+        let mut output = [0.0f32; 16];
+        let mut produced = 0;
+
+        for _ in 0..100_000 {
+            let count = consumer.consume(&mut output[produced..]);
+            produced += count;
+            assert!(worker.poll_event().is_none(), "long loop terminated early");
+            if produced == output.len() {
+                break;
+            }
+            std::thread::yield_now();
+        }
+
+        assert_eq!(produced, output.len());
+        assert_eq!(
+            output,
+            [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+        );
         control_stop_and_join(worker, consumer);
     }
 
