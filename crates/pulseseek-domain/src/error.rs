@@ -56,12 +56,14 @@ impl fmt::Display for UserErrorDescriptor {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DiagnosticCode {
     BrowserRead,
+    AudioOutput,
 }
 
 impl DiagnosticCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::BrowserRead => "browser.read",
+            Self::AudioOutput => "audio.output",
         }
     }
 }
