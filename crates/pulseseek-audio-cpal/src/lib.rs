@@ -11,13 +11,14 @@ use pulseseek_domain::audio_output::{
 };
 use pulseseek_domain::error::{DiagnosticCode, DiagnosticContext};
 use pulseseek_domain::playback::volume::{Gain, Volume};
-use pulseseek_playback::PlaybackConsumer;
+use pulseseek_playback::{PlaybackConsumer, PlaybackControl};
 
 /// A cpal-based audio output adapter.
 pub struct CpalAudioOutput {
     current_device: Option<DeviceId>,
     active_device: Option<cpal::Device>,
     stream: Option<StreamControl>,
+    playback_control: Option<PlaybackControl>,
     state: StreamState,
     #[allow(dead_code)]
     volume: Volume,
@@ -107,6 +108,7 @@ impl Default for CpalAudioOutput {
             current_device: None,
             active_device: None,
             stream: None,
+            playback_control: None,
             state: StreamState::Stopped,
             volume: Volume::new(Gain::new(1.0)),
             volume_gain: Arc::new(AtomicU32::new(1.0f32.to_bits())),
@@ -188,6 +190,7 @@ impl CpalAudioOutput {
         if let Some(stream) = self.stream.take() {
             stream.stop()?;
         }
+        self.playback_control = None;
         let device = self.active_device.as_ref().ok_or_else(|| {
             AudioOutputError::new(
                 DiagnosticContext::new(DiagnosticCode::AudioOutput),
@@ -210,6 +213,7 @@ impl CpalAudioOutput {
         let stream_error = Arc::new(Mutex::new(None));
         let callback_error = Arc::clone(&stream_error);
         let volume_gain = Arc::clone(&self.volume_gain);
+        let playback_control = consumer.control();
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let (command_tx, command_rx) = mpsc::channel();
         let join = std::thread::spawn(move || {
@@ -289,6 +293,7 @@ impl CpalAudioOutput {
                     error: stream_error,
                     join: Some(join),
                 });
+                self.playback_control = Some(playback_control);
                 Ok(())
             },
             Ok(Err(error)) => {
@@ -385,6 +390,7 @@ impl AudioOutput for CpalAudioOutput {
         if let Some(stream) = self.stream.take() {
             stream.stop()?;
         }
+        self.playback_control = None;
         let host = cpal::default_host();
 
         // Try to find the requested device by ID.
@@ -418,6 +424,9 @@ impl AudioOutput for CpalAudioOutput {
             )
         })?;
         stream.play()?;
+        if let Some(control) = &self.playback_control {
+            control.resume();
+        }
         self.state = StreamState::Playing;
         Ok(())
     }
@@ -429,7 +438,15 @@ impl AudioOutput for CpalAudioOutput {
                 std::io::Error::other("output stream is not open"),
             )
         })?;
-        stream.pause()?;
+        if let Some(control) = &self.playback_control {
+            control.pause();
+        }
+        if let Err(error) = stream.pause() {
+            if let Some(control) = &self.playback_control {
+                control.resume();
+            }
+            return Err(error);
+        }
         self.state = StreamState::Paused;
         Ok(())
     }
@@ -438,6 +455,7 @@ impl AudioOutput for CpalAudioOutput {
         if let Some(stream) = self.stream.take() {
             stream.stop()?;
         }
+        self.playback_control = None;
         self.state = StreamState::Stopped;
         Ok(())
     }
