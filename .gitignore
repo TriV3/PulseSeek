@@ -1,5 +1,5 @@
 # Local product specifications
-/spec/
+# /spec/
 
 # Rust build output
 /target/
