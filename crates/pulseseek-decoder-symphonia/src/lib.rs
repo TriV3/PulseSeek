@@ -150,18 +150,6 @@ impl Decoder for SymphoniaDecoder {
                 DecodeError::new(DiagnosticContext::new(DiagnosticCode::BrowserRead), e)
             })?;
 
-        let dec_opts = DecoderOptions { verify: true };
-        self.decoder = symphonia::default::get_codecs()
-            .make(
-                &self.format.tracks()
-                    [self.format.tracks().iter().position(|t| t.id == self.track_id).unwrap_or(0)]
-                .codec_params,
-                &dec_opts,
-            )
-            .map_err(|e| {
-                DecodeError::new(DiagnosticContext::new(DiagnosticCode::BrowserRead), e)
-            })?;
-
         Ok(target.position())
     }
 }
@@ -200,6 +188,30 @@ impl FlacDecoder {
 }
 
 impl Decoder for FlacDecoder {
+    fn probe(&self) -> ProbeResult {
+        self.0.probe()
+    }
+    fn metadata(&mut self) -> Result<StreamMetadata, DecodeError> {
+        self.0.metadata()
+    }
+    fn read(&mut self, buf: &mut [f32]) -> Result<usize, DecodeError> {
+        self.0.read(buf)
+    }
+    fn seek(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
+        self.0.seek(target)
+    }
+}
+
+/// A Symphonia-based decoder for MP3 audio files.
+pub struct Mp3Decoder(SymphoniaDecoder);
+
+impl Mp3Decoder {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, DecodeError> {
+        SymphoniaDecoder::open(path, "mp3").map(Mp3Decoder)
+    }
+}
+
+impl Decoder for Mp3Decoder {
     fn probe(&self) -> ProbeResult {
         self.0.probe()
     }
