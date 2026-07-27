@@ -2,6 +2,7 @@ use pulseseek_domain::error::{ApplicationError, ErrorContract};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::playback_events::PlaybackEventEmitter;
 use crate::playback_service::PlaybackService;
 
 pub const CURRENT_COMMAND_VERSION: u32 = 1;
@@ -95,7 +96,11 @@ impl CommandResponse {
     }
 }
 
-pub fn dispatch(envelope: CommandEnvelope, service: &mut dyn PlaybackService) -> CommandResponse {
+pub fn dispatch(
+    envelope: CommandEnvelope,
+    service: &mut dyn PlaybackService,
+    events: &dyn PlaybackEventEmitter,
+) -> CommandResponse {
     if envelope.version != CURRENT_COMMAND_VERSION {
         return CommandResponse::err(BoundaryError {
             category: "Unsupported".to_string(),
@@ -133,7 +138,10 @@ pub fn dispatch(envelope: CommandEnvelope, service: &mut dyn PlaybackService) ->
                 },
             };
             match service.play(&request.path) {
-                Ok(()) => CommandResponse::ok(serde_json::to_value(PlayResponse {}).unwrap()),
+                Ok(()) => {
+                    let _ = events.emit_state("playing");
+                    CommandResponse::ok(serde_json::to_value(PlayResponse {}).unwrap())
+                },
                 Err(e) => CommandResponse::err(from_application_error(&e)),
             }
         },
@@ -149,7 +157,10 @@ pub fn dispatch(envelope: CommandEnvelope, service: &mut dyn PlaybackService) ->
                 },
             };
             match service.pause() {
-                Ok(()) => CommandResponse::ok(serde_json::to_value(PauseResponse {}).unwrap()),
+                Ok(()) => {
+                    let _ = events.emit_state("paused");
+                    CommandResponse::ok(serde_json::to_value(PauseResponse {}).unwrap())
+                },
                 Err(e) => CommandResponse::err(from_application_error(&e)),
             }
         },
@@ -165,7 +176,10 @@ pub fn dispatch(envelope: CommandEnvelope, service: &mut dyn PlaybackService) ->
                 },
             };
             match service.resume() {
-                Ok(()) => CommandResponse::ok(serde_json::to_value(ResumeResponse {}).unwrap()),
+                Ok(()) => {
+                    let _ = events.emit_state("playing");
+                    CommandResponse::ok(serde_json::to_value(ResumeResponse {}).unwrap())
+                },
                 Err(e) => CommandResponse::err(from_application_error(&e)),
             }
         },
@@ -181,7 +195,10 @@ pub fn dispatch(envelope: CommandEnvelope, service: &mut dyn PlaybackService) ->
                 },
             };
             match service.stop() {
-                Ok(()) => CommandResponse::ok(serde_json::to_value(StopResponse {}).unwrap()),
+                Ok(()) => {
+                    let _ = events.emit_state("stopped");
+                    CommandResponse::ok(serde_json::to_value(StopResponse {}).unwrap())
+                },
                 Err(e) => CommandResponse::err(from_application_error(&e)),
             }
         },
@@ -244,9 +261,10 @@ pub fn from_application_error(err: &ApplicationError) -> BoundaryError {
 pub fn invoke_command(
     envelope: CommandEnvelope,
     state: tauri::State<'_, std::sync::Mutex<Box<dyn PlaybackService>>>,
+    events: tauri::State<'_, Box<dyn PlaybackEventEmitter>>,
 ) -> CommandResponse {
     let mut service = state.lock().expect("playback service lock poisoned");
-    dispatch(envelope, &mut **service)
+    dispatch(envelope, &mut **service, &**events)
 }
 
 #[cfg(test)]
@@ -254,7 +272,12 @@ mod tests {
     use pulseseek_domain::error::{DiagnosticCode, DiagnosticContext, ErrorCategory};
 
     use super::*;
+    use crate::playback_events::{FakeEventEmitter, NoopEventEmitter};
     use crate::playback_service::FakePlaybackService;
+
+    fn noop_events() -> NoopEventEmitter {
+        NoopEventEmitter
+    }
 
     fn health_envelope() -> CommandEnvelope {
         CommandEnvelope {
@@ -270,7 +293,7 @@ mod tests {
     fn health_command_round_trip() {
         let mut service = FakePlaybackService::new();
 
-        let response = dispatch(health_envelope(), &mut service);
+        let response = dispatch(health_envelope(), &mut service, &noop_events());
 
         assert!(response.ok);
         let data = response.data.expect("should have data");
@@ -289,7 +312,7 @@ mod tests {
                 payload: serde_json::json!({}),
             };
 
-            let response = dispatch(envelope, &mut service);
+            let response = dispatch(envelope, &mut service, &noop_events());
 
             assert!(!response.ok);
             let error = response.error.expect("should have error");
@@ -309,7 +332,7 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -328,7 +351,7 @@ mod tests {
             payload: serde_json::json!("not_an_object"),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -369,7 +392,7 @@ mod tests {
             payload: serde_json::json!({"path": "/music/track.wav"}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(response.ok, "play should succeed");
         assert!(response.error.is_none());
@@ -387,7 +410,7 @@ mod tests {
             payload: serde_json::json!("not_an_object"),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -406,7 +429,7 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -426,7 +449,7 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(response.ok);
         assert_eq!(service.pause_call_count, 1);
@@ -442,7 +465,7 @@ mod tests {
             payload: serde_json::json!("invalid"),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         assert_eq!(response.error.unwrap().category, "InvalidInput");
@@ -461,7 +484,7 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(response.ok);
         assert_eq!(service.resume_call_count, 1);
@@ -477,7 +500,7 @@ mod tests {
             payload: serde_json::json!("invalid"),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         assert_eq!(service.resume_call_count, 0);
@@ -495,7 +518,7 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(response.ok);
         assert_eq!(service.stop_call_count, 1);
@@ -511,7 +534,7 @@ mod tests {
             payload: serde_json::json!("invalid"),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         assert_eq!(service.stop_call_count, 0);
@@ -530,7 +553,7 @@ mod tests {
             payload: serde_json::json!({"position_ms": 45000}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(response.ok);
         assert_eq!(service.seek_call_count, 1);
@@ -549,7 +572,7 @@ mod tests {
             payload: serde_json::json!("not_an_object"),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         assert_eq!(service.seek_call_count, 0);
@@ -565,7 +588,7 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         assert_eq!(service.seek_call_count, 0);
@@ -583,7 +606,7 @@ mod tests {
             payload: serde_json::json!({"gain": 0.75, "muted": false}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(response.ok);
         assert_eq!(service.set_volume_call_count, 1);
@@ -601,7 +624,7 @@ mod tests {
             payload: serde_json::json!({"gain": 0.0, "muted": true}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(response.ok);
         assert_eq!(service.set_volume_call_count, 1);
@@ -618,7 +641,7 @@ mod tests {
             payload: serde_json::json!("not_an_object"),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         assert_eq!(service.set_volume_call_count, 0);
@@ -634,7 +657,7 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         assert_eq!(service.set_volume_call_count, 0);
@@ -653,7 +676,7 @@ mod tests {
             payload: serde_json::json!({"path": "/music/track.wav"}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -672,7 +695,7 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -690,7 +713,7 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -708,7 +731,7 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -726,7 +749,7 @@ mod tests {
             payload: serde_json::json!({"position_ms": 99999}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -744,10 +767,160 @@ mod tests {
             payload: serde_json::json!({"gain": 1.0, "muted": false}),
         };
 
-        let response = dispatch(envelope, &mut service);
+        let response = dispatch(envelope, &mut service, &noop_events());
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
         assert_eq!(error.category, "Unsupported");
+    }
+
+    // ── Event emission tests ─────────────────────────────────────────
+
+    #[test]
+    fn play_emits_playing_state_event() {
+        let mut service = FakePlaybackService::new();
+        let events = FakeEventEmitter::new();
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "play".to_string(),
+            payload: serde_json::json!({"path": "/music/track.wav"}),
+        };
+
+        let _response = dispatch(envelope, &mut service, &events);
+
+        let recorded = events.recorded_events();
+        assert_eq!(recorded.len(), 1, "play should emit one event");
+        assert_eq!(recorded[0].event, "playback:state-changed");
+        let payload: serde_json::Value =
+            serde_json::from_value(recorded[0].payload.clone()).unwrap();
+        assert_eq!(payload["state"], "playing");
+    }
+
+    #[test]
+    fn play_emits_event_only_on_success() {
+        let mut service = FakePlaybackService::new();
+        service.fail_with = Some(ErrorCategory::NotFound);
+        let events = FakeEventEmitter::new();
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "play".to_string(),
+            payload: serde_json::json!({"path": "/music/missing.wav"}),
+        };
+
+        let _response = dispatch(envelope, &mut service, &events);
+
+        assert_eq!(events.event_count(), 0, "no event on error");
+    }
+
+    #[test]
+    fn pause_emits_paused_state_event() {
+        let mut service = FakePlaybackService::new();
+        let events = FakeEventEmitter::new();
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "pause".to_string(),
+            payload: serde_json::json!({}),
+        };
+
+        let _response = dispatch(envelope, &mut service, &events);
+
+        let recorded = events.recorded_events();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].event, "playback:state-changed");
+        let payload: serde_json::Value =
+            serde_json::from_value(recorded[0].payload.clone()).unwrap();
+        assert_eq!(payload["state"], "paused");
+    }
+
+    #[test]
+    fn resume_emits_playing_state_event() {
+        let mut service = FakePlaybackService::new();
+        let events = FakeEventEmitter::new();
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "resume".to_string(),
+            payload: serde_json::json!({}),
+        };
+
+        let _response = dispatch(envelope, &mut service, &events);
+
+        let recorded = events.recorded_events();
+        assert_eq!(recorded.len(), 1);
+        let payload: serde_json::Value =
+            serde_json::from_value(recorded[0].payload.clone()).unwrap();
+        assert_eq!(payload["state"], "playing");
+    }
+
+    #[test]
+    fn stop_emits_stopped_state_event() {
+        let mut service = FakePlaybackService::new();
+        let events = FakeEventEmitter::new();
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "stop".to_string(),
+            payload: serde_json::json!({}),
+        };
+
+        let _response = dispatch(envelope, &mut service, &events);
+
+        let recorded = events.recorded_events();
+        assert_eq!(recorded.len(), 1);
+        let payload: serde_json::Value =
+            serde_json::from_value(recorded[0].payload.clone()).unwrap();
+        assert_eq!(payload["state"], "stopped");
+    }
+
+    #[test]
+    fn seek_does_not_emit_state_event() {
+        let mut service = FakePlaybackService::new();
+        let events = FakeEventEmitter::new();
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "seek".to_string(),
+            payload: serde_json::json!({"position_ms": 45000}),
+        };
+
+        let _response = dispatch(envelope, &mut service, &events);
+
+        assert_eq!(events.event_count(), 0, "seek should not emit state event");
+    }
+
+    #[test]
+    fn volume_does_not_emit_state_event() {
+        let mut service = FakePlaybackService::new();
+        let events = FakeEventEmitter::new();
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "volume".to_string(),
+            payload: serde_json::json!({"gain": 0.5, "muted": false}),
+        };
+
+        let _response = dispatch(envelope, &mut service, &events);
+
+        assert_eq!(events.event_count(), 0, "volume should not emit state event");
+    }
+
+    #[test]
+    fn state_event_has_versioned_envelope() {
+        let mut service = FakePlaybackService::new();
+        let events = FakeEventEmitter::new();
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "play".to_string(),
+            payload: serde_json::json!({"path": "/music/track.wav"}),
+        };
+
+        let _response = dispatch(envelope, &mut service, &events);
+
+        let recorded = events.recorded_events();
+        assert_eq!(recorded[0].version, crate::playback_events::CURRENT_EVENT_VERSION);
     }
 }
