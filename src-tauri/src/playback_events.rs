@@ -11,6 +11,7 @@ pub const CURRENT_EVENT_VERSION: u32 = 1;
 pub const EVENT_STATE_CHANGED: &str = "playback:state-changed";
 pub const EVENT_POSITION: &str = "playback:position";
 pub const EVENT_DEVICE_LOST: &str = "audio:device-lost";
+pub const EVENT_FOLDER_CHUNK: &str = "browser:folder-chunk";
 
 /// Versioned envelope wrapping every event sent to the frontend.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -43,6 +44,22 @@ pub struct PositionPayload {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DeviceLostPayload {
     pub previous_device_id: String,
+}
+
+/// Serializable browser entry sent to the frontend.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BrowserEntryData {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+}
+
+/// Payload for [`EVENT_FOLDER_CHUNK`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FolderChunkPayload {
+    pub session_id: String,
+    pub entries: Vec<BrowserEntryData>,
+    pub done: bool,
 }
 
 /// Error returned when event emission fails (e.g. subscriber disconnected).

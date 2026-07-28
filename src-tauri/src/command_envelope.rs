@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use pulseseek_domain::error::{ApplicationError, ErrorContract};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::audio_device_service::{AudioDeviceService, DeviceInfoData};
+use crate::folder_enumeration_service::{ActiveEnumerations, FolderEnumerationService};
 use crate::playback_events::{DeviceLostPayload, PlaybackEventEmitter, EVENT_DEVICE_LOST};
 use crate::playback_service::PlaybackService;
 
@@ -113,6 +116,27 @@ pub struct SelectDeviceRequest {
 #[derive(Debug, Serialize)]
 pub struct SelectDeviceResponse {}
 
+// ── Folder enumeration command request/response types ─────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct StartEnumerationRequest {
+    pub path: String,
+    pub batch_size: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StartEnumerationResponse {
+    pub session_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CancelEnumerationRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CancelEnumerationResponse {}
+
 impl CommandResponse {
     pub fn ok(data: Value) -> Self {
         Self { version: CURRENT_COMMAND_VERSION, ok: true, data: Some(data), error: None }
@@ -127,7 +151,9 @@ pub fn dispatch(
     envelope: CommandEnvelope,
     service: &mut dyn PlaybackService,
     device_service: &mut dyn AudioDeviceService,
-    events: &dyn PlaybackEventEmitter,
+    enum_service: &mut dyn FolderEnumerationService,
+    active: &ActiveEnumerations,
+    events: &Arc<dyn PlaybackEventEmitter>,
 ) -> CommandResponse {
     if envelope.version != CURRENT_COMMAND_VERSION {
         return CommandResponse::err(BoundaryError {
@@ -327,6 +353,40 @@ pub fn dispatch(
                 Err(e) => CommandResponse::err(from_application_error(&e)),
             }
         },
+        "start_enumeration" => {
+            let request: StartEnumerationRequest = match serde_json::from_value(envelope.payload) {
+                Ok(r) => r,
+                Err(e) => {
+                    return CommandResponse::err(BoundaryError {
+                        category: "InvalidInput".to_string(),
+                        message: format!("Invalid start_enumeration command payload: {}", e),
+                        diagnostic_code: "command.payload".to_string(),
+                    });
+                },
+            };
+            let batch_size = request.batch_size.unwrap_or(100) as usize;
+            match enum_service.start_enumeration(&request.path, batch_size, active, events.clone())
+            {
+                Ok(session_id) => CommandResponse::ok(
+                    serde_json::to_value(StartEnumerationResponse { session_id }).unwrap(),
+                ),
+                Err(e) => CommandResponse::err(from_application_error(&e)),
+            }
+        },
+        "cancel_enumeration" => {
+            let request: CancelEnumerationRequest = match serde_json::from_value(envelope.payload) {
+                Ok(r) => r,
+                Err(e) => {
+                    return CommandResponse::err(BoundaryError {
+                        category: "InvalidInput".to_string(),
+                        message: format!("Invalid cancel_enumeration command payload: {}", e),
+                        diagnostic_code: "command.payload".to_string(),
+                    });
+                },
+            };
+            active.cancel(&request.session_id);
+            CommandResponse::ok(serde_json::to_value(CancelEnumerationResponse {}).unwrap())
+        },
         _ => CommandResponse::err(BoundaryError {
             category: "Unsupported".to_string(),
             message: format!("Unknown command: {}", envelope.command),
@@ -353,11 +413,14 @@ pub fn invoke_command(
     envelope: CommandEnvelope,
     state: tauri::State<'_, std::sync::Mutex<Box<dyn PlaybackService>>>,
     device_state: tauri::State<'_, std::sync::Mutex<Box<dyn AudioDeviceService>>>,
-    events: tauri::State<'_, Box<dyn PlaybackEventEmitter>>,
+    enum_state: tauri::State<'_, std::sync::Mutex<Box<dyn FolderEnumerationService>>>,
+    active: tauri::State<'_, ActiveEnumerations>,
+    events: tauri::State<'_, Arc<dyn PlaybackEventEmitter>>,
 ) -> CommandResponse {
     let mut service = state.lock().expect("playback service lock poisoned");
     let mut device_service = device_state.lock().expect("audio device service lock poisoned");
-    dispatch(envelope, &mut **service, &mut **device_service, &**events)
+    let mut enum_service = enum_state.lock().expect("enumeration service lock poisoned");
+    dispatch(envelope, &mut **service, &mut **device_service, &mut **enum_service, &active, &events)
 }
 
 #[cfg(test)]
@@ -366,15 +429,30 @@ mod tests {
 
     use super::*;
     use crate::audio_device_service::FakeAudioDeviceService;
+    use crate::folder_enumeration_service::{ActiveEnumerations, FakeFolderEnumerationService};
     use crate::playback_events::{FakeEventEmitter, NoopEventEmitter};
     use crate::playback_service::FakePlaybackService;
 
-    fn noop_events() -> NoopEventEmitter {
-        NoopEventEmitter
+    fn noop_events() -> Arc<dyn PlaybackEventEmitter> {
+        Arc::new(NoopEventEmitter)
+    }
+
+    fn fake_events() -> (Arc<FakeEventEmitter>, Arc<dyn PlaybackEventEmitter>) {
+        let inner = Arc::new(FakeEventEmitter::new());
+        let erased = inner.clone() as Arc<dyn PlaybackEventEmitter>;
+        (inner, erased)
     }
 
     fn noop_device() -> FakeAudioDeviceService {
         FakeAudioDeviceService::new()
+    }
+
+    fn noop_enum() -> FakeFolderEnumerationService {
+        FakeFolderEnumerationService::new()
+    }
+
+    fn noop_active() -> ActiveEnumerations {
+        ActiveEnumerations::new()
     }
 
     fn health_envelope() -> CommandEnvelope {
@@ -391,8 +469,14 @@ mod tests {
     fn health_command_round_trip() {
         let mut service = FakePlaybackService::new();
 
-        let response =
-            dispatch(health_envelope(), &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            health_envelope(),
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(response.ok);
         let data = response.data.expect("should have data");
@@ -411,7 +495,14 @@ mod tests {
                 payload: serde_json::json!({}),
             };
 
-            let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+            let response = dispatch(
+                envelope,
+                &mut service,
+                &mut noop_device(),
+                &mut noop_enum(),
+                &noop_active(),
+                &noop_events(),
+            );
 
             assert!(!response.ok);
             let error = response.error.expect("should have error");
@@ -431,7 +522,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -450,7 +548,14 @@ mod tests {
             payload: serde_json::json!("not_an_object"),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -491,7 +596,14 @@ mod tests {
             payload: serde_json::json!({"path": "/music/track.wav"}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(response.ok, "play should succeed");
         assert!(response.error.is_none());
@@ -509,7 +621,14 @@ mod tests {
             payload: serde_json::json!("not_an_object"),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -528,7 +647,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -548,7 +674,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(response.ok);
         assert_eq!(service.pause_call_count, 1);
@@ -564,7 +697,14 @@ mod tests {
             payload: serde_json::json!("invalid"),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         assert_eq!(response.error.unwrap().category, "InvalidInput");
@@ -583,7 +723,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(response.ok);
         assert_eq!(service.resume_call_count, 1);
@@ -599,7 +746,14 @@ mod tests {
             payload: serde_json::json!("invalid"),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         assert_eq!(service.resume_call_count, 0);
@@ -617,7 +771,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(response.ok);
         assert_eq!(service.stop_call_count, 1);
@@ -633,7 +794,14 @@ mod tests {
             payload: serde_json::json!("invalid"),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         assert_eq!(service.stop_call_count, 0);
@@ -652,7 +820,14 @@ mod tests {
             payload: serde_json::json!({"position_ms": 45000}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(response.ok);
         assert_eq!(service.seek_call_count, 1);
@@ -671,7 +846,14 @@ mod tests {
             payload: serde_json::json!("not_an_object"),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         assert_eq!(service.seek_call_count, 0);
@@ -687,7 +869,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         assert_eq!(service.seek_call_count, 0);
@@ -705,7 +894,14 @@ mod tests {
             payload: serde_json::json!({"gain": 0.75, "muted": false}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(response.ok);
         assert_eq!(service.set_volume_call_count, 1);
@@ -723,7 +919,14 @@ mod tests {
             payload: serde_json::json!({"gain": 0.0, "muted": true}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(response.ok);
         assert_eq!(service.set_volume_call_count, 1);
@@ -740,7 +943,14 @@ mod tests {
             payload: serde_json::json!("not_an_object"),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         assert_eq!(service.set_volume_call_count, 0);
@@ -756,7 +966,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         assert_eq!(service.set_volume_call_count, 0);
@@ -775,7 +992,14 @@ mod tests {
             payload: serde_json::json!({"path": "/music/track.wav"}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -794,7 +1018,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -812,7 +1043,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -830,7 +1068,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -848,7 +1093,14 @@ mod tests {
             payload: serde_json::json!({"position_ms": 99999}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -866,7 +1118,14 @@ mod tests {
             payload: serde_json::json!({"gain": 1.0, "muted": false}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut noop_device(), &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         let error = response.error.expect("should have error");
@@ -878,7 +1137,7 @@ mod tests {
     #[test]
     fn play_emits_playing_state_event() {
         let mut service = FakePlaybackService::new();
-        let events = FakeEventEmitter::new();
+        let (events_inner, events) = fake_events();
 
         let envelope = CommandEnvelope {
             version: CURRENT_COMMAND_VERSION,
@@ -886,9 +1145,16 @@ mod tests {
             payload: serde_json::json!({"path": "/music/track.wav"}),
         };
 
-        let _response = dispatch(envelope, &mut service, &mut noop_device(), &events);
+        let _response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &events,
+        );
 
-        let recorded = events.recorded_events();
+        let recorded = events_inner.recorded_events();
         assert_eq!(recorded.len(), 1, "play should emit one event");
         assert_eq!(recorded[0].event, "playback:state-changed");
         let payload: serde_json::Value =
@@ -900,7 +1166,7 @@ mod tests {
     fn play_emits_event_only_on_success() {
         let mut service = FakePlaybackService::new();
         service.fail_with = Some(ErrorCategory::NotFound);
-        let events = FakeEventEmitter::new();
+        let (events_inner, events) = fake_events();
 
         let envelope = CommandEnvelope {
             version: CURRENT_COMMAND_VERSION,
@@ -908,15 +1174,22 @@ mod tests {
             payload: serde_json::json!({"path": "/music/missing.wav"}),
         };
 
-        let _response = dispatch(envelope, &mut service, &mut noop_device(), &events);
+        let _response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &events,
+        );
 
-        assert_eq!(events.event_count(), 0, "no event on error");
+        assert_eq!(events_inner.event_count(), 0, "no event on error");
     }
 
     #[test]
     fn pause_emits_paused_state_event() {
         let mut service = FakePlaybackService::new();
-        let events = FakeEventEmitter::new();
+        let (events_inner, events) = fake_events();
 
         let envelope = CommandEnvelope {
             version: CURRENT_COMMAND_VERSION,
@@ -924,9 +1197,16 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let _response = dispatch(envelope, &mut service, &mut noop_device(), &events);
+        let _response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &events,
+        );
 
-        let recorded = events.recorded_events();
+        let recorded = events_inner.recorded_events();
         assert_eq!(recorded.len(), 1);
         assert_eq!(recorded[0].event, "playback:state-changed");
         let payload: serde_json::Value =
@@ -937,7 +1217,7 @@ mod tests {
     #[test]
     fn resume_emits_playing_state_event() {
         let mut service = FakePlaybackService::new();
-        let events = FakeEventEmitter::new();
+        let (events_inner, events) = fake_events();
 
         let envelope = CommandEnvelope {
             version: CURRENT_COMMAND_VERSION,
@@ -945,9 +1225,16 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let _response = dispatch(envelope, &mut service, &mut noop_device(), &events);
+        let _response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &events,
+        );
 
-        let recorded = events.recorded_events();
+        let recorded = events_inner.recorded_events();
         assert_eq!(recorded.len(), 1);
         let payload: serde_json::Value =
             serde_json::from_value(recorded[0].payload.clone()).unwrap();
@@ -957,7 +1244,7 @@ mod tests {
     #[test]
     fn stop_emits_stopped_state_event() {
         let mut service = FakePlaybackService::new();
-        let events = FakeEventEmitter::new();
+        let (events_inner, events) = fake_events();
 
         let envelope = CommandEnvelope {
             version: CURRENT_COMMAND_VERSION,
@@ -965,9 +1252,16 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let _response = dispatch(envelope, &mut service, &mut noop_device(), &events);
+        let _response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &events,
+        );
 
-        let recorded = events.recorded_events();
+        let recorded = events_inner.recorded_events();
         assert_eq!(recorded.len(), 1);
         let payload: serde_json::Value =
             serde_json::from_value(recorded[0].payload.clone()).unwrap();
@@ -977,7 +1271,7 @@ mod tests {
     #[test]
     fn seek_does_not_emit_state_event() {
         let mut service = FakePlaybackService::new();
-        let events = FakeEventEmitter::new();
+        let (events_inner, events) = fake_events();
 
         let envelope = CommandEnvelope {
             version: CURRENT_COMMAND_VERSION,
@@ -985,15 +1279,22 @@ mod tests {
             payload: serde_json::json!({"position_ms": 45000}),
         };
 
-        let _response = dispatch(envelope, &mut service, &mut noop_device(), &events);
+        let _response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &events,
+        );
 
-        assert_eq!(events.event_count(), 0, "seek should not emit state event");
+        assert_eq!(events_inner.event_count(), 0, "seek should not emit state event");
     }
 
     #[test]
     fn volume_does_not_emit_state_event() {
         let mut service = FakePlaybackService::new();
-        let events = FakeEventEmitter::new();
+        let (events_inner, events) = fake_events();
 
         let envelope = CommandEnvelope {
             version: CURRENT_COMMAND_VERSION,
@@ -1001,15 +1302,22 @@ mod tests {
             payload: serde_json::json!({"gain": 0.5, "muted": false}),
         };
 
-        let _response = dispatch(envelope, &mut service, &mut noop_device(), &events);
+        let _response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &events,
+        );
 
-        assert_eq!(events.event_count(), 0, "volume should not emit state event");
+        assert_eq!(events_inner.event_count(), 0, "volume should not emit state event");
     }
 
     #[test]
     fn state_event_has_versioned_envelope() {
         let mut service = FakePlaybackService::new();
-        let events = FakeEventEmitter::new();
+        let (events_inner, events) = fake_events();
 
         let envelope = CommandEnvelope {
             version: CURRENT_COMMAND_VERSION,
@@ -1017,9 +1325,16 @@ mod tests {
             payload: serde_json::json!({"path": "/music/track.wav"}),
         };
 
-        let _response = dispatch(envelope, &mut service, &mut noop_device(), &events);
+        let _response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &events,
+        );
 
-        let recorded = events.recorded_events();
+        let recorded = events_inner.recorded_events();
         assert_eq!(recorded[0].version, crate::playback_events::CURRENT_EVENT_VERSION);
     }
 
@@ -1036,7 +1351,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut device_service, &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(response.ok);
         let data = response.data.expect("should have data");
@@ -1057,7 +1379,14 @@ mod tests {
             payload: serde_json::json!("not_an_object"),
         };
 
-        let response = dispatch(envelope, &mut service, &mut device_service, &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         assert_eq!(response.error.unwrap().category, "InvalidInput");
@@ -1075,7 +1404,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut device_service, &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         let error = response.error.unwrap();
@@ -1095,7 +1431,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut device_service, &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(response.ok);
         let data = response.data.expect("should have data");
@@ -1113,7 +1456,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut device_service, &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(response.ok);
         let data = response.data.expect("should have data");
@@ -1133,7 +1483,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut device_service, &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         assert_eq!(response.error.unwrap().category, "Unavailable");
@@ -1150,7 +1507,14 @@ mod tests {
             payload: serde_json::json!({"device_id": "hdmi"}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut device_service, &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(response.ok);
         assert_eq!(device_service.select_call_count, 1);
@@ -1169,7 +1533,14 @@ mod tests {
             payload: serde_json::json!("not_an_object"),
         };
 
-        let response = dispatch(envelope, &mut service, &mut device_service, &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         assert_eq!(device_service.select_call_count, 0);
@@ -1186,7 +1557,14 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut device_service, &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         assert_eq!(device_service.select_call_count, 0);
@@ -1204,7 +1582,14 @@ mod tests {
             payload: serde_json::json!({"device_id": "hdmi"}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut device_service, &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         assert_eq!(response.error.unwrap().category, "Unavailable");
@@ -1215,7 +1600,7 @@ mod tests {
         let mut service = FakePlaybackService::new();
         let mut device_service = FakeAudioDeviceService::new();
         device_service.device_lost = true;
-        let events = FakeEventEmitter::new();
+        let (events_inner, events) = fake_events();
 
         let envelope = CommandEnvelope {
             version: CURRENT_COMMAND_VERSION,
@@ -1223,9 +1608,16 @@ mod tests {
             payload: serde_json::json!({"device_id": "hdmi"}),
         };
 
-        let _response = dispatch(envelope, &mut service, &mut device_service, &events);
+        let _response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut noop_enum(),
+            &noop_active(),
+            &events,
+        );
 
-        let recorded = events.recorded_events();
+        let recorded = events_inner.recorded_events();
         assert_eq!(recorded.len(), 1, "should emit device-lost event");
         assert_eq!(recorded[0].event, "audio:device-lost");
         let payload: serde_json::Value =
@@ -1238,7 +1630,7 @@ mod tests {
         let mut service = FakePlaybackService::new();
         let mut device_service = FakeAudioDeviceService::new();
         device_service.device_lost = false;
-        let events = FakeEventEmitter::new();
+        let (events_inner, events) = fake_events();
 
         let envelope = CommandEnvelope {
             version: CURRENT_COMMAND_VERSION,
@@ -1246,9 +1638,16 @@ mod tests {
             payload: serde_json::json!({"device_id": "hdmi"}),
         };
 
-        let _response = dispatch(envelope, &mut service, &mut device_service, &events);
+        let _response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut noop_enum(),
+            &noop_active(),
+            &events,
+        );
 
-        assert_eq!(events.event_count(), 0, "should not emit event when device not lost");
+        assert_eq!(events_inner.event_count(), 0, "should not emit event when device not lost");
     }
 
     #[test]
@@ -1262,9 +1661,229 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        let response = dispatch(envelope, &mut service, &mut device_service, &noop_events());
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
 
         assert!(!response.ok);
         assert_eq!(response.error.unwrap().category, "Unsupported");
+    }
+
+    // ── Enumeration command tests ─────────────────────────────────────
+
+    #[test]
+    fn start_enumeration_returns_session_id() {
+        let mut service = FakePlaybackService::new();
+        let mut device_service = FakeAudioDeviceService::new();
+        let mut enum_service = FakeFolderEnumerationService::new();
+        let active = ActiveEnumerations::new();
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "start_enumeration".to_string(),
+            payload: serde_json::json!({"path": "/music", "batch_size": 50}),
+        };
+
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut enum_service,
+            &active,
+            &noop_events(),
+        );
+
+        assert!(response.ok);
+        assert_eq!(enum_service.start_call_count, 1);
+        assert_eq!(enum_service.last_path, Some("/music".to_string()));
+        let data = response.data.expect("should have data");
+        assert_eq!(data["session_id"], "test-session-001");
+    }
+
+    #[test]
+    fn start_enumeration_defaults_batch_size() {
+        let mut service = FakePlaybackService::new();
+        let mut device_service = FakeAudioDeviceService::new();
+        let mut enum_service = FakeFolderEnumerationService::new();
+        let active = ActiveEnumerations::new();
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "start_enumeration".to_string(),
+            payload: serde_json::json!({"path": "/music"}),
+        };
+
+        let _response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut enum_service,
+            &active,
+            &noop_events(),
+        );
+
+        assert_eq!(enum_service.last_batch_size, Some(100), "default batch size should be 100");
+    }
+
+    #[test]
+    fn start_enumeration_invalid_payload_rejected() {
+        let mut service = FakePlaybackService::new();
+        let mut device_service = FakeAudioDeviceService::new();
+        let mut enum_service = FakeFolderEnumerationService::new();
+        let active = ActiveEnumerations::new();
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "start_enumeration".to_string(),
+            payload: serde_json::json!("not_an_object"),
+        };
+
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut enum_service,
+            &active,
+            &noop_events(),
+        );
+
+        assert!(!response.ok);
+        assert_eq!(enum_service.start_call_count, 0);
+    }
+
+    #[test]
+    fn start_enumeration_missing_path_rejected() {
+        let mut service = FakePlaybackService::new();
+        let mut device_service = FakeAudioDeviceService::new();
+        let mut enum_service = FakeFolderEnumerationService::new();
+        let active = ActiveEnumerations::new();
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "start_enumeration".to_string(),
+            payload: serde_json::json!({}),
+        };
+
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut enum_service,
+            &active,
+            &noop_events(),
+        );
+
+        assert!(!response.ok);
+        assert_eq!(enum_service.start_call_count, 0);
+    }
+
+    #[test]
+    fn start_enumeration_service_error_maps_to_boundary() {
+        let mut service = FakePlaybackService::new();
+        let mut device_service = FakeAudioDeviceService::new();
+        let mut enum_service = FakeFolderEnumerationService::new();
+        enum_service.fail_start = true;
+        let active = ActiveEnumerations::new();
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "start_enumeration".to_string(),
+            payload: serde_json::json!({"path": "/music"}),
+        };
+
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut enum_service,
+            &active,
+            &noop_events(),
+        );
+
+        assert!(!response.ok);
+        assert_eq!(response.error.unwrap().category, "Unavailable");
+    }
+
+    #[test]
+    fn cancel_enumeration_cancels_session() {
+        let mut service = FakePlaybackService::new();
+        let mut device_service = FakeAudioDeviceService::new();
+        let mut enum_service = FakeFolderEnumerationService::new();
+        let active = ActiveEnumerations::new();
+        let flag = active.register("session-1");
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "cancel_enumeration".to_string(),
+            payload: serde_json::json!({"session_id": "session-1"}),
+        };
+
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut enum_service,
+            &active,
+            &noop_events(),
+        );
+
+        assert!(response.ok);
+        assert!(flag.load(std::sync::atomic::Ordering::Acquire), "session should be cancelled");
+    }
+
+    #[test]
+    fn cancel_enumeration_unknown_session_idempotent() {
+        let mut service = FakePlaybackService::new();
+        let mut device_service = FakeAudioDeviceService::new();
+        let mut enum_service = FakeFolderEnumerationService::new();
+        let active = ActiveEnumerations::new();
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "cancel_enumeration".to_string(),
+            payload: serde_json::json!({"session_id": "nonexistent"}),
+        };
+
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut enum_service,
+            &active,
+            &noop_events(),
+        );
+
+        assert!(response.ok, "cancelling unknown session should succeed");
+    }
+
+    #[test]
+    fn cancel_enumeration_invalid_payload_rejected() {
+        let mut service = FakePlaybackService::new();
+        let mut device_service = FakeAudioDeviceService::new();
+        let mut enum_service = FakeFolderEnumerationService::new();
+        let active = ActiveEnumerations::new();
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "cancel_enumeration".to_string(),
+            payload: serde_json::json!("not_an_object"),
+        };
+
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut enum_service,
+            &active,
+            &noop_events(),
+        );
+
+        assert!(!response.ok);
+        assert_eq!(response.error.unwrap().category, "InvalidInput");
     }
 }

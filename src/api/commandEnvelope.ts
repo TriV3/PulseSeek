@@ -187,3 +187,39 @@ export async function selectDevice(device_id: string): Promise<void> {
     device_id,
   } satisfies SelectDeviceRequest);
 }
+
+// ── Typed folder enumeration command wrappers ─────────────────────────
+
+export interface StartEnumerationRequest {
+  path: string;
+  batch_size?: number;
+}
+
+export interface StartEnumerationResponse {
+  session_id: string;
+}
+
+export interface CancelEnumerationRequest {
+  session_id: string;
+}
+
+export type CancelEnumerationResponse = Record<string, never>;
+
+/** Starts enumerating a folder. Results arrive via onFolderChunk events. */
+export async function startEnumeration(
+  path: string,
+  batch_size?: number,
+): Promise<string> {
+  const response = await invokeCommand<StartEnumerationResponse>(
+    "start_enumeration",
+    { path, batch_size } satisfies StartEnumerationRequest,
+  );
+  return response.session_id;
+}
+
+/** Cancels a running folder enumeration. */
+export async function cancelEnumeration(session_id: string): Promise<void> {
+  await invokeCommand<CancelEnumerationResponse>("cancel_enumeration", {
+    session_id,
+  } satisfies CancelEnumerationRequest);
+}
