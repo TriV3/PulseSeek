@@ -10,6 +10,7 @@ pub const CURRENT_EVENT_VERSION: u32 = 1;
 /// Event names sent to the frontend.
 pub const EVENT_STATE_CHANGED: &str = "playback:state-changed";
 pub const EVENT_POSITION: &str = "playback:position";
+pub const EVENT_DEVICE_LOST: &str = "audio:device-lost";
 
 /// Versioned envelope wrapping every event sent to the frontend.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -38,6 +39,12 @@ pub struct PositionPayload {
     pub duration_ms: Option<u64>,
 }
 
+/// Payload for [`EVENT_DEVICE_LOST`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DeviceLostPayload {
+    pub previous_device_id: String,
+}
+
 /// Error returned when event emission fails (e.g. subscriber disconnected).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EmitError;
@@ -53,6 +60,9 @@ pub trait PlaybackEventEmitter: Send + Sync {
     /// disconnected.
     fn emit_position(&self, position_ms: u64, duration_ms: Option<u64>) -> Result<(), EmitError>;
 
+    /// Emits a raw event with the given name and JSON payload.
+    fn emit(&self, event: &str, payload: Value) -> Result<(), EmitError>;
+
     /// Returns `true` when the frontend subscriber is no longer connected.
     fn is_disconnected(&self) -> bool;
 }
@@ -67,6 +77,9 @@ impl PlaybackEventEmitter for NoopEventEmitter {
         Ok(())
     }
     fn emit_position(&self, _position_ms: u64, _duration_ms: Option<u64>) -> Result<(), EmitError> {
+        Ok(())
+    }
+    fn emit(&self, _event: &str, _payload: Value) -> Result<(), EmitError> {
         Ok(())
     }
     fn is_disconnected(&self) -> bool {
@@ -131,6 +144,15 @@ impl PlaybackEventEmitter for FakeEventEmitter {
         Ok(())
     }
 
+    fn emit(&self, event: &str, payload: Value) -> Result<(), EmitError> {
+        if self.disconnected.load(Ordering::Acquire) {
+            return Err(EmitError);
+        }
+        let envelope = EventEnvelope::new(event, payload);
+        self.events.lock().expect("events mutex poisoned").push(envelope);
+        Ok(())
+    }
+
     fn is_disconnected(&self) -> bool {
         self.disconnected.load(Ordering::Acquire)
     }
@@ -179,12 +201,15 @@ impl PlaybackEventEmitter for ThrottledEventEmitter {
         let now = Instant::now();
         if now.duration_since(*last) < self.min_interval {
             self.dropped_count.fetch_add(1, Ordering::Release);
-            // Return Ok — throttling is silent, not an error.
             return Ok(());
         }
         *last = now;
-        drop(last); // release lock before inner call
+        drop(last);
         self.inner.emit_position(position_ms, duration_ms)
+    }
+
+    fn emit(&self, event: &str, payload: Value) -> Result<(), EmitError> {
+        self.inner.emit(event, payload)
     }
 
     fn is_disconnected(&self) -> bool {

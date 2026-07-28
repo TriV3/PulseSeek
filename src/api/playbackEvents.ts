@@ -20,10 +20,15 @@ export interface PositionPayload {
   duration_ms: number | null;
 }
 
+export interface DeviceLostPayload {
+  previous_device_id: string;
+}
+
 // ── Event names ───────────────────────────────────────────────────────
 
 export const EVENT_STATE_CHANGED = "playback:state-changed";
 export const EVENT_POSITION = "playback:position";
+export const EVENT_DEVICE_LOST = "audio:device-lost";
 
 // ── Typed event listeners ─────────────────────────────────────────────
 
@@ -49,6 +54,19 @@ export function onPosition(
   handler: (payload: PositionPayload) => void,
 ): Promise<UnlistenFn> {
   return listen<PositionPayload>(EVENT_POSITION, (event) => {
+    handler(event.payload);
+  });
+}
+
+/**
+ * Listens for audio device loss events.
+ *
+ * Returns an `unlisten` function to stop listening.
+ */
+export function onDeviceLost(
+  handler: (payload: DeviceLostPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<DeviceLostPayload>(EVENT_DEVICE_LOST, (event) => {
     handler(event.payload);
   });
 }
