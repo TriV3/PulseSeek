@@ -2655,6 +2655,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pulseseek-browser-fs"
+version = "0.1.0"
+dependencies = [
+ "pulseseek-domain",
+ "tempfile",
+]
+
+[[package]]
 name = "pulseseek-decoder-symphonia"
 version = "0.1.0"
 dependencies = [
