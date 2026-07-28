@@ -1,3 +1,4 @@
+pub mod audio_device_service;
 pub mod command_envelope;
 pub mod diagnostics;
 pub mod playback_events;
@@ -12,6 +13,11 @@ pub fn run() {
     let playback_service: std::sync::Mutex<Box<dyn playback_service::PlaybackService>> =
         std::sync::Mutex::new(Box::new(playback_service::FakePlaybackService::new()));
 
+    // Placeholder audio device service — replaced with real implementation
+    // in a later PR.
+    let audio_device_service: std::sync::Mutex<Box<dyn audio_device_service::AudioDeviceService>> =
+        std::sync::Mutex::new(Box::new(audio_device_service::FakeAudioDeviceService::new()));
+
     // Placeholder event emitter — replaced with a Tauri-backed emitter once
     // a real AppHandle is available.
     let event_emitter: Box<dyn playback_events::PlaybackEventEmitter> =
@@ -19,6 +25,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(playback_service)
+        .manage(audio_device_service)
         .manage(event_emitter)
         .invoke_handler(tauri::generate_handler![
             diagnostics::report_error,

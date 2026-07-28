@@ -65,6 +65,27 @@ export interface VolumeRequest {
 
 export type VolumeResponse = Record<string, never>;
 
+// ── Audio device command types ─────────────────────────────────────────
+
+export interface DeviceInfoData {
+  id: string;
+  name: string;
+}
+
+export interface ListDevicesResponse {
+  devices: DeviceInfoData[];
+}
+
+export interface CurrentDeviceResponse {
+  device: DeviceInfoData | null;
+}
+
+export interface SelectDeviceRequest {
+  device_id: string;
+}
+
+export type SelectDeviceResponse = Record<string, never>;
+
 // ── Typed invoke wrapper ──────────────────────────────────────────────
 
 /**
@@ -141,4 +162,28 @@ export async function setVolume(gain: number, muted: boolean): Promise<void> {
     gain,
     muted,
   } satisfies VolumeRequest);
+}
+
+// ── Typed audio device command wrappers ────────────────────────────────
+
+/** Returns all available audio output devices. */
+export async function listDevices(): Promise<DeviceInfoData[]> {
+  const response = await invokeCommand<ListDevicesResponse>("list_devices", {});
+  return response.devices;
+}
+
+/** Returns the currently selected audio output device, or null. */
+export async function currentDevice(): Promise<DeviceInfoData | null> {
+  const response = await invokeCommand<CurrentDeviceResponse>(
+    "current_device",
+    {},
+  );
+  return response.device;
+}
+
+/** Selects an audio output device by its stable identifier. */
+export async function selectDevice(device_id: string): Promise<void> {
+  await invokeCommand<SelectDeviceResponse>("select_device", {
+    device_id,
+  } satisfies SelectDeviceRequest);
 }
