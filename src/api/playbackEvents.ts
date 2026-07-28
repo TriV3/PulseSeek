@@ -24,11 +24,24 @@ export interface DeviceLostPayload {
   previous_device_id: string;
 }
 
+export interface BrowserEntryData {
+  id: string;
+  name: string;
+  kind: "folder" | "playable" | "unsupported" | "inaccessible";
+}
+
+export interface FolderChunkPayload {
+  session_id: string;
+  entries: BrowserEntryData[];
+  done: boolean;
+}
+
 // ── Event names ───────────────────────────────────────────────────────
 
 export const EVENT_STATE_CHANGED = "playback:state-changed";
 export const EVENT_POSITION = "playback:position";
 export const EVENT_DEVICE_LOST = "audio:device-lost";
+export const EVENT_FOLDER_CHUNK = "browser:folder-chunk";
 
 // ── Typed event listeners ─────────────────────────────────────────────
 
@@ -67,6 +80,19 @@ export function onDeviceLost(
   handler: (payload: DeviceLostPayload) => void,
 ): Promise<UnlistenFn> {
   return listen<DeviceLostPayload>(EVENT_DEVICE_LOST, (event) => {
+    handler(event.payload);
+  });
+}
+
+/**
+ * Listens for batched folder enumeration results.
+ *
+ * Returns an `unlisten` function to stop listening.
+ */
+export function onFolderChunk(
+  handler: (payload: FolderChunkPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<FolderChunkPayload>(EVENT_FOLDER_CHUNK, (event) => {
     handler(event.payload);
   });
 }

@@ -1,8 +1,13 @@
 pub mod audio_device_service;
 pub mod command_envelope;
 pub mod diagnostics;
+pub mod folder_enumeration_service;
 pub mod playback_events;
 pub mod playback_service;
+
+use std::sync::Arc;
+
+use diagnostics::DiagnosticsConfig;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -20,12 +25,24 @@ pub fn run() {
 
     // Placeholder event emitter — replaced with a Tauri-backed emitter once
     // a real AppHandle is available.
-    let event_emitter: Box<dyn playback_events::PlaybackEventEmitter> =
-        Box::new(playback_events::NoopEventEmitter);
+    let event_emitter: Arc<dyn playback_events::PlaybackEventEmitter> =
+        Arc::new(playback_events::NoopEventEmitter);
+
+    // Placeholder folder enumeration service.
+    let enum_service: std::sync::Mutex<
+        Box<dyn folder_enumeration_service::FolderEnumerationService>,
+    > = std::sync::Mutex::new(Box::new(
+        folder_enumeration_service::FakeFolderEnumerationService::new(),
+    ));
+
+    let active_enumerations: folder_enumeration_service::ActiveEnumerations =
+        folder_enumeration_service::ActiveEnumerations::new();
 
     tauri::Builder::default()
         .manage(playback_service)
         .manage(audio_device_service)
+        .manage(enum_service)
+        .manage(active_enumerations)
         .manage(event_emitter)
         .invoke_handler(tauri::generate_handler![
             diagnostics::report_error,
@@ -34,5 +51,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-
-use diagnostics::DiagnosticsConfig;

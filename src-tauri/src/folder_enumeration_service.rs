@@ -1,0 +1,259 @@
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContext, ErrorCategory};
+
+use crate::playback_events::{
+    BrowserEntryData, FolderChunkPayload, PlaybackEventEmitter, EVENT_FOLDER_CHUNK,
+};
+
+/// Manages active folder enumeration sessions and their cancellation flags.
+pub struct ActiveEnumerations {
+    pub sessions: Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+impl ActiveEnumerations {
+    pub fn new() -> Self {
+        Self { sessions: Mutex::new(HashMap::new()) }
+    }
+
+    /// Registers a new session with a cancellation flag.
+    pub fn register(&self, session_id: &str) -> Arc<AtomicBool> {
+        let flag = Arc::new(AtomicBool::new(false));
+        self.sessions
+            .lock()
+            .expect("sessions mutex poisoned")
+            .insert(session_id.to_string(), flag.clone());
+        flag
+    }
+
+    /// Sets the cancellation flag for a session. No-op if session unknown.
+    pub fn cancel(&self, session_id: &str) {
+        if let Some(flag) = self.sessions.lock().expect("sessions mutex poisoned").get(session_id) {
+            flag.store(true, Ordering::Release);
+        }
+    }
+
+    /// Removes a session after enumeration completes.
+    pub fn remove(&self, session_id: &str) {
+        self.sessions.lock().expect("sessions mutex poisoned").remove(session_id);
+    }
+}
+
+impl Default for ActiveEnumerations {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Application service for starting and cancelling folder enumeration.
+///
+/// The real implementation spawns a background thread that reads the folder
+/// and emits chunked events. The fake implementation records calls for
+/// test assertions.
+pub trait FolderEnumerationService: Send {
+    /// Starts enumerating a folder.
+    ///
+    /// Returns a session_id that can be used to cancel the enumeration.
+    fn start_enumeration(
+        &mut self,
+        path: &str,
+        batch_size: usize,
+        active: &ActiveEnumerations,
+        events: Arc<dyn PlaybackEventEmitter>,
+    ) -> Result<String, ApplicationError>;
+}
+
+/// Fake implementation of [`FolderEnumerationService`] for tests.
+pub struct FakeFolderEnumerationService {
+    pub start_call_count: u64,
+    pub last_path: Option<String>,
+    pub last_batch_size: Option<usize>,
+    pub fail_start: bool,
+    pub next_session_id: String,
+}
+
+impl FakeFolderEnumerationService {
+    pub fn new() -> Self {
+        Self {
+            start_call_count: 0,
+            last_path: None,
+            last_batch_size: None,
+            fail_start: false,
+            next_session_id: "test-session-001".to_string(),
+        }
+    }
+}
+
+impl Default for FakeFolderEnumerationService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FolderEnumerationService for FakeFolderEnumerationService {
+    fn start_enumeration(
+        &mut self,
+        path: &str,
+        batch_size: usize,
+        _active: &ActiveEnumerations,
+        _events: Arc<dyn PlaybackEventEmitter>,
+    ) -> Result<String, ApplicationError> {
+        self.start_call_count += 1;
+        self.last_path = Some(path.to_string());
+        self.last_batch_size = Some(batch_size);
+        if self.fail_start {
+            return Err(ApplicationError::new(
+                ErrorCategory::Unavailable,
+                DiagnosticContext::new(DiagnosticCode::BrowserRead),
+                std::io::Error::other("fake enumeration error"),
+            ));
+        }
+        Ok(self.next_session_id.clone())
+    }
+}
+
+/// Converts a domain `BrowserEntry` to a serializable `BrowserEntryData`.
+pub fn browser_entry_to_data(
+    entry: &pulseseek_domain::browser::entry::BrowserEntry,
+) -> BrowserEntryData {
+    let kind = match entry {
+        pulseseek_domain::browser::entry::BrowserEntry::Folder(_) => "folder",
+        pulseseek_domain::browser::entry::BrowserEntry::PlayableFile(_) => "playable",
+        pulseseek_domain::browser::entry::BrowserEntry::UnsupportedFile(_) => "unsupported",
+        pulseseek_domain::browser::entry::BrowserEntry::Inaccessible(_) => "inaccessible",
+    };
+    BrowserEntryData {
+        id: entry.id().as_str().to_string(),
+        name: entry.name().to_string(),
+        kind: kind.to_string(),
+    }
+}
+
+/// Emits a folder chunk event for a batch of entries.
+pub fn emit_folder_chunk(
+    events: &dyn PlaybackEventEmitter,
+    session_id: &str,
+    entries: &[pulseseek_domain::browser::entry::BrowserEntry],
+    done: bool,
+) {
+    let data: Vec<BrowserEntryData> = entries.iter().map(browser_entry_to_data).collect();
+    let payload = FolderChunkPayload { session_id: session_id.to_string(), entries: data, done };
+    let _ = events.emit(
+        EVENT_FOLDER_CHUNK,
+        serde_json::to_value(payload).expect("folder chunk serialization"),
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::playback_events::FakeEventEmitter;
+    use pulseseek_domain::error::ErrorContract;
+
+    #[test]
+    fn active_enumerations_register_and_cancel() {
+        let active = ActiveEnumerations::new();
+        let flag = active.register("session-1");
+        assert!(!flag.load(Ordering::Acquire), "new session should not be cancelled");
+        active.cancel("session-1");
+        assert!(flag.load(Ordering::Acquire), "session should be cancelled");
+    }
+
+    #[test]
+    fn active_enumerations_remove_unknown_idempotent() {
+        let active = ActiveEnumerations::new();
+        active.remove("nonexistent"); // should not panic
+    }
+
+    #[test]
+    fn active_enumerations_cancel_unknown_idempotent() {
+        let active = ActiveEnumerations::new();
+        active.cancel("nonexistent"); // should not panic
+    }
+
+    #[test]
+    fn fake_service_starts_enumeration() {
+        let mut service = FakeFolderEnumerationService::new();
+        let active = ActiveEnumerations::new();
+        let events = Arc::new(FakeEventEmitter::new()) as Arc<dyn PlaybackEventEmitter>;
+
+        let session_id = service.start_enumeration("/music", 50, &active, events).unwrap();
+
+        assert_eq!(service.start_call_count, 1);
+        assert_eq!(service.last_path, Some("/music".to_string()));
+        assert_eq!(service.last_batch_size, Some(50));
+        assert_eq!(session_id, "test-session-001");
+    }
+
+    #[test]
+    fn fake_service_fails_with_error() {
+        let mut service = FakeFolderEnumerationService::new();
+        service.fail_start = true;
+        let active = ActiveEnumerations::new();
+        let events = Arc::new(FakeEventEmitter::new()) as Arc<dyn PlaybackEventEmitter>;
+
+        let result = service.start_enumeration("/music", 50, &active, events);
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().user_descriptor().category(), ErrorCategory::Unavailable);
+    }
+
+    #[test]
+    fn browser_entry_to_data_converts_folder() {
+        use pulseseek_domain::browser::entry::{EntryId, FolderEntry};
+        let entry = pulseseek_domain::browser::entry::BrowserEntry::Folder(FolderEntry {
+            id: EntryId::new("/music/beats"),
+            name: "beats".to_string(),
+        });
+        let data = browser_entry_to_data(&entry);
+        assert_eq!(data.id, "/music/beats");
+        assert_eq!(data.name, "beats");
+        assert_eq!(data.kind, "folder");
+    }
+
+    #[test]
+    fn browser_entry_to_data_converts_playable() {
+        use pulseseek_domain::browser::entry::{EntryId, PlayableFileEntry};
+        let entry =
+            pulseseek_domain::browser::entry::BrowserEntry::PlayableFile(PlayableFileEntry {
+                id: EntryId::new("/music/kick.wav"),
+                name: "kick.wav".to_string(),
+            });
+        let data = browser_entry_to_data(&entry);
+        assert_eq!(data.kind, "playable");
+    }
+
+    #[test]
+    fn emit_folder_chunk_emits_correct_event() {
+        use pulseseek_domain::browser::entry::{EntryId, PlayableFileEntry};
+        let entry =
+            pulseseek_domain::browser::entry::BrowserEntry::PlayableFile(PlayableFileEntry {
+                id: EntryId::new("/a.wav"),
+                name: "a.wav".to_string(),
+            });
+        let events = Arc::new(FakeEventEmitter::new());
+
+        emit_folder_chunk(&*events, "sid-1", &[entry], false);
+
+        let recorded = events.recorded_events();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].event, EVENT_FOLDER_CHUNK);
+        let payload: FolderChunkPayload =
+            serde_json::from_value(recorded[0].payload.clone()).unwrap();
+        assert_eq!(payload.session_id, "sid-1");
+        assert_eq!(payload.entries.len(), 1);
+        assert!(!payload.done);
+    }
+
+    #[test]
+    fn emit_folder_chunk_done_flag() {
+        let events = Arc::new(FakeEventEmitter::new());
+        emit_folder_chunk(&*events, "sid-1", &[], true);
+        let recorded = events.recorded_events();
+        let payload: FolderChunkPayload =
+            serde_json::from_value(recorded[0].payload.clone()).unwrap();
+        assert!(payload.done);
+    }
+}
