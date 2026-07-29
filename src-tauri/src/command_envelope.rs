@@ -122,6 +122,8 @@ pub struct SelectDeviceResponse {}
 pub struct StartEnumerationRequest {
     pub path: String,
     pub batch_size: Option<u64>,
+    #[serde(default)]
+    pub show_unsupported: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -365,8 +367,13 @@ pub fn dispatch(
                 },
             };
             let batch_size = request.batch_size.unwrap_or(100) as usize;
-            match enum_service.start_enumeration(&request.path, batch_size, active, events.clone())
-            {
+            match enum_service.start_enumeration(
+                &request.path,
+                batch_size,
+                request.show_unsupported,
+                active,
+                events.clone(),
+            ) {
                 Ok(session_id) => CommandResponse::ok(
                     serde_json::to_value(StartEnumerationResponse { session_id }).unwrap(),
                 ),

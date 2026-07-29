@@ -12,6 +12,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
 pulseseek-domain = { path = "../crates/pulseseek-domain" }
+pulseseek-browser-fs = { path = "../crates/pulseseek-browser-fs" }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

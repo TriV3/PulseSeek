@@ -2635,6 +2635,7 @@ dependencies = [
 name = "pulseseek"
 version = "0.1.0"
 dependencies = [
+ "pulseseek-browser-fs",
  "pulseseek-domain",
  "serde",
  "serde_json",
@@ -2658,6 +2659,7 @@ dependencies = [
 name = "pulseseek-browser-fs"
 version = "0.1.0"
 dependencies = [
+ "pulseseek-decoder-symphonia",
  "pulseseek-domain",
  "tempfile",
 ]

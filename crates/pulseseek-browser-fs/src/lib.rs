@@ -1,6 +1,9 @@
 use std::path::Path;
 
-use pulseseek_domain::browser::entry::{BrowserEntry, EntryId, FolderEntry, PlayableFileEntry};
+use pulseseek_decoder_symphonia::registry::DecoderRegistry;
+use pulseseek_domain::browser::entry::{
+    BrowserEntry, EntryId, FolderEntry, PlayableFileEntry, UnsupportedFileEntry,
+};
 use pulseseek_domain::browser::folder_reader::{FolderReadError, FolderReader};
 
 /// Native filesystem adapter for [`FolderReader`].
@@ -11,6 +14,20 @@ pub struct NativeFolderReader;
 
 impl FolderReader for NativeFolderReader {
     fn read_folder(&self, path: &Path) -> Result<Vec<BrowserEntry>, FolderReadError> {
+        self.read_folder_with_options(path, false)
+    }
+}
+
+impl NativeFolderReader {
+    /// Reads direct children and hides files that no registered decoder can open.
+    ///
+    /// `show_unsupported` reveals those files as `UnsupportedFile` entries. Probe
+    /// results come from file content, never from the filename extension.
+    pub fn read_folder_with_options(
+        &self,
+        path: &Path,
+        show_unsupported: bool,
+    ) -> Result<Vec<BrowserEntry>, FolderReadError> {
         let dir_reader =
             std::fs::read_dir(path).map_err(|e| FolderReadError::from_io_error(e, path))?;
 
@@ -26,12 +43,14 @@ impl FolderReader for NativeFolderReader {
             let browser_entry = if file_type.is_dir() {
                 BrowserEntry::Folder(FolderEntry { id: EntryId::new(&path_str), name: name_str })
             } else {
-                // Files and symlinks to files are treated as playable.
-                // Decoder probing is handled in a later PR.
-                BrowserEntry::PlayableFile(PlayableFileEntry {
-                    id: EntryId::new(&path_str),
-                    name: name_str,
-                })
+                let id = EntryId::new(&path_str);
+                if DecoderRegistry::open(entry.path()).is_ok() {
+                    BrowserEntry::PlayableFile(PlayableFileEntry { id, name: name_str })
+                } else if show_unsupported {
+                    BrowserEntry::UnsupportedFile(UnsupportedFileEntry { id, name: name_str })
+                } else {
+                    continue;
+                }
             };
             entries.push(browser_entry);
         }
@@ -59,6 +78,19 @@ mod tests {
         fs::write(path, b"content").expect("create test file");
     }
 
+    fn create_wav(path: &Path) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create parent dir");
+        }
+        fs::write(
+            path,
+            include_bytes!(
+                "../../pulseseek-decoder-symphonia/tests/fixtures/silent-stereo-44100.wav"
+            ),
+        )
+        .expect("create WAV fixture");
+    }
+
     #[test]
     fn native_reads_empty_folder() {
         let dir = tempfile::tempdir().expect("create temp dir");
@@ -69,8 +101,8 @@ mod tests {
     #[test]
     fn native_reads_folder_with_files() {
         let dir = tempfile::tempdir().expect("create temp dir");
-        create_file(&dir.path().join("a.wav"));
-        create_file(&dir.path().join("b.wav"));
+        create_wav(&dir.path().join("a.wav"));
+        create_wav(&dir.path().join("b.wav"));
 
         let result = NativeFolderReader.read_folder(dir.path()).unwrap();
         assert_eq!(result.len(), 2);
@@ -79,7 +111,7 @@ mod tests {
     #[test]
     fn native_reads_folder_with_nested_folder() {
         let dir = tempfile::tempdir().expect("create temp dir");
-        create_file(&dir.path().join("root.wav"));
+        create_wav(&dir.path().join("root.wav"));
         create_dir(&dir.path().join("sub"));
         create_file(&dir.path().join("sub").join("nested.wav"));
 
@@ -99,7 +131,7 @@ mod tests {
     #[test]
     fn native_reads_folder_with_symlink() {
         let dir = tempfile::tempdir().expect("create temp dir");
-        create_file(&dir.path().join("target.wav"));
+        create_wav(&dir.path().join("target.wav"));
         let link_path = dir.path().join("link.wav");
         #[cfg(unix)]
         {
@@ -121,8 +153,8 @@ mod tests {
     #[test]
     fn native_reads_folder_with_unicode_names() {
         let dir = tempfile::tempdir().expect("create temp dir");
-        create_file(&dir.path().join("über-jam.wav"));
-        create_file(&dir.path().join("alpha.wav"));
+        create_wav(&dir.path().join("über-jam.wav"));
+        create_wav(&dir.path().join("alpha.wav"));
 
         let result = NativeFolderReader.read_folder(dir.path()).unwrap();
         let names: Vec<&str> = result.iter().map(|e| e.name()).collect();
@@ -155,14 +187,50 @@ mod tests {
     fn native_entries_are_sorted() {
         let dir = tempfile::tempdir().expect("create temp dir");
         create_dir(&dir.path().join("zzz_folder"));
-        create_file(&dir.path().join("aaa_file.wav"));
+        create_wav(&dir.path().join("aaa_file.wav"));
         create_dir(&dir.path().join("bbb_folder"));
-        create_file(&dir.path().join("ccc_file.wav"));
+        create_wav(&dir.path().join("ccc_file.wav"));
 
         let result = NativeFolderReader.read_folder(dir.path()).unwrap();
         let names: Vec<&str> = result.iter().map(|e| e.name()).collect();
 
         // Folders first, then files, alphabetically
         assert_eq!(names, vec!["bbb_folder", "zzz_folder", "aaa_file.wav", "ccc_file.wav"]);
+    }
+
+    #[test]
+    fn native_hides_unsupported_files_by_default() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        create_wav(&dir.path().join("audio.bin"));
+        create_file(&dir.path().join("notes.txt"));
+
+        let result = NativeFolderReader.read_folder(dir.path()).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], BrowserEntry::PlayableFile(_)));
+        assert_eq!(result[0].name(), "audio.bin");
+    }
+
+    #[test]
+    fn native_can_show_unsupported_files() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        create_wav(&dir.path().join("audio.txt"));
+        create_file(&dir.path().join("notes.txt"));
+
+        let result = NativeFolderReader.read_folder_with_options(dir.path(), true).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert!(matches!(result[0], BrowserEntry::PlayableFile(_)));
+        assert!(matches!(result[1], BrowserEntry::UnsupportedFile(_)));
+    }
+
+    #[test]
+    fn native_rejects_corrupt_audio_as_unsupported() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        create_file(&dir.path().join("corrupt.wav"));
+
+        let result = NativeFolderReader.read_folder_with_options(dir.path(), true).unwrap();
+
+        assert!(matches!(result[0], BrowserEntry::UnsupportedFile(_)));
     }
 }
