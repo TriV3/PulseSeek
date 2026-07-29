@@ -10,6 +10,8 @@ interface FolderNodeProps {
   depth: number;
   /** Folder state from the tree. */
   state: FolderState;
+  /** Loaded state for descendant folders. */
+  folders: Record<string, FolderState>;
   /** Path of the currently selected item (for computing aria-selected). */
   selectedPath: string | null;
   /** Called when the expand/collapse toggle is clicked. */
@@ -23,6 +25,7 @@ export function FolderNode({
   name,
   depth,
   state,
+  folders,
   selectedPath,
   onToggle,
   onSelect,
@@ -119,23 +122,29 @@ export function FolderNode({
               (empty)
             </li>
           )}
-          {state.children.map((childName) => (
-            <FolderNode
-              key={`${path}/${childName}`}
-              path={`${path}/${childName}`}
-              name={childName}
-              depth={depth + 1}
-              state={{
-                expanded: false,
-                children: [],
-                isLoading: false,
-                error: null,
-              }}
-              selectedPath={selectedPath}
-              onToggle={onToggle}
-              onSelect={onSelect}
-            />
-          ))}
+          {state.children.map((child) => {
+            const childPath = child.id;
+            return (
+              <FolderNode
+                key={childPath}
+                path={childPath}
+                name={child.name}
+                depth={depth + 1}
+                state={
+                  folders[childPath] ?? {
+                    expanded: false,
+                    children: [],
+                    isLoading: false,
+                    error: null,
+                  }
+                }
+                folders={folders}
+                selectedPath={selectedPath}
+                onToggle={onToggle}
+                onSelect={onSelect}
+              />
+            );
+          })}
         </ul>
       )}
     </li>

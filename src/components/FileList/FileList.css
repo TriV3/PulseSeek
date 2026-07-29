@@ -1,0 +1,104 @@
+/* ── Container ───────────────────────────────────────────────────────── */
+
+.file-list {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  font-size: 14px;
+  color: #1a1a1a;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* ── Placeholder states ──────────────────────────────────────────────── */
+
+.file-list--empty,
+.file-list--loading,
+.file-list--error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.file-list-placeholder {
+  color: #999;
+  font-size: 14px;
+  font-style: italic;
+}
+
+.file-list-placeholder--error {
+  color: #a03030;
+}
+
+/* ── Header ──────────────────────────────────────────────────────────── */
+
+.file-list-header {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid #e0e0e0;
+  background: #fafafa;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #666;
+  flex-shrink: 0;
+}
+
+.file-list-header-name {
+  flex: 1;
+}
+
+/* ── Virtual viewport ────────────────────────────────────────────────── */
+
+.file-list-viewport {
+  flex: 1;
+  overflow-y: auto;
+  position: relative;
+}
+
+.file-list-inner {
+  position: relative;
+  width: 100%;
+}
+
+/* ── Row ─────────────────────────────────────────────────────────────── */
+
+.file-list-row {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+  box-sizing: border-box;
+}
+
+.file-list-row:hover {
+  background: #eef0f5;
+}
+
+.file-list-row.selected {
+  background: #d6e4ff;
+}
+
+.file-list-row:focus {
+  outline: 2px solid #4a90d9;
+  outline-offset: -2px;
+}
+
+.file-list-row-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}

@@ -56,10 +56,14 @@ export function folderTreeReducer(
           ...state.folders,
           [action.path]: {
             expanded: existing?.expanded ?? true,
-            children: existing?.children ?? [],
+            children: [],
             isLoading: true,
             error: null,
           },
+        },
+        playableEntries: {
+          ...state.playableEntries,
+          [action.path]: [],
         },
         status: "loading",
       };
@@ -70,14 +74,17 @@ export function folderTreeReducer(
       if (!current) return state;
 
       // Merge new folder entries into the children list.
-      const newFolderNames = action.entries
-        .filter((e) => e.kind === "folder")
-        .map((e) => e.name);
+      const newFolders = action.entries.filter((e) => e.kind === "folder");
 
-      // Deduplicate by name.
-      const seen = new Set(current.children);
-      for (const name of newFolderNames) {
-        seen.add(name);
+      // Accumulate playable entries for the file list.
+      const newPlayable = action.entries.filter((e) => e.kind === "playable");
+
+      // Deduplicate folder names.
+      const childrenById = new Map(
+        current.children.map((entry) => [entry.id, entry]),
+      );
+      for (const entry of newFolders) {
+        childrenById.set(entry.id, entry);
       }
 
       return {
@@ -86,10 +93,17 @@ export function folderTreeReducer(
           ...state.folders,
           [action.path]: {
             ...current,
-            children: [...seen],
+            children: [...childrenById.values()],
             isLoading: !action.done,
             expanded: true,
           },
+        },
+        playableEntries: {
+          ...state.playableEntries,
+          [action.path]: [
+            ...(state.playableEntries[action.path] ?? []),
+            ...newPlayable,
+          ],
         },
         status: action.done
           ? state.status === "error"
