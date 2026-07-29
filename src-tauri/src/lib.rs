@@ -28,11 +28,11 @@ pub fn run() {
     let event_emitter: Arc<dyn playback_events::PlaybackEventEmitter> =
         Arc::new(playback_events::NoopEventEmitter);
 
-    // Placeholder folder enumeration service.
+    // Native folder enumeration service.
     let enum_service: std::sync::Mutex<
         Box<dyn folder_enumeration_service::FolderEnumerationService>,
     > = std::sync::Mutex::new(Box::new(
-        folder_enumeration_service::FakeFolderEnumerationService::new(),
+        folder_enumeration_service::NativeFolderEnumerationService::new(),
     ));
 
     let active_enumerations: folder_enumeration_service::ActiveEnumerations =

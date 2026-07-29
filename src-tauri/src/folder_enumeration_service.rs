@@ -9,13 +9,14 @@ use crate::playback_events::{
 };
 
 /// Manages active folder enumeration sessions and their cancellation flags.
+#[derive(Clone)]
 pub struct ActiveEnumerations {
-    pub sessions: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    pub sessions: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
 impl ActiveEnumerations {
     pub fn new() -> Self {
-        Self { sessions: Mutex::new(HashMap::new()) }
+        Self { sessions: Arc::new(Mutex::new(HashMap::new())) }
     }
 
     /// Registers a new session with a cancellation flag.
@@ -60,6 +61,7 @@ pub trait FolderEnumerationService: Send {
         &mut self,
         path: &str,
         batch_size: usize,
+        show_unsupported: bool,
         active: &ActiveEnumerations,
         events: Arc<dyn PlaybackEventEmitter>,
     ) -> Result<String, ApplicationError>;
@@ -70,6 +72,7 @@ pub struct FakeFolderEnumerationService {
     pub start_call_count: u64,
     pub last_path: Option<String>,
     pub last_batch_size: Option<usize>,
+    pub last_show_unsupported: Option<bool>,
     pub fail_start: bool,
     pub next_session_id: String,
 }
@@ -80,6 +83,7 @@ impl FakeFolderEnumerationService {
             start_call_count: 0,
             last_path: None,
             last_batch_size: None,
+            last_show_unsupported: None,
             fail_start: false,
             next_session_id: "test-session-001".to_string(),
         }
@@ -97,12 +101,14 @@ impl FolderEnumerationService for FakeFolderEnumerationService {
         &mut self,
         path: &str,
         batch_size: usize,
+        show_unsupported: bool,
         _active: &ActiveEnumerations,
         _events: Arc<dyn PlaybackEventEmitter>,
     ) -> Result<String, ApplicationError> {
         self.start_call_count += 1;
         self.last_path = Some(path.to_string());
         self.last_batch_size = Some(batch_size);
+        self.last_show_unsupported = Some(show_unsupported);
         if self.fail_start {
             return Err(ApplicationError::new(
                 ErrorCategory::Unavailable,
@@ -111,6 +117,77 @@ impl FolderEnumerationService for FakeFolderEnumerationService {
             ));
         }
         Ok(self.next_session_id.clone())
+    }
+}
+
+/// Native folder enumeration service. Reads and probes files on worker thread.
+pub struct NativeFolderEnumerationService {
+    next_session_id: std::sync::atomic::AtomicU64,
+}
+
+impl NativeFolderEnumerationService {
+    pub fn new() -> Self {
+        Self { next_session_id: std::sync::atomic::AtomicU64::new(1) }
+    }
+}
+
+impl Default for NativeFolderEnumerationService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FolderEnumerationService for NativeFolderEnumerationService {
+    fn start_enumeration(
+        &mut self,
+        path: &str,
+        batch_size: usize,
+        show_unsupported: bool,
+        active: &ActiveEnumerations,
+        events: Arc<dyn PlaybackEventEmitter>,
+    ) -> Result<String, ApplicationError> {
+        if batch_size == 0 {
+            return Err(ApplicationError::new(
+                ErrorCategory::InvalidInput,
+                DiagnosticContext::new(DiagnosticCode::BrowserRead),
+                std::io::Error::other("batch size must be greater than zero"),
+            ));
+        }
+
+        let session_id = format!("folder-{}", self.next_session_id.fetch_add(1, Ordering::Relaxed));
+        let cancelled = active.register(&session_id);
+        let active_for_thread = active.clone();
+        let path = path.to_owned();
+        let session_for_thread = session_id.clone();
+
+        std::thread::Builder::new()
+            .name("pulseseek-folder-enumeration".to_string())
+            .spawn(move || {
+                let result = pulseseek_browser_fs::NativeFolderReader
+                    .read_folder_with_options(std::path::Path::new(&path), show_unsupported);
+                if let Ok(entries) = result {
+                    for chunk in entries.chunks(batch_size) {
+                        if cancelled.load(Ordering::Acquire) || events.is_disconnected() {
+                            break;
+                        }
+                        emit_folder_chunk(&*events, &session_for_thread, chunk, false);
+                    }
+                    if !cancelled.load(Ordering::Acquire) && !events.is_disconnected() {
+                        emit_folder_chunk(&*events, &session_for_thread, &[], true);
+                    }
+                }
+                active_for_thread.remove(&session_for_thread);
+            })
+            .map_err(|error| {
+                active.remove(&session_id);
+                ApplicationError::new(
+                    ErrorCategory::Unavailable,
+                    DiagnosticContext::new(DiagnosticCode::BrowserRead),
+                    error,
+                )
+            })?;
+
+        Ok(session_id)
     }
 }
 
@@ -179,7 +256,7 @@ mod tests {
         let active = ActiveEnumerations::new();
         let events = Arc::new(FakeEventEmitter::new()) as Arc<dyn PlaybackEventEmitter>;
 
-        let session_id = service.start_enumeration("/music", 50, &active, events).unwrap();
+        let session_id = service.start_enumeration("/music", 50, false, &active, events).unwrap();
 
         assert_eq!(service.start_call_count, 1);
         assert_eq!(service.last_path, Some("/music".to_string()));
@@ -194,10 +271,21 @@ mod tests {
         let active = ActiveEnumerations::new();
         let events = Arc::new(FakeEventEmitter::new()) as Arc<dyn PlaybackEventEmitter>;
 
-        let result = service.start_enumeration("/music", 50, &active, events);
+        let result = service.start_enumeration("/music", 50, false, &active, events);
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().user_descriptor().category(), ErrorCategory::Unavailable);
+    }
+
+    #[test]
+    fn fake_service_records_show_unsupported_preference() {
+        let mut service = FakeFolderEnumerationService::new();
+        let active = ActiveEnumerations::new();
+        let events = Arc::new(FakeEventEmitter::new()) as Arc<dyn PlaybackEventEmitter>;
+
+        service.start_enumeration("/music", 50, true, &active, events).unwrap();
+
+        assert_eq!(service.last_show_unsupported, Some(true));
     }
 
     #[test]
