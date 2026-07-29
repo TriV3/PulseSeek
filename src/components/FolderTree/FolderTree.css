@@ -1,0 +1,193 @@
+/* ── Container ───────────────────────────────────────────────────────── */
+
+.folder-tree {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #1a1a1a;
+  background: #fafafa;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  padding: 8px;
+  min-height: 200px;
+  user-select: none;
+}
+
+/* ── Toolbar ──────────────────────────────────────────────────────────── */
+
+.folder-tree-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid #e0e0e0;
+  margin-bottom: 4px;
+}
+
+.open-folder-btn,
+.go-up-btn {
+  padding: 4px 12px;
+  border: 1px solid #b0b0b0;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.open-folder-btn:disabled,
+.go-up-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.open-folder-btn:hover:not(:disabled),
+.go-up-btn:hover:not(:disabled) {
+  background: #e8e8e8;
+}
+
+.current-path {
+  margin-left: auto;
+  font-size: 12px;
+  color: #666;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+}
+
+/* ── Error banner ─────────────────────────────────────────────────────── */
+
+.folder-tree-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.folder-tree-banner--error {
+  background: #fce4e4;
+  border: 1px solid #e8b0b0;
+  color: #a03030;
+}
+
+.banner-close-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  color: inherit;
+}
+
+/* ── Tree list ────────────────────────────────────────────────────────── */
+
+.folder-tree-root {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.folder-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── Folder node ──────────────────────────────────────────────────────── */
+
+.folder-node {
+  cursor: default;
+  border-radius: 3px;
+}
+
+.folder-node:hover {
+  background: #eef0f5;
+}
+
+.folder-node.selected {
+  background: #d6e4ff;
+}
+
+.folder-node-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+/* ── Folder toggle button ─────────────────────────────────────────────── */
+
+.folder-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.folder-arrow {
+  font-size: 10px;
+  transition: transform 0.15s ease;
+  display: inline-block;
+}
+
+.folder-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+.folder-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #ccc;
+  border-top-color: #555;
+  border-radius: 50%;
+  animation: folder-spin 0.6s linear infinite;
+}
+
+@keyframes folder-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Folder icon + name ───────────────────────────────────────────────── */
+
+.folder-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.folder-name {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Error / empty state ──────────────────────────────────────────────── */
+
+.folder-error {
+  font-size: 12px;
+  color: #a03030;
+  padding: 2px 0;
+}
+
+.folder-empty {
+  font-size: 12px;
+  color: #999;
+  font-style: italic;
+  padding: 2px 0;
+}
