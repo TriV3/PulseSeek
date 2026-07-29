@@ -27,5 +27,8 @@ describe("application shell", () => {
     expect(
       screen.getByRole("button", { name: "Open Folder" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "File list" }),
+    ).toBeInTheDocument();
   });
 });

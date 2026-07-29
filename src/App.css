@@ -8,3 +8,26 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* ── App layout ───────────────────────────────────────────────────────── */
+
+.app-layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app-sidebar {
+  width: 300px;
+  flex-shrink: 0;
+  border-right: 1px solid #d0d0d0;
+  overflow-y: auto;
+}
+
+.app-content {
+  flex: 1;
+  padding: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}

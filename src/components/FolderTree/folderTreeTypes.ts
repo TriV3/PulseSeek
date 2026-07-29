@@ -12,8 +12,8 @@ export interface BrowserEntry {
 /** Per-folder state tracked in the tree. */
 export interface FolderState {
   expanded: boolean;
-  /** Names of subfolder entries inside this folder. */
-  children: string[];
+  /** Subfolder entries inside this folder. */
+  children: BrowserEntry[];
   /** Whether a folder enumeration is in progress for this path. */
   isLoading: boolean;
   /** Error message when enumeration failed, or null. */
@@ -26,6 +26,8 @@ export interface FolderTreeState {
   rootPath: string | null;
   /** Map of folder path → folder state. */
   folders: Record<string, FolderState>;
+  /** Playable file entries per folder path (for file list). */
+  playableEntries: Record<string, BrowserEntry[]>;
   /** Full path of the currently selected (highlighted) folder. */
   selectedPath: string | null;
   /** Current enumeration session id, or null if idle. */
@@ -57,6 +59,7 @@ export type FolderTreeAction =
 export const INITIAL_FOLDER_TREE_STATE: FolderTreeState = {
   rootPath: null,
   folders: {},
+  playableEntries: {},
   selectedPath: null,
   activeSessionId: null,
   status: "idle",

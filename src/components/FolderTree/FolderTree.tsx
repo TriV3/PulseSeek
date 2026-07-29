@@ -1,18 +1,25 @@
 import { useCallback } from "react";
-import { useFolderTree } from "../../hooks/useFolderTree";
+import type { FolderTreeState } from "./folderTreeTypes";
 import { FolderNode } from "./FolderNode";
 import "./FolderTree.css";
 
-export function FolderTree() {
-  const {
-    state,
-    openFolder,
-    toggleExpand,
-    selectFolder,
-    navigateUp,
-    clearError,
-  } = useFolderTree();
+export interface FolderTreeProps {
+  state: FolderTreeState;
+  openFolder: () => Promise<void>;
+  toggleExpand: (path: string) => void;
+  selectFolder: (path: string) => void;
+  navigateUp: () => void;
+  clearError: () => void;
+}
 
+export function FolderTree({
+  state,
+  openFolder,
+  toggleExpand,
+  selectFolder,
+  navigateUp,
+  clearError,
+}: FolderTreeProps) {
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       const selected = state.selectedPath;
@@ -61,8 +68,6 @@ export function FolderTree() {
     [state.selectedPath, state.folders, selectFolder, toggleExpand, navigateUp],
   );
 
-  // ── Render ───────────────────────────────────────────────────────────
-
   if (!state.rootPath) {
     return (
       <div className="folder-tree" role="tree" aria-label="Folder browser">
@@ -99,7 +104,7 @@ export function FolderTree() {
   const rootFolder = state.folders[state.rootPath];
   const rootFolderState = rootFolder ?? {
     expanded: true,
-    children: [] as string[],
+    children: [],
     isLoading: false,
     error: null as string | null,
   };
@@ -162,6 +167,7 @@ export function FolderTree() {
           }
           depth={0}
           state={rootFolderState}
+          folders={state.folders}
           selectedPath={state.selectedPath}
           onToggle={toggleExpand}
           onSelect={selectFolder}
