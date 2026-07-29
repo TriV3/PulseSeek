@@ -188,11 +188,18 @@ export async function selectDevice(device_id: string): Promise<void> {
   } satisfies SelectDeviceRequest);
 }
 
+// ── Folder picker types ───────────────────────────────────────────────
+
+export interface PickFolderResponse {
+  path: string | null;
+}
+
 // ── Typed folder enumeration command wrappers ─────────────────────────
 
 export interface StartEnumerationRequest {
   path: string;
   batch_size?: number;
+  show_unsupported?: boolean;
 }
 
 export interface StartEnumerationResponse {
@@ -222,4 +229,14 @@ export async function cancelEnumeration(session_id: string): Promise<void> {
   await invokeCommand<CancelEnumerationResponse>("cancel_enumeration", {
     session_id,
   } satisfies CancelEnumerationRequest);
+}
+
+/** Opens the native OS folder picker dialog.
+ *
+ * Returns the selected folder path, or `null` if the user cancelled.
+ * Throws `CommandError` if the dialog encounters a system-level failure.
+ */
+export async function pickFolder(): Promise<string | null> {
+  const response = await invokeCommand<PickFolderResponse>("pick_folder", {});
+  return response.path;
 }

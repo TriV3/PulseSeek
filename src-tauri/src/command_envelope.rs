@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::audio_device_service::{AudioDeviceService, DeviceInfoData};
+use crate::dialog_service::FolderPicker;
 use crate::folder_enumeration_service::{ActiveEnumerations, FolderEnumerationService};
 use crate::playback_events::{DeviceLostPayload, PlaybackEventEmitter, EVENT_DEVICE_LOST};
 use crate::playback_service::PlaybackService;
@@ -115,6 +116,16 @@ pub struct SelectDeviceRequest {
 
 #[derive(Debug, Serialize)]
 pub struct SelectDeviceResponse {}
+
+// ── Folder picker command request/response types ──────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct PickFolderRequest {}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PickFolderResponse {
+    pub path: Option<String>,
+}
 
 // ── Folder enumeration command request/response types ─────────────────
 
@@ -402,6 +413,18 @@ pub fn dispatch(
     }
 }
 
+/// Handles the `"pick_folder"` command: opens a native folder picker dialog
+/// and returns the selected path (or `None` on cancellation).
+///
+/// Extracted as a standalone function so it can be unit-tested without
+/// a running Tauri application.
+pub fn handle_pick_folder(picker: &dyn FolderPicker) -> CommandResponse {
+    match picker.pick_folder() {
+        Ok(path) => CommandResponse::ok(serde_json::to_value(PickFolderResponse { path }).unwrap()),
+        Err(e) => CommandResponse::err(from_application_error(&e)),
+    }
+}
+
 pub fn from_application_error(err: &ApplicationError) -> BoundaryError {
     let descriptor = err.user_descriptor();
     let context = err.diagnostic_context();
@@ -423,7 +446,25 @@ pub fn invoke_command(
     enum_state: tauri::State<'_, std::sync::Mutex<Box<dyn FolderEnumerationService>>>,
     active: tauri::State<'_, ActiveEnumerations>,
     events: tauri::State<'_, Arc<dyn PlaybackEventEmitter>>,
+    folder_picker: tauri::State<'_, std::sync::Mutex<Box<dyn FolderPicker>>>,
 ) -> CommandResponse {
+    // Handle pick_folder separately — it requires a dialog service that is
+    // not part of the synchronous dispatch path.
+    if envelope.command == "pick_folder" {
+        let _request: PickFolderRequest = match serde_json::from_value(envelope.payload) {
+            Ok(r) => r,
+            Err(e) => {
+                return CommandResponse::err(BoundaryError {
+                    category: "InvalidInput".to_string(),
+                    message: format!("Invalid pick_folder command payload: {}", e),
+                    diagnostic_code: "command.payload".to_string(),
+                });
+            },
+        };
+        let picker = folder_picker.lock().expect("folder picker lock poisoned");
+        return handle_pick_folder(&**picker);
+    }
+
     let mut service = state.lock().expect("playback service lock poisoned");
     let mut device_service = device_state.lock().expect("audio device service lock poisoned");
     let mut enum_service = enum_state.lock().expect("enumeration service lock poisoned");
@@ -436,6 +477,7 @@ mod tests {
 
     use super::*;
     use crate::audio_device_service::FakeAudioDeviceService;
+    use crate::dialog_service::FakeFolderPicker;
     use crate::folder_enumeration_service::{ActiveEnumerations, FakeFolderEnumerationService};
     use crate::playback_events::{FakeEventEmitter, NoopEventEmitter};
     use crate::playback_service::FakePlaybackService;
@@ -1892,5 +1934,41 @@ mod tests {
 
         assert!(!response.ok);
         assert_eq!(response.error.unwrap().category, "InvalidInput");
+    }
+
+    // ── Folder picker command tests ────────────────────────────────────
+
+    #[test]
+    fn handle_pick_folder_returns_path() {
+        let picker = FakeFolderPicker::returning(Some("/music/library"));
+
+        let response = handle_pick_folder(&picker);
+
+        assert!(response.ok);
+        let data: PickFolderResponse = serde_json::from_value(response.data.unwrap()).unwrap();
+        assert_eq!(data.path, Some("/music/library".to_string()));
+    }
+
+    #[test]
+    fn handle_pick_folder_returns_none_when_cancelled() {
+        let picker = FakeFolderPicker::returning(None);
+
+        let response = handle_pick_folder(&picker);
+
+        assert!(response.ok);
+        let data: PickFolderResponse = serde_json::from_value(response.data.unwrap()).unwrap();
+        assert_eq!(data.path, None);
+    }
+
+    #[test]
+    fn handle_pick_folder_maps_service_error() {
+        let picker = FakeFolderPicker::failing();
+
+        let response = handle_pick_folder(&picker);
+
+        assert!(!response.ok);
+        let error = response.error.unwrap();
+        assert_eq!(error.category, "PermissionDenied");
+        assert_eq!(error.diagnostic_code, "browser.read");
     }
 }

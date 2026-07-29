@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use tauri::Emitter;
 
 /// Current version of the event envelope protocol.
 pub const CURRENT_EVENT_VERSION: u32 = 1;
@@ -231,6 +232,50 @@ impl PlaybackEventEmitter for ThrottledEventEmitter {
 
     fn is_disconnected(&self) -> bool {
         self.inner.is_disconnected()
+    }
+}
+
+// ── TauriEventEmitter ───────────────────────────────────────────────────
+
+/// Real event emitter that forwards events to the Tauri WebView via
+/// `tauri::Emitter`.
+///
+/// `is_disconnected()` always returns `false` because Tauri does not
+/// expose a reliable disconnected-subscriber API. The enumeration worker
+/// will complete naturally even when the frontend is gone.
+pub struct TauriEventEmitter {
+    app: tauri::AppHandle,
+}
+
+impl TauriEventEmitter {
+    pub fn new(app: tauri::AppHandle) -> Self {
+        Self { app }
+    }
+}
+
+impl PlaybackEventEmitter for TauriEventEmitter {
+    fn emit_state(&self, state: &str) -> Result<(), EmitError> {
+        let payload = StateChangedPayload { state: state.to_string() };
+        self.app.emit(EVENT_STATE_CHANGED, &payload).map_err(|_| EmitError)?;
+        Ok(())
+    }
+
+    fn emit_position(&self, position_ms: u64, duration_ms: Option<u64>) -> Result<(), EmitError> {
+        let payload = PositionPayload { position_ms, duration_ms };
+        self.app.emit(EVENT_POSITION, &payload).map_err(|_| EmitError)?;
+        Ok(())
+    }
+
+    fn emit(&self, event: &str, payload: serde_json::Value) -> Result<(), EmitError> {
+        // Emit the raw payload directly. The frontend listener receives this
+        // as `event.payload` without an extra EventEnvelope wrapper.
+        self.app.emit(event, &payload).map_err(|_| EmitError)?;
+        Ok(())
+    }
+
+    fn is_disconnected(&self) -> bool {
+        // Tauri does not expose a reliable disconnected API.
+        false
     }
 }
 
