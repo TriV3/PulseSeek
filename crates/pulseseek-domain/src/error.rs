@@ -58,6 +58,7 @@ pub enum DiagnosticCode {
     BrowserRead,
     AudioOutput,
     PlaybackControl,
+    FileOperation,
 }
 
 impl DiagnosticCode {
@@ -66,6 +67,7 @@ impl DiagnosticCode {
             Self::BrowserRead => "browser.read",
             Self::AudioOutput => "audio.output",
             Self::PlaybackControl => "playback.control",
+            Self::FileOperation => "file.operation",
         }
     }
 }

@@ -8,12 +8,15 @@ pub mod native_playback_service;
 pub mod path_validation;
 pub mod playback_events;
 pub mod playback_service;
+pub mod trash_service;
 
 use std::sync::{Arc, Mutex};
 
 use diagnostics::DiagnosticsConfig;
 use pulseseek_audio_cpal::CpalAudioOutput;
 use tauri::Manager;
+
+use crate::trash_service::{NativeTrashService, TrashService};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -47,12 +50,18 @@ pub fn run() {
     let active_enumerations: folder_enumeration_service::ActiveEnumerations =
         folder_enumeration_service::ActiveEnumerations::new();
 
+    // Native trash service backed by the operating system trash.
+    let trash_service: std::sync::Mutex<Box<dyn TrashService>> = std::sync::Mutex::new(Box::new(
+        NativeTrashService::new(pulseseek_browser_fs::trash::NativeFileTrash),
+    ));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(playback_service)
         .manage(audio_device_service)
         .manage(enum_service)
         .manage(active_enumerations)
+        .manage(trash_service)
         .invoke_handler(tauri::generate_handler![
             diagnostics::report_error,
             command_envelope::invoke_command,
