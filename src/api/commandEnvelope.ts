@@ -255,10 +255,11 @@ export async function cancelEnumeration(session_id: string): Promise<void> {
 
 /** Opens the native OS folder picker dialog.
  *
+ * Uses a dedicated async Tauri command to avoid macOS dialog deadlocks.
  * Returns the selected folder path, or `null` if the user cancelled.
  * Throws `CommandError` if the dialog encounters a system-level failure.
  */
 export async function pickFolder(): Promise<string | null> {
-  const response = await invokeCommand<PickFolderResponse>("pick_folder", {});
+  const response = await invoke<PickFolderResponse>("pick_folder_dialog", {});
   return response.path;
 }

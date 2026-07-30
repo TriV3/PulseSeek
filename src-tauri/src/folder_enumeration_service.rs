@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use tracing;
+
 use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContext, ErrorCategory};
 
 use crate::playback_events::{
@@ -166,16 +168,27 @@ impl FolderEnumerationService for NativeFolderEnumerationService {
             .spawn(move || {
                 let result = pulseseek_browser_fs::NativeFolderReader
                     .read_folder_with_options(std::path::Path::new(&path), show_unsupported);
-                if let Ok(entries) = result {
-                    for chunk in entries.chunks(batch_size) {
-                        if cancelled.load(Ordering::Acquire) || events.is_disconnected() {
-                            break;
+                match result {
+                    Ok(entries) => {
+                        for chunk in entries.chunks(batch_size) {
+                            if cancelled.load(Ordering::Acquire) || events.is_disconnected() {
+                                break;
+                            }
+                            emit_folder_chunk(&*events, &session_for_thread, chunk, false);
                         }
-                        emit_folder_chunk(&*events, &session_for_thread, chunk, false);
-                    }
-                    if !cancelled.load(Ordering::Acquire) && !events.is_disconnected() {
-                        emit_folder_chunk(&*events, &session_for_thread, &[], true);
-                    }
+                    },
+                    Err(error) => {
+                        tracing::warn!(
+                            path = %path,
+                            error = %error,
+                            "folder enumeration failed, sending empty result",
+                        );
+                    },
+                }
+                // Always emit done=true so the frontend exits its loading
+                // state, even when enumeration failed or was cancelled.
+                if !cancelled.load(Ordering::Acquire) && !events.is_disconnected() {
+                    emit_folder_chunk(&*events, &session_for_thread, &[], true);
                 }
                 active_for_thread.remove(&session_for_thread);
             })

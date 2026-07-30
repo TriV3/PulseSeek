@@ -4,7 +4,7 @@ import {
   pickFolder,
   startEnumeration,
 } from "../api/commandEnvelope";
-import { onFolderChunk } from "../api/playbackEvents";
+import { onFolderChunk, type FolderChunkPayload } from "../api/playbackEvents";
 import type {
   FolderTreeAction,
   FolderTreeState,
@@ -181,6 +181,10 @@ export function folderTreeReducer(
 // ── Hook ─────────────────────────────────────────────────────────────────
 
 const SESSION_PATHS: Record<string, string> = {};
+// Buffer for folder-chunk events that arrive before their session mapping
+// is registered (race between Rust worker emitting and JavaScript setting
+// the session→path mapping).
+const PENDING_CHUNKS: Record<string, FolderChunkPayload[]> = {};
 
 export interface UseFolderTreeReturn {
   state: FolderTreeState;
@@ -210,7 +214,16 @@ export function useFolderTree(): UseFolderTreeReturn {
     (async () => {
       unlisten = await onFolderChunk((payload) => {
         const path = SESSION_PATHS[payload.session_id];
-        if (!path) return; // stale / unknown session
+        if (!path) {
+          // Session mapping not yet registered — buffer for replay.
+          const buffer = PENDING_CHUNKS[payload.session_id];
+          if (buffer) {
+            buffer.push(payload);
+          } else {
+            PENDING_CHUNKS[payload.session_id] = [payload];
+          }
+          return;
+        }
         dispatch({
           type: "ENUMERATION_CHUNK",
           path,
@@ -241,8 +254,29 @@ export function useFolderTree(): UseFolderTreeReturn {
 
     try {
       const sessionId = await startEnumeration(path);
+      // Register mapping before dispatching START_ENUMERATING so that
+      // any chunks buffered during the await are applied to the correct
+      // folder state after the reducer resets entries.
       SESSION_PATHS[sessionId] = path;
       dispatch({ type: "START_ENUMERATING", path, sessionId });
+      // Replay any folder-chunk events that arrived before the mapping
+      // was registered (race between Rust worker and JavaScript handler).
+      // Atomically drain the buffer so new events go directly to dispatch.
+      const buffered = PENDING_CHUNKS[sessionId];
+      delete PENDING_CHUNKS[sessionId];
+      if (buffered) {
+        for (const payload of buffered) {
+          dispatch({
+            type: "ENUMERATION_CHUNK",
+            path,
+            entries: payload.entries,
+            done: payload.done,
+          });
+          if (payload.done) {
+            delete SESSION_PATHS[sessionId];
+          }
+        }
+      }
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Failed to enumerate folder.";

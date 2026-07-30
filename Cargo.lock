@@ -2638,7 +2638,9 @@ version = "0.1.0"
 dependencies = [
  "pulseseek-audio-cpal",
  "pulseseek-browser-fs",
+ "pulseseek-decoder-symphonia",
  "pulseseek-domain",
+ "pulseseek-playback",
  "serde",
  "serde_json",
  "tauri",

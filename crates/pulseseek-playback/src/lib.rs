@@ -578,7 +578,14 @@ impl PlaybackWorker {
                         reached_eof = true;
                         worker_finished.store(true, Ordering::Release);
                     },
-                    Ok(true) if engine.is_buffer_full() => thread::yield_now(),
+                    Ok(true) if engine.is_buffer_full() => {
+                        // Brief sleep when the ring buffer is full instead of
+                        // yielding, which can delay refill for an OS-dependent
+                        // interval. A 1ms sleep keeps the worker responsive
+                        // to both the callback consuming data and incoming
+                        // commands.
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    },
                     Ok(true) => {},
                     Err(playback_error) => {
                         if engine.control.claim_failure() {
@@ -715,10 +722,16 @@ impl PlaybackConsumer {
         }
 
         let mut written = 0;
+        // Track whether we have exhausted the ring buffer. Once exhausted,
+        // fill remaining frames with silence instead of breaking, so the
+        // entire cpal output buffer is properly zeroed and avoids a pop or
+        // crackle at the end of the stream.
+        let mut drained = false;
         for frame in buf.chunks_mut(output_channels) {
-            if self.available() < source_channels {
+            if drained || self.available() < source_channels {
                 frame.fill(0.0);
-                break;
+                drained = true;
+                continue;
             }
 
             let mut source_samples = [0.0f32; 32];
@@ -737,7 +750,8 @@ impl PlaybackConsumer {
             }
             if !complete {
                 frame.fill(0.0);
-                break;
+                drained = true;
+                continue;
             }
 
             if source_channels == 1 {
