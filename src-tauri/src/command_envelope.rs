@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use pulseseek_domain::error::{ApplicationError, ErrorContract};
+use pulseseek_domain::playback::mode::PlaybackMode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -91,6 +92,16 @@ pub struct VolumeRequest {
 #[derive(Debug, Serialize)]
 pub struct VolumeResponse {}
 
+#[derive(Debug, Deserialize)]
+pub struct SetPlaybackModeRequest {
+    pub mode: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SetPlaybackModeResponse {
+    pub mode: String,
+}
+
 // ── Audio device command request/response types ────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -149,6 +160,16 @@ pub struct CancelEnumerationRequest {
 
 #[derive(Debug, Serialize)]
 pub struct CancelEnumerationResponse {}
+
+fn parse_playback_mode(value: &str) -> Option<PlaybackMode> {
+    match value {
+        "one-shot" => Some(PlaybackMode::OneShot),
+        "loop-current" => Some(PlaybackMode::LoopCurrent),
+        "sequential" => Some(PlaybackMode::Sequential),
+        "random" => Some(PlaybackMode::Random),
+        _ => None,
+    }
+}
 
 impl CommandResponse {
     pub fn ok(data: Value) -> Self {
@@ -303,6 +324,37 @@ pub fn dispatch(
                 Err(e) => CommandResponse::err(from_application_error(&e)),
             }
         },
+        "set_playback_mode" => {
+            let request: SetPlaybackModeRequest = match serde_json::from_value(envelope.payload) {
+                Ok(r) => r,
+                Err(e) => {
+                    return CommandResponse::err(BoundaryError {
+                        category: "InvalidInput".to_string(),
+                        message: format!("Invalid set_playback_mode command payload: {}", e),
+                        diagnostic_code: "command.payload".to_string(),
+                    });
+                },
+            };
+            let mode = match parse_playback_mode(&request.mode) {
+                Some(mode) => mode,
+                None => {
+                    return CommandResponse::err(BoundaryError {
+                        category: "InvalidInput".to_string(),
+                        message: format!("Unknown playback mode: {}", request.mode),
+                        diagnostic_code: "command.mode".to_string(),
+                    });
+                },
+            };
+            match service.set_mode(mode) {
+                Ok(confirmed_mode) => CommandResponse::ok(
+                    serde_json::to_value(SetPlaybackModeResponse {
+                        mode: playback_mode_name(confirmed_mode),
+                    })
+                    .unwrap(),
+                ),
+                Err(e) => CommandResponse::err(from_application_error(&e)),
+            }
+        },
         "list_devices" => {
             let _request: ListDevicesRequest = match serde_json::from_value(envelope.payload) {
                 Ok(r) => r,
@@ -411,6 +463,16 @@ pub fn dispatch(
             diagnostic_code: "command.unknown".to_string(),
         }),
     }
+}
+
+fn playback_mode_name(mode: PlaybackMode) -> String {
+    match mode {
+        PlaybackMode::OneShot => "one-shot",
+        PlaybackMode::LoopCurrent => "loop-current",
+        PlaybackMode::Sequential => "sequential",
+        PlaybackMode::Random => "random",
+    }
+    .to_string()
 }
 
 /// Handles the `"pick_folder"` command: opens a native folder picker dialog
@@ -709,6 +771,76 @@ mod tests {
         let error = response.error.expect("should have error");
         assert_eq!(error.category, "InvalidInput");
         assert_eq!(service.play_call_count, 0, "service should not be called");
+    }
+
+    #[test]
+    fn set_playback_mode_dispatches_and_returns_confirmed_mode() {
+        let mut service = FakePlaybackService::new();
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "set_playback_mode".to_string(),
+            payload: serde_json::json!({"mode": "loop-current"}),
+        };
+
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
+
+        assert!(response.ok);
+        assert_eq!(service.mode, PlaybackMode::LoopCurrent);
+        assert_eq!(response.data.unwrap()["mode"], "loop-current");
+    }
+
+    #[test]
+    fn set_playback_mode_rejects_unknown_mode() {
+        let mut service = FakePlaybackService::new();
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "set_playback_mode".to_string(),
+            payload: serde_json::json!({"mode": "invalid"}),
+        };
+
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
+
+        assert!(!response.ok);
+        assert_eq!(response.error.unwrap().diagnostic_code, "command.mode");
+        assert_eq!(service.mode, PlaybackMode::OneShot);
+    }
+
+    #[test]
+    fn set_playback_mode_maps_service_failure() {
+        let mut service = FakePlaybackService::new();
+        service.fail_with = Some(ErrorCategory::Unavailable);
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "set_playback_mode".to_string(),
+            payload: serde_json::json!({"mode": "random"}),
+        };
+
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut noop_device(),
+            &mut noop_enum(),
+            &noop_active(),
+            &noop_events(),
+        );
+
+        assert!(!response.ok);
+        assert_eq!(response.error.unwrap().category, "Unavailable");
+        assert_eq!(service.mode, PlaybackMode::OneShot);
     }
 
     // ── Pause command tests ───────────────────────────────────────────

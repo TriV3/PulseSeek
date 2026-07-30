@@ -4,12 +4,15 @@ import { FileList } from "./components/FileList/FileList";
 import { usePlaybackSelection } from "./hooks/usePlaybackSelection";
 import { usePlaybackTransport } from "./hooks/usePlaybackTransport";
 import { PlayerTransport } from "./components/PlayerTransport/PlayerTransport";
+import { PlaybackModeSelector } from "./components/PlaybackModeSelector/PlaybackModeSelector";
+import { usePlaybackMode } from "./hooks/usePlaybackMode";
 import "./App.css";
 
 function App() {
   const folderTree = useFolderTree();
   const { state } = folderTree;
   const playback = usePlaybackSelection();
+  const playbackMode = usePlaybackMode();
 
   const fileListEntries = state.playableEntries[state.selectedPath ?? ""] ?? [];
   const fileListFolder = state.folders[state.selectedPath ?? ""] ?? undefined;
@@ -54,6 +57,12 @@ function App() {
             onSeek={transport.handleSeek}
             onVolume={transport.handleVolume}
             onToggleMute={transport.toggleMute}
+          />
+          <PlaybackModeSelector
+            mode={playbackMode.mode}
+            disabled={playbackMode.isChanging}
+            error={playbackMode.error}
+            onChange={playbackMode.selectMode}
           />
         </section>
       </div>

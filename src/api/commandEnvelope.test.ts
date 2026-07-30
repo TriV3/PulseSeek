@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CommandResponse } from "./commandEnvelope";
-import { CommandError, healthCheck, invokeCommand } from "./commandEnvelope";
+import {
+  CommandError,
+  healthCheck,
+  invokeCommand,
+  setPlaybackMode,
+} from "./commandEnvelope";
 
 const mockInvoke = vi.hoisted(() => vi.fn());
 
@@ -101,5 +106,24 @@ describe("healthCheck", () => {
     } satisfies CommandResponse);
 
     await expect(healthCheck()).rejects.toThrow(CommandError);
+  });
+});
+
+describe("setPlaybackMode", () => {
+  it("returns confirmed mode from Rust", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: true,
+      data: { mode: "random" },
+    });
+
+    await expect(setPlaybackMode("random")).resolves.toBe("random");
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: {
+        version: 1,
+        command: "set_playback_mode",
+        payload: { mode: "random" },
+      },
+    });
   });
 });

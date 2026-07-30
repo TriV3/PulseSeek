@@ -1,4 +1,5 @@
 use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContext, ErrorCategory};
+use pulseseek_domain::playback::mode::PlaybackMode;
 
 /// Application service for controlling audio playback.
 ///
@@ -25,6 +26,9 @@ pub trait PlaybackService: Send {
 
     /// Sets the volume gain and mute state.
     fn set_volume(&mut self, gain: f64, muted: bool) -> Result<(), ApplicationError>;
+
+    /// Changes end-of-file playback mode.
+    fn set_mode(&mut self, mode: PlaybackMode) -> Result<PlaybackMode, ApplicationError>;
 }
 
 /// Fake implementation of [`PlaybackService`] for use in command-envelope tests.
@@ -45,6 +49,7 @@ pub struct FakePlaybackService {
     pub fail_with: Option<ErrorCategory>,
     /// When set, seek returns this position.
     pub seek_result: Option<u64>,
+    pub mode: PlaybackMode,
 }
 
 impl FakePlaybackService {
@@ -62,6 +67,7 @@ impl FakePlaybackService {
             last_volume_muted: None,
             fail_with: None,
             seek_result: None,
+            mode: PlaybackMode::OneShot,
         }
     }
 
@@ -111,6 +117,12 @@ impl PlaybackService for FakePlaybackService {
         self.last_volume_gain = Some(gain);
         self.last_volume_muted = Some(muted);
         self.check_fail()
+    }
+
+    fn set_mode(&mut self, mode: PlaybackMode) -> Result<PlaybackMode, ApplicationError> {
+        self.check_fail()?;
+        self.mode = mode;
+        Ok(self.mode)
     }
 }
 
