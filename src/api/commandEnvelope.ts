@@ -65,6 +65,17 @@ export interface VolumeRequest {
 
 export type VolumeResponse = Record<string, never>;
 
+export type PlaybackMode =
+  "one-shot" | "loop-current" | "sequential" | "random";
+
+export interface SetPlaybackModeRequest {
+  mode: PlaybackMode;
+}
+
+export interface SetPlaybackModeResponse {
+  mode: PlaybackMode;
+}
+
 // ── Audio device command types ─────────────────────────────────────────
 
 export interface DeviceInfoData {
@@ -162,6 +173,17 @@ export async function setVolume(gain: number, muted: boolean): Promise<void> {
     gain,
     muted,
   } satisfies VolumeRequest);
+}
+
+/** Sets and confirms end-of-file playback mode. */
+export async function setPlaybackMode(
+  mode: PlaybackMode,
+): Promise<PlaybackMode> {
+  const response = await invokeCommand<SetPlaybackModeResponse>(
+    "set_playback_mode",
+    { mode } satisfies SetPlaybackModeRequest,
+  );
+  return response.mode;
 }
 
 // ── Typed audio device command wrappers ────────────────────────────────
