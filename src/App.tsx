@@ -8,6 +8,7 @@ import { PlaybackModeSelector } from "./components/PlaybackModeSelector/Playback
 import { usePlaybackMode } from "./hooks/usePlaybackMode";
 import { useAudioDevices } from "./hooks/useAudioDevices";
 import { AudioDeviceSelector } from "./components/AudioDeviceSelector/AudioDeviceSelector";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import "./App.css";
 
 function App() {
@@ -24,6 +25,25 @@ function App() {
     selectedEntryId: playback.playback.entryId,
     playbackStatus: playback.playback.status,
     onSelectEntry: playback.select,
+  });
+
+  useKeyboardShortcuts({
+    onOpenFolder: folderTree.openFolder,
+    onTogglePlayPause: transport.togglePlayPause,
+    onPreviousTrack: transport.handlePrevious,
+    onNextTrack: transport.handleNext,
+    onSeekBackward: () =>
+      transport.handleSeek(Math.max(0, transport.positionMs - 5_000)),
+    onSeekForward: () =>
+      transport.handleSeek(
+        transport.durationMs === null
+          ? transport.positionMs + 5_000
+          : Math.min(transport.durationMs, transport.positionMs + 5_000),
+      ),
+    onToggleLoop: () =>
+      playbackMode.selectMode(
+        playbackMode.mode === "loop-current" ? "one-shot" : "loop-current",
+      ),
   });
 
   return (

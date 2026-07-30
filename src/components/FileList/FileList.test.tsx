@@ -537,6 +537,21 @@ describe("FileList — move to Trash", () => {
 
     expect(screen.getByRole("alertdialog")).toBeInTheDocument();
   });
+
+  it("opens confirmation for the selected row with global Delete", () => {
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.keyDown(window, { key: "Delete" });
+
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("song1.mp3");
+  });
 });
 
 describe("FileList — large collections", () => {
