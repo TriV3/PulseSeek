@@ -149,6 +149,126 @@ describe("FileList — entries display", () => {
 
     expect(screen.getByText("Name")).toBeInTheDocument();
   });
+
+  it("shows formatted metadata columns", () => {
+    render(
+      <FileList
+        entries={[
+          {
+            id: "song.wav",
+            name: "song.wav",
+            kind: "playable",
+            metadata: {
+              duration_ms: 61_000,
+              size_bytes: 1_572_864,
+              modified_at_ms: Date.UTC(2026, 0, 2, 3, 4),
+              channels: 2,
+              sample_rate: 44_100,
+              bit_depth: 16,
+              codec: "PCM",
+            },
+          },
+        ]}
+        selectedPath="/test/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    expect(
+      screen.getByRole("columnheader", { name: "Duration" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: "Size" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: "Modified" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1:01")).toBeInTheDocument();
+    const expectedSize = `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(1.5)} MiB`;
+    const expectedSampleRate = `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(44.1)} kHz`;
+    expect(screen.getByText(expectedSize)).toBeInTheDocument();
+    expect(screen.getByText("Stereo")).toBeInTheDocument();
+    expect(screen.getByText(expectedSampleRate)).toBeInTheDocument();
+    expect(screen.getByText("16-bit")).toBeInTheDocument();
+    expect(screen.getByText("PCM")).toBeInTheDocument();
+    expect(
+      screen.getByRole("grid", { name: "Playable files" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /song\.wav/ })).toBeInTheDocument();
+  });
+
+  it("preserves common fractional sample rates", () => {
+    render(
+      <FileList
+        entries={[
+          {
+            id: "song.wav",
+            name: "song.wav",
+            kind: "playable",
+            metadata: {
+              duration_ms: null,
+              size_bytes: null,
+              modified_at_ms: null,
+              channels: null,
+              sample_rate: 22_050,
+              bit_depth: null,
+              codec: null,
+            },
+          },
+        ]}
+        selectedPath="/test/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    const expectedRate = `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(22.05)} kHz`;
+    expect(screen.getByText(expectedRate)).toBeInTheDocument();
+  });
+
+  it("keeps partially loaded playable rows and marks missing values", () => {
+    render(
+      <FileList
+        entries={[
+          {
+            id: "song.mp3",
+            name: "song.mp3",
+            kind: "playable",
+            metadata: {
+              duration_ms: 61_000,
+              size_bytes: null,
+              modified_at_ms: null,
+              channels: 2,
+              sample_rate: 44_100,
+              bit_depth: null,
+              codec: "MP3",
+            },
+          },
+        ]}
+        selectedPath="/test/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    expect(screen.getByText("song.mp3")).toBeInTheDocument();
+    expect(screen.getAllByText("—")).toHaveLength(3);
+  });
+
+  it("shows loading placeholders while playable metadata is unavailable", () => {
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/test/music"
+        isLoading={true}
+        error={null}
+      />,
+    );
+
+    expect(screen.getByText("song1.mp3")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Metadata loading")).toHaveLength(7);
+  });
 });
 
 describe("FileList — file selection", () => {
@@ -169,7 +289,7 @@ describe("FileList — file selection", () => {
 
     expect(onSelect).toHaveBeenCalledOnce();
     expect(onSelect).toHaveBeenCalledWith(sampleEntries[0]);
-    expect(screen.getByRole("option", { name: "song1.mp3" })).toHaveAttribute(
+    expect(screen.getByRole("row", { name: /song1\.mp3/ })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -188,7 +308,7 @@ describe("FileList — file selection", () => {
       />,
     );
 
-    const row = screen.getByRole("option", { name: "song1.mp3" });
+    const row = screen.getByRole("row", { name: /song1\.mp3/ });
     fireEvent.keyDown(row, { key: "Enter" });
 
     expect(onSelect).toHaveBeenCalledWith(sampleEntries[0]);
@@ -212,11 +332,11 @@ describe("FileList — stable row identity", () => {
       />,
     );
 
-    expect(screen.getByRole("option", { name: "a.mp3" })).toHaveAttribute(
+    expect(screen.getByRole("row", { name: /a\.mp3/ })).toHaveAttribute(
       "data-row-id",
       "a.mp3",
     );
-    expect(screen.getByRole("option", { name: "b.mp3" })).toHaveAttribute(
+    expect(screen.getByRole("row", { name: /b\.mp3/ })).toHaveAttribute(
       "data-row-id",
       "b.mp3",
     );
@@ -243,6 +363,6 @@ describe("FileList — large collections", () => {
       />,
     );
 
-    expect(screen.getAllByRole("option")).toHaveLength(20);
+    expect(screen.getAllByRole("row")).toHaveLength(21);
   });
 });
