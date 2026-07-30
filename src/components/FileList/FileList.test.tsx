@@ -20,6 +20,7 @@ vi.mock("@tanstack/react-virtual", () => ({
       return {
         getVirtualItems: () => items,
         getTotalSize: () => items.length * opts.estimateSize(),
+        scrollToIndex: vi.fn(),
       };
     },
   ),
@@ -313,6 +314,72 @@ describe("FileList — file selection", () => {
 
     expect(onSelect).toHaveBeenCalledWith(sampleEntries[0]);
     expect(row).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("moves grid focus with arrow keys using one tab stop", () => {
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/test/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    const first = screen.getByRole("row", { name: /song1\.mp3/ });
+    const second = screen.getByRole("row", { name: /song2\.wav/ });
+    expect(first).toHaveAttribute("tabindex", "0");
+    expect(second).toHaveAttribute("tabindex", "-1");
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    expect(second).toHaveAttribute("tabindex", "0");
+  });
+
+  it("starts playback from one left click and exposes row status", () => {
+    const onSelect = vi.fn();
+
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/test/music"
+        isLoading={false}
+        error={null}
+        onFileSelect={onSelect}
+        playbackEntryId={sampleEntries[0].id}
+        playbackStatus="loading"
+      />,
+    );
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+
+    expect(onSelect).toHaveBeenCalledWith(sampleEntries[0]);
+    expect(screen.getByText("Loading")).toBeInTheDocument();
+    expect(
+      screen.getByRole("row", { name: /song1\.mp3.*Loading/i }),
+    ).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("shows playback failure without removing the selected row", () => {
+    const onSelect = vi.fn();
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/test/music"
+        isLoading={false}
+        error={null}
+        onFileSelect={onSelect}
+        playbackEntryId={sampleEntries[0].id}
+        playbackStatus="failed"
+        playbackError="Unable to play file."
+      />,
+    );
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+
+    expect(screen.getByText("Unable to play file.")).toBeInTheDocument();
+    expect(screen.getByText("song1.mp3")).toBeInTheDocument();
+    expect(
+      screen.getByRole("row", { name: /song1\.mp3.*Failed/i }),
+    ).toHaveAttribute("aria-selected", "true");
   });
 });
 
