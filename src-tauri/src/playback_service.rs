@@ -1,5 +1,9 @@
+use std::sync::Arc;
+
 use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContext, ErrorCategory};
 use pulseseek_domain::playback::mode::PlaybackMode;
+
+use crate::playback_events::PlaybackEventEmitter;
 
 /// Application service for controlling audio playback.
 ///
@@ -29,6 +33,10 @@ pub trait PlaybackService: Send {
 
     /// Changes end-of-file playback mode.
     fn set_mode(&mut self, mode: PlaybackMode) -> Result<PlaybackMode, ApplicationError>;
+
+    /// Provides a real event emitter to a native service. No-op default for
+    /// fake implementations.
+    fn set_events(&mut self, _events: Option<Arc<dyn PlaybackEventEmitter>>) {}
 }
 
 /// Fake implementation of [`PlaybackService`] for use in command-envelope tests.

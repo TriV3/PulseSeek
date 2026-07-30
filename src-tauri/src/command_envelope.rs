@@ -497,6 +497,33 @@ pub fn from_application_error(err: &ApplicationError) -> BoundaryError {
     }
 }
 
+/// Async Tauri command that opens the native folder picker dialog via the
+/// callback-based `pick_folder` API. Using `blocking_pick_folder` from the
+/// async runtime causes a deadlock on macOS (`dispatch_sync` to the main
+/// thread while the runtime thread is blocked). The callback fires on the
+/// main thread, so we wait via a channel without ever blocking the main
+/// thread ourselves.
+#[tauri::command]
+pub async fn pick_folder_dialog(app: tauri::AppHandle) -> Result<PickFolderResponse, ()> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog().file().pick_folder(move |file| {
+        let _ = tx.send(file);
+    });
+    let picked = rx.recv().map_err(|_| ())?;
+    let path_str = match picked {
+        Some(file_path) => {
+            let s = file_path.to_string();
+            match crate::path_validation::validate_directory(&s) {
+                Ok(()) => Some(s),
+                Err(_) => return Err(()),
+            }
+        },
+        None => None,
+    };
+    Ok(PickFolderResponse { path: path_str })
+}
+
 /// Tauri command: dispatches a versioned command envelope and returns a
 /// versioned response. This is the single entry point for all frontend
 /// commands.
@@ -508,25 +535,7 @@ pub fn invoke_command(
     enum_state: tauri::State<'_, std::sync::Mutex<Box<dyn FolderEnumerationService>>>,
     active: tauri::State<'_, ActiveEnumerations>,
     events: tauri::State<'_, Arc<dyn PlaybackEventEmitter>>,
-    folder_picker: tauri::State<'_, std::sync::Mutex<Box<dyn FolderPicker>>>,
 ) -> CommandResponse {
-    // Handle pick_folder separately — it requires a dialog service that is
-    // not part of the synchronous dispatch path.
-    if envelope.command == "pick_folder" {
-        let _request: PickFolderRequest = match serde_json::from_value(envelope.payload) {
-            Ok(r) => r,
-            Err(e) => {
-                return CommandResponse::err(BoundaryError {
-                    category: "InvalidInput".to_string(),
-                    message: format!("Invalid pick_folder command payload: {}", e),
-                    diagnostic_code: "command.payload".to_string(),
-                });
-            },
-        };
-        let picker = folder_picker.lock().expect("folder picker lock poisoned");
-        return handle_pick_folder(&**picker);
-    }
-
     let mut service = state.lock().expect("playback service lock poisoned");
     let mut device_service = device_state.lock().expect("audio device service lock poisoned");
     let mut enum_service = enum_state.lock().expect("enumeration service lock poisoned");

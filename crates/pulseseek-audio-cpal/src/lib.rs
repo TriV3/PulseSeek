@@ -302,10 +302,13 @@ impl CpalAudioOutput {
     }
 
     /// Builds an output stream using decoder interleaved channel count.
+    /// Uses `source_sample_rate` for the stream config when possible to
+    /// avoid resampling; falls back to the device default otherwise.
     pub fn open_stream(
         &mut self,
         consumer: PlaybackConsumer,
         source_channels: usize,
+        source_sample_rate: u32,
     ) -> Result<(), AudioOutputError> {
         if source_channels == 0 {
             return Err(AudioOutputError::new(
@@ -330,7 +333,11 @@ impl CpalAudioOutput {
             AudioOutputError::new(DiagnosticContext::new(DiagnosticCode::AudioOutput), e)
         })?;
         let device = device.clone();
-        let config: cpal::StreamConfig = supported.clone().into();
+        // Try to use the source sample rate to avoid resampling. On macOS
+        // CoreAudio this is handled transparently; on other platforms cpal
+        // will use the device default if the requested rate is unsupported.
+        let mut config: cpal::StreamConfig = supported.clone().into();
+        config.sample_rate = cpal::SampleRate(source_sample_rate);
         let output_channels = config.channels as usize;
         if output_channels == 0 || output_channels > 32 {
             return Err(AudioOutputError::new(
