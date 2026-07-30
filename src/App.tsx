@@ -2,6 +2,8 @@ import { useFolderTree } from "./hooks/useFolderTree";
 import { FolderTree } from "./components/FolderTree/FolderTree";
 import { FileList } from "./components/FileList/FileList";
 import { usePlaybackSelection } from "./hooks/usePlaybackSelection";
+import { usePlaybackTransport } from "./hooks/usePlaybackTransport";
+import { PlayerTransport } from "./components/PlayerTransport/PlayerTransport";
 import "./App.css";
 
 function App() {
@@ -11,6 +13,12 @@ function App() {
 
   const fileListEntries = state.playableEntries[state.selectedPath ?? ""] ?? [];
   const fileListFolder = state.folders[state.selectedPath ?? ""] ?? undefined;
+  const transport = usePlaybackTransport({
+    entries: fileListEntries,
+    selectedEntryId: playback.playback.entryId,
+    playbackStatus: playback.playback.status,
+    onSelectEntry: playback.select,
+  });
 
   return (
     <main>
@@ -29,6 +37,23 @@ function App() {
             playbackEntryId={playback.playback.entryId}
             playbackStatus={playback.playback.status}
             playbackError={playback.playback.error}
+          />
+          <PlayerTransport
+            status={transport.status}
+            positionMs={transport.positionMs}
+            durationMs={transport.durationMs}
+            volume={transport.volume}
+            muted={transport.muted}
+            canPrevious={transport.canPrevious}
+            canNext={transport.canNext}
+            error={transport.error ?? playback.playback.error}
+            onTogglePlayPause={transport.togglePlayPause}
+            onStop={transport.handleStop}
+            onPrevious={transport.handlePrevious}
+            onNext={transport.handleNext}
+            onSeek={transport.handleSeek}
+            onVolume={transport.handleVolume}
+            onToggleMute={transport.toggleMute}
           />
         </section>
       </div>
