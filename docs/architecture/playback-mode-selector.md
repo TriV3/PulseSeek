@@ -12,4 +12,4 @@ separate follow-up behavior.
 The current desktop bootstrap still uses `FakePlaybackService`, as established
 by the pre-existing Tauri bootstrap. The command contract returns the mode
 confirmed by its service; wiring the native playback worker into application
-bootstrap remains separate playback integration work.
+bootstrap is tracked by PR-049-2.

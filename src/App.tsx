@@ -6,6 +6,8 @@ import { usePlaybackTransport } from "./hooks/usePlaybackTransport";
 import { PlayerTransport } from "./components/PlayerTransport/PlayerTransport";
 import { PlaybackModeSelector } from "./components/PlaybackModeSelector/PlaybackModeSelector";
 import { usePlaybackMode } from "./hooks/usePlaybackMode";
+import { useAudioDevices } from "./hooks/useAudioDevices";
+import { AudioDeviceSelector } from "./components/AudioDeviceSelector/AudioDeviceSelector";
 import "./App.css";
 
 function App() {
@@ -13,6 +15,7 @@ function App() {
   const { state } = folderTree;
   const playback = usePlaybackSelection();
   const playbackMode = usePlaybackMode();
+  const audioDevices = useAudioDevices();
 
   const fileListEntries = state.playableEntries[state.selectedPath ?? ""] ?? [];
   const fileListFolder = state.folders[state.selectedPath ?? ""] ?? undefined;
@@ -63,6 +66,11 @@ function App() {
             disabled={playbackMode.isChanging}
             error={playbackMode.error}
             onChange={playbackMode.selectMode}
+          />
+          <AudioDeviceSelector
+            {...audioDevices}
+            onChange={audioDevices.choose}
+            onRetry={audioDevices.refresh}
           />
         </section>
       </div>
