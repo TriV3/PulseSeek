@@ -625,11 +625,31 @@ behavior test is not applicable.
 - **Branch:** `feature/pr-049-device-selector`
 - **Depends on:** PR-037
 - **Requirements:** FR-IO-001–FR-IO-004
-- **Outcome:** Add accessible device selection and device-loss recovery UI.
+- **Outcome:** Add accessible device selection and device-loss recovery UI over
+  the native audio-device service.
 - **Tests first:** Default, selection, missing device, loss, retry, and no-device
   states.
-- **Acceptance:** The user can change output without restarting PulseSeek.
+- **Acceptance:** The user can select an available output, see the confirmed
+  device, and retry after loss without restarting PulseSeek. Rebinding active
+  playback to the selected device is completed by PR-049-2.
 - **Out of scope:** Buffer-size and exclusive-mode settings.
+
+### PR-049-2 — Wire real playback service
+
+- **Branch:** `feature/pr-049-2-real-playback-wiring`
+- **Depends on:** PR-024, PR-025, PR-026, PR-027, PR-028, PR-033, PR-049
+- **Requirements:** FR-AU-001–FR-AU-005, FR-IO-002–FR-IO-004
+- **Outcome:** Replace the Tauri fake playback service with an application
+  service that connects decoder workers, `pulseseek-playback`, and
+  `CpalAudioOutput` for real audible playback.
+- **Tests first:** WAV fixture playback through a fake output boundary, pause,
+  resume, stop, seek, volume, selected-device rebind, fallback device, device
+  loss, recovery, and shutdown.
+- **Acceptance:** PulseSeek plays supported audio through the selected output
+  device; transport commands affect audible playback; device loss pauses safely
+  and recovery can resume playback without restarting PulseSeek.
+- **Out of scope:** Playback-mode selector behavior, sequential/random
+  end-of-file selection, buffer-size settings, and exclusive-mode settings.
 
 ### PR-050 — Add move-to-trash application service
 
@@ -656,7 +676,7 @@ behavior test is not applicable.
 ### PR-052 — Add primary keyboard shortcuts
 
 - **Branch:** `feature/pr-052-player-shortcuts`
-- **Depends on:** PR-043, PR-047, PR-048, PR-051
+- **Depends on:** PR-043, PR-047, PR-048, PR-049-2, PR-051
 - **Requirements:** FR-KB-001, FR-KB-002
 - **Outcome:** Add open, play/pause, previous, next, seek, loop, and trash
   shortcuts.
