@@ -1,3 +1,5 @@
+pub mod trash;
+
 use std::path::Path;
 
 use pulseseek_decoder_symphonia::registry::DecoderRegistry;

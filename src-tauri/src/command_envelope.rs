@@ -10,6 +10,7 @@ use crate::dialog_service::FolderPicker;
 use crate::folder_enumeration_service::{ActiveEnumerations, FolderEnumerationService};
 use crate::playback_events::{DeviceLostPayload, PlaybackEventEmitter, EVENT_DEVICE_LOST};
 use crate::playback_service::PlaybackService;
+use crate::trash_service::TrashService;
 
 pub const CURRENT_COMMAND_VERSION: u32 = 1;
 
@@ -161,6 +162,30 @@ pub struct CancelEnumerationRequest {
 #[derive(Debug, Serialize)]
 pub struct CancelEnumerationResponse {}
 
+// ── Trash command request/response types ────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct MoveToTrashRequest {
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct MoveToTrashResponse {
+    pub results: Vec<MoveToTrashItemResult>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct MoveToTrashItemResult {
+    pub path: String,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic_code: Option<String>,
+}
+
 fn parse_playback_mode(value: &str) -> Option<PlaybackMode> {
     match value {
         "one-shot" => Some(PlaybackMode::OneShot),
@@ -186,6 +211,7 @@ pub fn dispatch(
     service: &mut dyn PlaybackService,
     device_service: &mut dyn AudioDeviceService,
     enum_service: &mut dyn FolderEnumerationService,
+    trash_service: &dyn TrashService,
     active: &ActiveEnumerations,
     events: &Arc<dyn PlaybackEventEmitter>,
 ) -> CommandResponse {
@@ -457,6 +483,52 @@ pub fn dispatch(
             active.cancel(&request.session_id);
             CommandResponse::ok(serde_json::to_value(CancelEnumerationResponse {}).unwrap())
         },
+        "move_to_trash" => {
+            let request: MoveToTrashRequest = match serde_json::from_value(envelope.payload) {
+                Ok(r) => r,
+                Err(e) => {
+                    return CommandResponse::err(BoundaryError {
+                        category: "InvalidInput".to_string(),
+                        message: format!("Invalid move_to_trash command payload: {}", e),
+                        diagnostic_code: "command.payload".to_string(),
+                    });
+                },
+            };
+            if request.paths.is_empty() {
+                return CommandResponse::ok(
+                    serde_json::to_value(MoveToTrashResponse { results: vec![] }).unwrap(),
+                );
+            }
+            let path_bufs: Vec<std::path::PathBuf> =
+                request.paths.iter().map(std::path::PathBuf::from).collect();
+            let results = trash_service.move_to_trash(path_bufs);
+            let response_results: Vec<MoveToTrashItemResult> = results
+                .into_iter()
+                .map(|(path, result)| match result {
+                    Ok(()) => MoveToTrashItemResult {
+                        path: path.to_string_lossy().to_string(),
+                        ok: true,
+                        category: None,
+                        message: None,
+                        diagnostic_code: None,
+                    },
+                    Err(e) => {
+                        let desc = e.user_descriptor();
+                        let ctx = e.diagnostic_context();
+                        MoveToTrashItemResult {
+                            path: path.to_string_lossy().to_string(),
+                            ok: false,
+                            category: Some(format!("{:?}", desc.category())),
+                            message: Some(desc.message().to_string()),
+                            diagnostic_code: Some(ctx.code().to_string()),
+                        }
+                    },
+                })
+                .collect();
+            CommandResponse::ok(
+                serde_json::to_value(MoveToTrashResponse { results: response_results }).unwrap(),
+            )
+        },
         _ => CommandResponse::err(BoundaryError {
             category: "Unsupported".to_string(),
             message: format!("Unknown command: {}", envelope.command),
@@ -533,17 +605,29 @@ pub fn invoke_command(
     state: tauri::State<'_, std::sync::Mutex<Box<dyn PlaybackService>>>,
     device_state: tauri::State<'_, std::sync::Mutex<Box<dyn AudioDeviceService>>>,
     enum_state: tauri::State<'_, std::sync::Mutex<Box<dyn FolderEnumerationService>>>,
+    trash_state: tauri::State<'_, std::sync::Mutex<Box<dyn TrashService>>>,
     active: tauri::State<'_, ActiveEnumerations>,
     events: tauri::State<'_, Arc<dyn PlaybackEventEmitter>>,
 ) -> CommandResponse {
     let mut service = state.lock().expect("playback service lock poisoned");
     let mut device_service = device_state.lock().expect("audio device service lock poisoned");
     let mut enum_service = enum_state.lock().expect("enumeration service lock poisoned");
-    dispatch(envelope, &mut **service, &mut **device_service, &mut **enum_service, &active, &events)
+    let trash_service = trash_state.lock().expect("trash service lock poisoned");
+    dispatch(
+        envelope,
+        &mut **service,
+        &mut **device_service,
+        &mut **enum_service,
+        &**trash_service,
+        &active,
+        &events,
+    )
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use pulseseek_domain::error::{DiagnosticCode, DiagnosticContext, ErrorCategory};
 
     use super::*;
@@ -552,6 +636,7 @@ mod tests {
     use crate::folder_enumeration_service::{ActiveEnumerations, FakeFolderEnumerationService};
     use crate::playback_events::{FakeEventEmitter, NoopEventEmitter};
     use crate::playback_service::FakePlaybackService;
+    use crate::trash_service::FakeTrashService;
 
     fn noop_events() -> Arc<dyn PlaybackEventEmitter> {
         Arc::new(NoopEventEmitter)
@@ -575,6 +660,10 @@ mod tests {
         ActiveEnumerations::new()
     }
 
+    fn noop_trash() -> FakeTrashService {
+        FakeTrashService::new(Box::new(|_| vec![]))
+    }
+
     fn health_envelope() -> CommandEnvelope {
         CommandEnvelope {
             version: CURRENT_COMMAND_VERSION,
@@ -594,6 +683,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -620,6 +710,7 @@ mod tests {
                 &mut service,
                 &mut noop_device(),
                 &mut noop_enum(),
+                &noop_trash(),
                 &noop_active(),
                 &noop_events(),
             );
@@ -647,6 +738,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -673,6 +765,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -721,6 +814,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -746,6 +840,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -772,6 +867,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -796,6 +892,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -819,6 +916,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -843,6 +941,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -869,6 +968,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -892,6 +992,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -918,6 +1019,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -941,6 +1043,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -966,6 +1069,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -989,6 +1093,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1015,6 +1120,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1041,6 +1147,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1064,6 +1171,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1089,6 +1197,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1114,6 +1223,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1138,6 +1248,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1161,6 +1272,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1187,6 +1299,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1213,6 +1326,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1238,6 +1352,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1263,6 +1378,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1288,6 +1404,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1313,6 +1430,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1340,6 +1458,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &events,
         );
@@ -1369,6 +1488,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &events,
         );
@@ -1392,6 +1512,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &events,
         );
@@ -1420,6 +1541,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &events,
         );
@@ -1447,6 +1569,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &events,
         );
@@ -1474,6 +1597,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &events,
         );
@@ -1497,6 +1621,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &events,
         );
@@ -1520,6 +1645,7 @@ mod tests {
             &mut service,
             &mut noop_device(),
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &events,
         );
@@ -1546,6 +1672,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1574,6 +1701,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1599,6 +1727,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1626,6 +1755,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1651,6 +1781,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1678,6 +1809,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1702,6 +1834,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1728,6 +1861,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1752,6 +1886,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1777,6 +1912,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1803,6 +1939,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &events,
         );
@@ -1833,6 +1970,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &events,
         );
@@ -1856,6 +1994,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut noop_enum(),
+            &noop_trash(),
             &noop_active(),
             &noop_events(),
         );
@@ -1884,6 +2023,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut enum_service,
+            &noop_trash(),
             &active,
             &noop_events(),
         );
@@ -1913,6 +2053,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut enum_service,
+            &noop_trash(),
             &active,
             &noop_events(),
         );
@@ -1938,6 +2079,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut enum_service,
+            &noop_trash(),
             &active,
             &noop_events(),
         );
@@ -1964,6 +2106,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut enum_service,
+            &noop_trash(),
             &active,
             &noop_events(),
         );
@@ -1991,6 +2134,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut enum_service,
+            &noop_trash(),
             &active,
             &noop_events(),
         );
@@ -2018,6 +2162,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut enum_service,
+            &noop_trash(),
             &active,
             &noop_events(),
         );
@@ -2044,6 +2189,7 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut enum_service,
+            &noop_trash(),
             &active,
             &noop_events(),
         );
@@ -2069,12 +2215,154 @@ mod tests {
             &mut service,
             &mut device_service,
             &mut enum_service,
+            &noop_trash(),
             &active,
             &noop_events(),
         );
 
         assert!(!response.ok);
         assert_eq!(response.error.unwrap().category, "InvalidInput");
+    }
+
+    // ── Move-to-trash command tests ───────────────────────────────────
+
+    #[test]
+    fn move_to_trash_command_dispatches_and_returns_results() {
+        let mut service = FakePlaybackService::new();
+        let mut device_service = FakeAudioDeviceService::new();
+        let mut enum_service = FakeFolderEnumerationService::new();
+        let active = ActiveEnumerations::new();
+        let trash_service = FakeTrashService::new(Box::new(|_| {
+            vec![(PathBuf::from("/music/a.wav"), Ok(())), (PathBuf::from("/music/b.wav"), Ok(()))]
+        }));
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "move_to_trash".to_string(),
+            payload: serde_json::json!({
+                "paths": ["/music/a.wav", "/music/b.wav"]
+            }),
+        };
+
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut enum_service,
+            &trash_service,
+            &active,
+            &noop_events(),
+        );
+
+        assert!(response.ok);
+        let data: MoveToTrashResponse = serde_json::from_value(response.data.unwrap()).unwrap();
+        assert_eq!(data.results.len(), 2);
+        assert!(data.results[0].ok);
+        assert!(data.results[1].ok);
+    }
+
+    #[test]
+    fn move_to_trash_reports_partial_failure() {
+        let mut service = FakePlaybackService::new();
+        let mut device_service = FakeAudioDeviceService::new();
+        let mut enum_service = FakeFolderEnumerationService::new();
+        let active = ActiveEnumerations::new();
+        let trash_service = FakeTrashService::new(Box::new(|_| {
+            let bad_err = ApplicationError::new(
+                ErrorCategory::NotFound,
+                DiagnosticContext::new(DiagnosticCode::FileOperation),
+                std::io::Error::new(std::io::ErrorKind::NotFound, "not found"),
+            );
+            vec![
+                (PathBuf::from("/music/good.wav"), Ok(())),
+                (PathBuf::from("/music/bad.wav"), Err(bad_err)),
+            ]
+        }));
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "move_to_trash".to_string(),
+            payload: serde_json::json!({
+                "paths": ["/music/good.wav", "/music/bad.wav"]
+            }),
+        };
+
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut enum_service,
+            &trash_service,
+            &active,
+            &noop_events(),
+        );
+
+        assert!(response.ok);
+        let data: MoveToTrashResponse = serde_json::from_value(response.data.unwrap()).unwrap();
+        assert_eq!(data.results.len(), 2);
+        assert!(data.results[0].ok);
+        assert!(!data.results[1].ok);
+        assert_eq!(data.results[1].category.as_deref(), Some("NotFound"));
+        assert_eq!(data.results[1].diagnostic_code.as_deref(), Some("file.operation"));
+    }
+
+    #[test]
+    fn move_to_trash_invalid_payload_rejected() {
+        let mut service = FakePlaybackService::new();
+        let mut device_service = FakeAudioDeviceService::new();
+        let mut enum_service = FakeFolderEnumerationService::new();
+        let active = ActiveEnumerations::new();
+        let trash_service = FakeTrashService::new(Box::new(|_| vec![]));
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "move_to_trash".to_string(),
+            payload: serde_json::json!("not_an_object"),
+        };
+
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut enum_service,
+            &trash_service,
+            &active,
+            &noop_events(),
+        );
+
+        assert!(!response.ok);
+        let error = response.error.unwrap();
+        assert_eq!(error.category, "InvalidInput");
+        assert_eq!(error.diagnostic_code, "command.payload");
+    }
+
+    #[test]
+    fn move_to_trash_empty_paths_returns_empty() {
+        let mut service = FakePlaybackService::new();
+        let mut device_service = FakeAudioDeviceService::new();
+        let mut enum_service = FakeFolderEnumerationService::new();
+        let active = ActiveEnumerations::new();
+        let trash_service = FakeTrashService::new(Box::new(|_| vec![]));
+
+        let envelope = CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "move_to_trash".to_string(),
+            payload: serde_json::json!({"paths": []}),
+        };
+
+        let response = dispatch(
+            envelope,
+            &mut service,
+            &mut device_service,
+            &mut enum_service,
+            &trash_service,
+            &active,
+            &noop_events(),
+        );
+
+        assert!(response.ok);
+        let data: MoveToTrashResponse = serde_json::from_value(response.data.unwrap()).unwrap();
+        assert!(data.results.is_empty());
     }
 
     // ── Folder picker command tests ────────────────────────────────────
