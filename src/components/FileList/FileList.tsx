@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { moveToTrash } from "../../api/commandEnvelope";
 import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
 import type { PlaybackSelectionStatus } from "../../hooks/usePlaybackSelection";
+import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { ConfirmDialog } from "../ConfirmDialog/ConfirmDialog";
 import "./FileList.css";
 import "../ConfirmDialog/ConfirmDialog.css";
@@ -141,6 +142,15 @@ export function FileList({
       );
     }
   };
+
+  useKeyboardShortcuts({
+    onMoveToTrash: () => {
+      const selected = entries.find(
+        (entry) => entry.id === selectedEntryIdForFolder,
+      );
+      if (selected) requestTrash(selected);
+    },
+  });
 
   const selectedEntryIdForFolder = entries.some(
     (entry) => entry.id === selectedEntryId,
