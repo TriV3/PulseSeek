@@ -263,3 +263,34 @@ export async function pickFolder(): Promise<string | null> {
   const response = await invoke<PickFolderResponse>("pick_folder_dialog", {});
   return response.path;
 }
+
+// ── Move-to-trash types ────────────────────────────────────────────────
+
+export interface MoveToTrashRequest {
+  paths: string[];
+}
+
+export interface MoveToTrashItemResult {
+  path: string;
+  ok: boolean;
+  category?: string;
+  message?: string;
+  diagnostic_code?: string;
+}
+
+export interface MoveToTrashResponse {
+  results: MoveToTrashItemResult[];
+}
+
+/** Moves the given file paths to the operating system trash.
+ *
+ * Returns per-file results. Throws `CommandError` on invalid input.
+ */
+export async function moveToTrash(
+  paths: string[],
+): Promise<MoveToTrashItemResult[]> {
+  const response = await invokeCommand<MoveToTrashResponse>("move_to_trash", {
+    paths,
+  } satisfies MoveToTrashRequest);
+  return response.results;
+}

@@ -63,4 +63,32 @@ describe("folderTreeReducer playable entries", () => {
     ]);
     expect(complete.folders[path]?.isLoading).toBe(false);
   });
+
+  it("removes trashed entries without changing unrelated entries", () => {
+    const state = {
+      ...INITIAL_FOLDER_TREE_STATE,
+      playableEntries: {
+        [path]: [
+          { id: "keep", name: "keep.wav", kind: "playable" as const },
+          { id: "trash", name: "trash.wav", kind: "playable" as const },
+        ],
+        "/other": [
+          { id: "other", name: "other.wav", kind: "playable" as const },
+        ],
+      },
+    };
+
+    const next = folderTreeReducer(state, {
+      type: "REMOVE_ENTRIES",
+      path,
+      entryIds: ["trash"],
+    });
+
+    expect(next.playableEntries[path]).toEqual([
+      { id: "keep", name: "keep.wav", kind: "playable" },
+    ]);
+    expect(next.playableEntries["/other"]).toEqual([
+      { id: "other", name: "other.wav", kind: "playable" },
+    ]);
+  });
 });
