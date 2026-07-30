@@ -33,6 +33,7 @@ src-tauri/gen/
 *.log
 *.tmp
 *.temp
+/temp/
 
 # Test and coverage output
 coverage/

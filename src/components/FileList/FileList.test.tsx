@@ -1,7 +1,14 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import { FileList } from "./FileList";
 import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
+
+const mockMoveToTrash = vi.hoisted(() => vi.fn());
+
+vi.mock("../../api/commandEnvelope", () => ({
+  moveToTrash: mockMoveToTrash,
+}));
 
 // Mock TanStack Virtual to render all items synchronously (jsdom has no
 // layout, so the virtualizer would measure 0 height and render nothing).
@@ -407,6 +414,128 @@ describe("FileList — stable row identity", () => {
       "data-row-id",
       "b.mp3",
     );
+  });
+});
+
+describe("FileList — move to Trash", () => {
+  it("opens confirmation for the selected row", () => {
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Move to Trash" }));
+
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("song1.mp3");
+  });
+
+  it("cancels without calling the trash command", () => {
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Move to Trash" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(mockMoveToTrash).not.toHaveBeenCalled();
+    expect(screen.getByText("song1.mp3")).toBeInTheDocument();
+  });
+
+  it("moves confirmed row to Trash and refreshes the list", async () => {
+    mockMoveToTrash.mockResolvedValueOnce([{ path: "song1.mp3", ok: true }]);
+    function Harness() {
+      const [entries, setEntries] = useState(sampleEntries);
+      return (
+        <FileList
+          entries={entries}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+          onEntriesTrashed={(ids) =>
+            setEntries((current) =>
+              current.filter((entry) => !ids.includes(entry.id)),
+            )
+          }
+        />
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Move to Trash" }));
+    fireEvent.click(
+      screen
+        .getByRole("alertdialog")
+        .querySelector(
+          "button.confirm-dialog-button--confirm",
+        ) as HTMLButtonElement,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("song1.mp3")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("song2.wav")).toBeInTheDocument();
+  });
+
+  it("keeps row and shows error after partial failure", async () => {
+    mockMoveToTrash.mockResolvedValueOnce([
+      {
+        path: "song1.mp3",
+        ok: false,
+        message: "Could not move file.",
+      },
+    ]);
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Move to Trash" }));
+    fireEvent.click(
+      screen
+        .getByRole("alertdialog")
+        .querySelector(
+          "button.confirm-dialog-button--confirm",
+        ) as HTMLButtonElement,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Could not move file.",
+      );
+    });
+    expect(screen.getByText("song1.mp3")).toBeInTheDocument();
+  });
+
+  it("opens confirmation with Delete keyboard shortcut", () => {
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+    fireEvent.keyDown(screen.getByRole("row", { name: /song1\.mp3/ }), {
+      key: "Delete",
+    });
+
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
   });
 });
 

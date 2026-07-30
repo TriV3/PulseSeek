@@ -43,6 +43,11 @@ function App() {
             playbackEntryId={playback.playback.entryId}
             playbackStatus={playback.playback.status}
             playbackError={playback.playback.error}
+            onEntriesTrashed={(entryIds) => {
+              if (state.selectedPath) {
+                folderTree.removeEntries(state.selectedPath, entryIds);
+              }
+            }}
           />
           <PlayerTransport
             status={transport.status}

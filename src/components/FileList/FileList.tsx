@@ -1,8 +1,11 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { moveToTrash } from "../../api/commandEnvelope";
 import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
 import type { PlaybackSelectionStatus } from "../../hooks/usePlaybackSelection";
+import { ConfirmDialog } from "../ConfirmDialog/ConfirmDialog";
 import "./FileList.css";
+import "../ConfirmDialog/ConfirmDialog.css";
 
 const UNAVAILABLE = "—";
 
@@ -71,6 +74,8 @@ interface FileListProps {
   playbackEntryId?: string | null;
   playbackStatus?: PlaybackSelectionStatus;
   playbackError?: string | null;
+  /** Called with entries successfully moved to the OS trash. */
+  onEntriesTrashed?: (entryIds: string[]) => void;
 }
 
 export function FileList({
@@ -82,15 +87,59 @@ export function FileList({
   playbackEntryId = null,
   playbackStatus = "idle",
   playbackError = null,
+  onEntriesTrashed,
 }: FileListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const [activeEntryId, setActiveEntryId] = useState<string | null>(null);
+  const [trashTarget, setTrashTarget] = useState<BrowserEntry | null>(null);
+  const [trashStatus, setTrashStatus] = useState<"idle" | "moving" | "error">(
+    "idle",
+  );
+  const [trashError, setTrashError] = useState<string | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
+
+  useEffect(() => {
+    setSelectedEntryId(null);
+    setTrashTarget(null);
+    setTrashStatus("idle");
+    setTrashError(null);
+  }, [selectedPath]);
 
   const selectEntry = (entry: BrowserEntry) => {
     setSelectedEntryId(entry.id);
     onFileSelect?.(entry);
+  };
+
+  const requestTrash = (entry: BrowserEntry) => {
+    setTrashError(null);
+    setTrashStatus("idle");
+    setTrashTarget(entry);
+  };
+
+  const confirmTrash = async () => {
+    if (!trashTarget || trashStatus === "moving") return;
+    setTrashStatus("moving");
+    setTrashError(null);
+    try {
+      const [result] = await moveToTrash([trashTarget.id]);
+      if (result?.ok) {
+        onEntriesTrashed?.([trashTarget.id]);
+        setSelectedEntryId(null);
+        setTrashTarget(null);
+        setTrashStatus("idle");
+        return;
+      }
+      setTrashStatus("error");
+      setTrashError(result?.message ?? "Unable to move file to Trash.");
+    } catch (error: unknown) {
+      setTrashStatus("error");
+      setTrashError(
+        error instanceof Error
+          ? error.message
+          : "Unable to move file to Trash.",
+      );
+    }
   };
 
   const selectedEntryIdForFolder = entries.some(
@@ -185,6 +234,30 @@ export function FileList({
 
   return (
     <div className="file-list" role="region" aria-label="File list">
+      <div className="file-list-actions">
+        <button
+          type="button"
+          onClick={() => {
+            const selected = entries.find(
+              (entry) => entry.id === selectedEntryIdForFolder,
+            );
+            if (selected) requestTrash(selected);
+          }}
+          disabled={!selectedEntryIdForFolder || trashStatus === "moving"}
+        >
+          Move to Trash
+        </button>
+        {trashStatus === "moving" ? (
+          <span role="status" aria-live="polite">
+            Moving to Trash…
+          </span>
+        ) : null}
+        {trashError ? (
+          <span className="file-list-trash-error" role="alert">
+            {trashError}
+          </span>
+        ) : null}
+      </div>
       <div
         ref={parentRef}
         className="file-list-viewport"
@@ -239,6 +312,11 @@ export function FileList({
                 }}
                 onClick={() => selectEntry(entry)}
                 onKeyDown={(event) => {
+                  if (event.key === "Delete" || event.key === "Backspace") {
+                    event.preventDefault();
+                    if (trashStatus !== "moving") requestTrash(entry);
+                    return;
+                  }
                   if (event.key === "ArrowDown") {
                     event.preventDefault();
                     focusEntry(virtualRow.index + 1);
@@ -339,6 +417,26 @@ export function FileList({
           {playbackError}
         </p>
       ) : null}
+      <ConfirmDialog
+        open={trashTarget !== null}
+        title="Move to Trash?"
+        message={
+          trashTarget
+            ? `Move “${trashTarget.name}” to the operating system Trash?`
+            : ""
+        }
+        confirmLabel={trashStatus === "moving" ? "Moving…" : "Move to Trash"}
+        confirmDisabled={trashStatus === "moving"}
+        onConfirm={() => {
+          void confirmTrash();
+        }}
+        onCancel={() => {
+          if (trashStatus !== "moving") {
+            setTrashTarget(null);
+            setTrashError(null);
+          }
+        }}
+      />
     </div>
   );
 }

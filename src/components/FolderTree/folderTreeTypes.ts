@@ -66,7 +66,8 @@ export type FolderTreeAction =
   | { type: "TOGGLE_EXPAND"; path: string }
   | { type: "SELECT_FOLDER"; path: string }
   | { type: "NAVIGATE_UP" }
-  | { type: "CLEAR_ERROR" };
+  | { type: "CLEAR_ERROR" }
+  | { type: "REMOVE_ENTRIES"; path: string; entryIds: string[] };
 
 export const INITIAL_FOLDER_TREE_STATE: FolderTreeState = {
   rootPath: null,

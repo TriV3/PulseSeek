@@ -127,3 +127,39 @@ describe("setPlaybackMode", () => {
     });
   });
 });
+
+describe("moveToTrash", () => {
+  it("sends paths and returns per-file results", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: true,
+      data: {
+        results: [
+          { path: "/music/a.wav", ok: true },
+          {
+            path: "/music/b.wav",
+            ok: false,
+            category: "NotFound",
+            message: "not found",
+            diagnostic_code: "file.operation",
+          },
+        ],
+      },
+    });
+
+    const { moveToTrash } = await import("./commandEnvelope");
+    const results = await moveToTrash(["/music/a.wav", "/music/b.wav"]);
+
+    expect(results).toHaveLength(2);
+    expect(results[0].ok).toBe(true);
+    expect(results[1].ok).toBe(false);
+    expect(results[1].category).toBe("NotFound");
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: {
+        version: 1,
+        command: "move_to_trash",
+        payload: { paths: ["/music/a.wav", "/music/b.wav"] },
+      },
+    });
+  });
+});

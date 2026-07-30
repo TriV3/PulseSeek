@@ -173,6 +173,21 @@ export function folderTreeReducer(
     case "CLEAR_ERROR":
       return { ...state, status: "idle", errorMessage: null };
 
+    case "REMOVE_ENTRIES": {
+      const existing = state.playableEntries[action.path];
+      if (!existing) return state;
+      const removeSet = new Set(action.entryIds);
+      const remaining = existing.filter((e) => !removeSet.has(e.id));
+      if (remaining.length === existing.length) return state;
+      return {
+        ...state,
+        playableEntries: {
+          ...state.playableEntries,
+          [action.path]: remaining,
+        },
+      };
+    }
+
     default:
       return state;
   }
@@ -193,6 +208,7 @@ export interface UseFolderTreeReturn {
   selectFolder: (path: string) => void;
   navigateUp: () => void;
   clearError: () => void;
+  removeEntries: (path: string, entryIds: string[]) => void;
 }
 
 export function useFolderTree(): UseFolderTreeReturn {
@@ -343,6 +359,10 @@ export function useFolderTree(): UseFolderTreeReturn {
     dispatch({ type: "CLEAR_ERROR" });
   }, []);
 
+  const removeEntries = useCallback((path: string, entryIds: string[]) => {
+    dispatch({ type: "REMOVE_ENTRIES", path, entryIds });
+  }, []);
+
   return {
     state,
     openFolder,
@@ -350,5 +370,6 @@ export function useFolderTree(): UseFolderTreeReturn {
     selectFolder,
     navigateUp,
     clearError,
+    removeEntries,
   };
 }
