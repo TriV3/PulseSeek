@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
+import type { PlaybackSelectionStatus } from "../../hooks/usePlaybackSelection";
 import "./FileList.css";
 
 const UNAVAILABLE = "—";
@@ -67,6 +68,9 @@ interface FileListProps {
   error: string | null;
   /** Called when a file row is clicked. */
   onFileSelect?: (entry: BrowserEntry) => void;
+  playbackEntryId?: string | null;
+  playbackStatus?: PlaybackSelectionStatus;
+  playbackError?: string | null;
 }
 
 export function FileList({
@@ -75,9 +79,14 @@ export function FileList({
   isLoading,
   error,
   onFileSelect,
+  playbackEntryId = null,
+  playbackStatus = "idle",
+  playbackError = null,
 }: FileListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  const [activeEntryId, setActiveEntryId] = useState<string | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLDivElement>());
 
   const selectEntry = (entry: BrowserEntry) => {
     setSelectedEntryId(entry.id);
@@ -89,6 +98,11 @@ export function FileList({
   )
     ? selectedEntryId
     : null;
+  const activeEntryIdForFolder = entries.some(
+    (entry) => entry.id === activeEntryId,
+  )
+    ? activeEntryId
+    : (entries[0]?.id ?? null);
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
@@ -97,6 +111,15 @@ export function FileList({
     estimateSize: () => 32,
     overscan: 10,
   });
+
+  const focusEntry = (index: number) => {
+    if (entries.length === 0) return;
+    const nextIndex = Math.max(0, Math.min(index, entries.length - 1));
+    const nextEntry = entries[nextIndex];
+    setActiveEntryId(nextEntry.id);
+    virtualizer.scrollToIndex(nextIndex, { align: "auto" });
+    window.setTimeout(() => rowRefs.current.get(nextEntry.id)?.focus(), 0);
+  };
 
   // ── No folder selected ──────────────────────────────────────────────
 
@@ -167,7 +190,7 @@ export function FileList({
         className="file-list-viewport"
         role="grid"
         aria-label="Playable files"
-        aria-colcount={8}
+        aria-colcount={9}
         aria-rowcount={entries.length + 1}
       >
         <div className="file-list-header" role="row">
@@ -179,6 +202,7 @@ export function FileList({
           <span role="columnheader">Sample rate</span>
           <span role="columnheader">Bit depth</span>
           <span role="columnheader">Codec</span>
+          <span role="columnheader">Status</span>
         </div>
         <div
           className="file-list-inner"
@@ -188,9 +212,23 @@ export function FileList({
             const entry = entries[virtualRow.index];
             const metadata = entry.metadata;
             const metadataLoading = isLoading && metadata == null;
+            const isPlaybackEntry = playbackEntryId === entry.id;
+            const statusLabel = isPlaybackEntry
+              ? playbackStatus === "loading"
+                ? "Loading"
+                : playbackStatus === "playing"
+                  ? "Playing"
+                  : playbackStatus === "failed"
+                    ? "Failed"
+                    : ""
+              : "";
             return (
               <div
                 key={entry.id}
+                ref={(node) => {
+                  if (node) rowRefs.current.set(entry.id, node);
+                  else rowRefs.current.delete(entry.id);
+                }}
                 data-row-id={entry.id}
                 className={`file-list-row${
                   selectedEntryIdForFolder === entry.id ? " selected" : ""
@@ -201,6 +239,26 @@ export function FileList({
                 }}
                 onClick={() => selectEntry(entry)}
                 onKeyDown={(event) => {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    focusEntry(virtualRow.index + 1);
+                    return;
+                  }
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    focusEntry(virtualRow.index - 1);
+                    return;
+                  }
+                  if (event.key === "Home") {
+                    event.preventDefault();
+                    focusEntry(0);
+                    return;
+                  }
+                  if (event.key === "End") {
+                    event.preventDefault();
+                    focusEntry(entries.length - 1);
+                    return;
+                  }
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
                     selectEntry(entry);
@@ -209,7 +267,13 @@ export function FileList({
                 role="row"
                 aria-rowindex={virtualRow.index + 2}
                 aria-selected={selectedEntryIdForFolder === entry.id}
-                tabIndex={0}
+                tabIndex={activeEntryIdForFolder === entry.id ? 0 : -1}
+                aria-label={`${entry.name}${statusLabel ? ` ${statusLabel}` : ""}`}
+                aria-describedby={
+                  isPlaybackEntry && playbackError
+                    ? "file-list-playback-error"
+                    : undefined
+                }
               >
                 <span className="file-list-row-name" role="gridcell">
                   {entry.name}
@@ -258,11 +322,23 @@ export function FileList({
                     metadataLoading,
                   )}
                 </span>
+                <span role="gridcell">{statusLabel}</span>
               </div>
             );
           })}
         </div>
       </div>
+      {playbackError &&
+      playbackEntryId &&
+      entries.some((entry) => entry.id === playbackEntryId) ? (
+        <p
+          className="file-list-playback-error"
+          id="file-list-playback-error"
+          role="alert"
+        >
+          {playbackError}
+        </p>
+      ) : null}
     </div>
   );
 }
