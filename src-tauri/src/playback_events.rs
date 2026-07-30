@@ -53,6 +53,19 @@ pub struct BrowserEntryData {
     pub id: String,
     pub name: String,
     pub kind: String,
+    pub metadata: Option<PlayableFileMetadataData>,
+}
+
+/// Serializable playable-file metadata sent to the frontend.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlayableFileMetadataData {
+    pub duration_ms: Option<u64>,
+    pub size_bytes: Option<u64>,
+    pub modified_at_ms: Option<u64>,
+    pub channels: Option<u16>,
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u32>,
+    pub codec: Option<String>,
 }
 
 /// Payload for [`EVENT_FOLDER_CHUNK`].

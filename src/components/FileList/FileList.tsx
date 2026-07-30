@@ -3,6 +3,59 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
 import "./FileList.css";
 
+const UNAVAILABLE = "—";
+
+function formatDuration(durationMs: number | null): string {
+  if (durationMs === null) return UNAVAILABLE;
+  const totalSeconds = Math.floor(durationMs / 1_000);
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
+    : `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function formatSize(sizeBytes: number | null): string {
+  if (sizeBytes === null) return UNAVAILABLE;
+  if (sizeBytes < 1_024) return `${sizeBytes} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let value = sizeBytes / 1_024;
+  let unitIndex = 0;
+  while (value >= 1_024 && unitIndex < units.length - 1) {
+    value /= 1_024;
+    unitIndex += 1;
+  }
+  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value)} ${units[unitIndex]}`;
+}
+
+function formatModified(modifiedAtMs: number | null): string {
+  if (modifiedAtMs === null) return UNAVAILABLE;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(modifiedAtMs));
+}
+
+function formatChannels(channels: number | null): string {
+  if (channels === null) return UNAVAILABLE;
+  if (channels === 1) return "Mono";
+  if (channels === 2) return "Stereo";
+  return `${channels} ch`;
+}
+
+function formatSampleRate(sampleRate: number | null): string {
+  if (sampleRate === null) return UNAVAILABLE;
+  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(sampleRate / 1_000)} kHz`;
+}
+
+function metadataValue(value: string, isLoading: boolean) {
+  if (isLoading && value === UNAVAILABLE) {
+    return <span aria-label="Metadata loading">…</span>;
+  }
+  return value;
+}
+
 interface FileListProps {
   /** Playable entries for the currently selected folder. */
   entries: BrowserEntry[];
@@ -109,21 +162,32 @@ export function FileList({
 
   return (
     <div className="file-list" role="region" aria-label="File list">
-      <div className="file-list-header">
-        <span className="file-list-header-name">Name</span>
-      </div>
       <div
         ref={parentRef}
         className="file-list-viewport"
-        role="listbox"
+        role="grid"
         aria-label="Playable files"
+        aria-colcount={8}
+        aria-rowcount={entries.length + 1}
       >
+        <div className="file-list-header" role="row">
+          <span role="columnheader">Name</span>
+          <span role="columnheader">Duration</span>
+          <span role="columnheader">Size</span>
+          <span role="columnheader">Modified</span>
+          <span role="columnheader">Channels</span>
+          <span role="columnheader">Sample rate</span>
+          <span role="columnheader">Bit depth</span>
+          <span role="columnheader">Codec</span>
+        </div>
         <div
           className="file-list-inner"
           style={{ height: `${virtualizer.getTotalSize()}px` }}
         >
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const entry = entries[virtualRow.index];
+            const metadata = entry.metadata;
+            const metadataLoading = isLoading && metadata == null;
             return (
               <div
                 key={entry.id}
@@ -142,12 +206,58 @@ export function FileList({
                     selectEntry(entry);
                   }
                 }}
-                role="option"
+                role="row"
+                aria-rowindex={virtualRow.index + 2}
                 aria-selected={selectedEntryIdForFolder === entry.id}
                 tabIndex={0}
-                aria-label={entry.name}
               >
-                <span className="file-list-row-name">{entry.name}</span>
+                <span className="file-list-row-name" role="gridcell">
+                  {entry.name}
+                </span>
+                <span role="gridcell">
+                  {metadataValue(
+                    formatDuration(metadata?.duration_ms ?? null),
+                    metadataLoading,
+                  )}
+                </span>
+                <span role="gridcell">
+                  {metadataValue(
+                    formatSize(metadata?.size_bytes ?? null),
+                    metadataLoading,
+                  )}
+                </span>
+                <span role="gridcell">
+                  {metadataValue(
+                    formatModified(metadata?.modified_at_ms ?? null),
+                    metadataLoading,
+                  )}
+                </span>
+                <span role="gridcell">
+                  {metadataValue(
+                    formatChannels(metadata?.channels ?? null),
+                    metadataLoading,
+                  )}
+                </span>
+                <span role="gridcell">
+                  {metadataValue(
+                    formatSampleRate(metadata?.sample_rate ?? null),
+                    metadataLoading,
+                  )}
+                </span>
+                <span role="gridcell">
+                  {metadataValue(
+                    metadata?.bit_depth == null
+                      ? UNAVAILABLE
+                      : `${metadata.bit_depth}-bit`,
+                    metadataLoading,
+                  )}
+                </span>
+                <span role="gridcell">
+                  {metadataValue(
+                    metadata?.codec ?? UNAVAILABLE,
+                    metadataLoading,
+                  )}
+                </span>
               </div>
             );
           })}

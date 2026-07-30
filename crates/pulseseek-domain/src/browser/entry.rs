@@ -63,6 +63,22 @@ pub struct FolderEntry {
 pub struct PlayableFileEntry {
     pub id: EntryId,
     pub name: String,
+    pub metadata: Option<PlayableFileMetadata>,
+}
+
+/// Available filesystem and stream metadata for a playable file.
+///
+/// Every field remains optional so metadata failures never make a playable
+/// browser entry disappear.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlayableFileMetadata {
+    pub duration_ms: Option<u64>,
+    pub size_bytes: Option<u64>,
+    pub modified_at_ms: Option<u64>,
+    pub channels: Option<u16>,
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u32>,
+    pub codec: Option<String>,
 }
 
 /// An unsupported (non-playable) file entry, hidden by default.
@@ -158,7 +174,11 @@ mod tests {
     }
 
     fn playable(path: &str, name: &str) -> BrowserEntry {
-        BrowserEntry::PlayableFile(PlayableFileEntry { id: entry_id(path), name: name.to_string() })
+        BrowserEntry::PlayableFile(PlayableFileEntry {
+            id: entry_id(path),
+            name: name.to_string(),
+            metadata: None,
+        })
     }
 
     fn unsupported(path: &str, name: &str) -> BrowserEntry {
@@ -307,6 +327,31 @@ mod tests {
     fn browser_entry_name_accessor() {
         let e = folder("/music", "My Music");
         assert_eq!(e.name(), "My Music");
+    }
+
+    #[test]
+    fn playable_entry_keeps_partial_metadata() {
+        let entry = BrowserEntry::PlayableFile(PlayableFileEntry {
+            id: entry_id("/music/song.mp3"),
+            name: "song.mp3".to_string(),
+            metadata: Some(PlayableFileMetadata {
+                duration_ms: Some(61_000),
+                size_bytes: Some(1_572_864),
+                modified_at_ms: None,
+                channels: Some(2),
+                sample_rate: Some(44_100),
+                bit_depth: None,
+                codec: Some("MP3".to_string()),
+            }),
+        });
+
+        let BrowserEntry::PlayableFile(file) = entry else {
+            panic!("expected playable file");
+        };
+        let metadata = file.metadata.expect("metadata should be present");
+        assert_eq!(metadata.duration_ms, Some(61_000));
+        assert_eq!(metadata.bit_depth, None);
+        assert_eq!(metadata.codec.as_deref(), Some("MP3"));
     }
 
     #[test]

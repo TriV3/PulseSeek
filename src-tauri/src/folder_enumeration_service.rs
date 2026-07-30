@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex};
 use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContext, ErrorCategory};
 
 use crate::playback_events::{
-    BrowserEntryData, FolderChunkPayload, PlaybackEventEmitter, EVENT_FOLDER_CHUNK,
+    BrowserEntryData, FolderChunkPayload, PlayableFileMetadataData, PlaybackEventEmitter,
+    EVENT_FOLDER_CHUNK,
 };
 
 /// Manages active folder enumeration sessions and their cancellation flags.
@@ -205,7 +206,27 @@ pub fn browser_entry_to_data(
         id: entry.id().as_str().to_string(),
         name: entry.name().to_string(),
         kind: kind.to_string(),
+        metadata: match entry {
+            pulseseek_domain::browser::entry::BrowserEntry::PlayableFile(file) => {
+                file.metadata.as_ref().map(|metadata| PlayableFileMetadataData {
+                    duration_ms: metadata.duration_ms.and_then(js_safe_integer),
+                    size_bytes: metadata.size_bytes.and_then(js_safe_integer),
+                    modified_at_ms: metadata.modified_at_ms.and_then(js_safe_integer),
+                    channels: metadata.channels,
+                    sample_rate: metadata.sample_rate,
+                    bit_depth: metadata.bit_depth,
+                    codec: metadata.codec.clone(),
+                })
+            },
+            _ => None,
+        },
     }
+}
+
+const MAX_JAVASCRIPT_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+
+fn js_safe_integer(value: u64) -> Option<u64> {
+    (value <= MAX_JAVASCRIPT_SAFE_INTEGER).then_some(value)
 }
 
 /// Emits a folder chunk event for a batch of entries.
@@ -308,6 +329,7 @@ mod tests {
             pulseseek_domain::browser::entry::BrowserEntry::PlayableFile(PlayableFileEntry {
                 id: EntryId::new("/music/kick.wav"),
                 name: "kick.wav".to_string(),
+                metadata: None,
             });
         let data = browser_entry_to_data(&entry);
         assert_eq!(data.kind, "playable");
@@ -320,6 +342,7 @@ mod tests {
             pulseseek_domain::browser::entry::BrowserEntry::PlayableFile(PlayableFileEntry {
                 id: EntryId::new("/a.wav"),
                 name: "a.wav".to_string(),
+                metadata: None,
             });
         let events = Arc::new(FakeEventEmitter::new());
 
@@ -343,5 +366,54 @@ mod tests {
         let payload: FolderChunkPayload =
             serde_json::from_value(recorded[0].payload.clone()).unwrap();
         assert!(payload.done);
+    }
+
+    #[test]
+    fn browser_entry_to_data_serializes_partial_metadata() {
+        use pulseseek_domain::browser::entry::{EntryId, PlayableFileEntry, PlayableFileMetadata};
+        let entry =
+            pulseseek_domain::browser::entry::BrowserEntry::PlayableFile(PlayableFileEntry {
+                id: EntryId::new("/music/song.mp3"),
+                name: "song.mp3".to_string(),
+                metadata: Some(PlayableFileMetadata {
+                    duration_ms: Some(61_000),
+                    size_bytes: Some(1_572_864),
+                    modified_at_ms: None,
+                    channels: Some(2),
+                    sample_rate: Some(44_100),
+                    bit_depth: None,
+                    codec: Some("MP3".to_string()),
+                }),
+            });
+
+        let data = browser_entry_to_data(&entry);
+
+        let metadata = data.metadata.expect("metadata should be serialized");
+        assert_eq!(metadata.duration_ms, Some(61_000));
+        assert_eq!(metadata.modified_at_ms, None);
+        assert_eq!(metadata.codec.as_deref(), Some("MP3"));
+    }
+
+    #[test]
+    fn browser_entry_to_data_omits_javascript_unsafe_integers() {
+        use pulseseek_domain::browser::entry::{EntryId, PlayableFileEntry, PlayableFileMetadata};
+        let entry =
+            pulseseek_domain::browser::entry::BrowserEntry::PlayableFile(PlayableFileEntry {
+                id: EntryId::new("/music/huge.wav"),
+                name: "huge.wav".to_string(),
+                metadata: Some(PlayableFileMetadata {
+                    duration_ms: None,
+                    size_bytes: Some(MAX_JAVASCRIPT_SAFE_INTEGER + 1),
+                    modified_at_ms: None,
+                    channels: None,
+                    sample_rate: None,
+                    bit_depth: None,
+                    codec: None,
+                }),
+            });
+
+        let data = browser_entry_to_data(&entry);
+
+        assert_eq!(data.metadata.expect("metadata").size_bytes, None);
     }
 }

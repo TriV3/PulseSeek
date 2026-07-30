@@ -7,6 +7,18 @@ export interface BrowserEntry {
   id: string;
   name: string;
   kind: BrowserEntryKind;
+  metadata?: PlayableFileMetadata | null;
+}
+
+/** Available filesystem and audio-stream metadata for a playable entry. */
+export interface PlayableFileMetadata {
+  duration_ms: number | null;
+  size_bytes: number | null;
+  modified_at_ms: number | null;
+  channels: number | null;
+  sample_rate: number | null;
+  bit_depth: number | null;
+  codec: string | null;
 }
 
 /** Per-folder state tracked in the tree. */

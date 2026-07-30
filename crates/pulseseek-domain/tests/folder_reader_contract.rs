@@ -31,7 +31,11 @@ impl FolderReader for FakeFolderReader {
 }
 
 fn entry(path: &str, name: &str) -> BrowserEntry {
-    BrowserEntry::PlayableFile(PlayableFileEntry { id: EntryId::new(path), name: name.to_string() })
+    BrowserEntry::PlayableFile(PlayableFileEntry {
+        id: EntryId::new(path),
+        name: name.to_string(),
+        metadata: None,
+    })
 }
 
 fn folder_entry(path: &str, name: &str) -> BrowserEntry {

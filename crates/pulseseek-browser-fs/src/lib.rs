@@ -2,9 +2,12 @@ use std::path::Path;
 
 use pulseseek_decoder_symphonia::registry::DecoderRegistry;
 use pulseseek_domain::browser::entry::{
-    BrowserEntry, EntryId, FolderEntry, PlayableFileEntry, UnsupportedFileEntry,
+    BrowserEntry, EntryId, FolderEntry, PlayableFileEntry, PlayableFileMetadata,
+    UnsupportedFileEntry,
 };
 use pulseseek_domain::browser::folder_reader::{FolderReadError, FolderReader};
+use pulseseek_domain::decoder::StreamMetadata;
+use pulseseek_domain::playback::position::Duration;
 
 /// Native filesystem adapter for [`FolderReader`].
 ///
@@ -44,8 +47,15 @@ impl NativeFolderReader {
                 BrowserEntry::Folder(FolderEntry { id: EntryId::new(&path_str), name: name_str })
             } else {
                 let id = EntryId::new(&path_str);
-                if DecoderRegistry::open(entry.path()).is_ok() {
-                    BrowserEntry::PlayableFile(PlayableFileEntry { id, name: name_str })
+                if let Ok(mut decoder) = DecoderRegistry::open(entry.path()) {
+                    let stream_metadata = decoder.metadata().ok();
+                    let file_metadata = entry.metadata().ok();
+                    let metadata = playable_file_metadata(stream_metadata, file_metadata.as_ref());
+                    BrowserEntry::PlayableFile(PlayableFileEntry {
+                        id,
+                        name: name_str,
+                        metadata: Some(metadata),
+                    })
                 } else if show_unsupported {
                     BrowserEntry::UnsupportedFile(UnsupportedFileEntry { id, name: name_str })
                 } else {
@@ -57,6 +67,34 @@ impl NativeFolderReader {
 
         entries.sort();
         Ok(entries)
+    }
+}
+
+fn playable_file_metadata(
+    stream_metadata: Option<StreamMetadata>,
+    file_metadata: Option<&std::fs::Metadata>,
+) -> PlayableFileMetadata {
+    PlayableFileMetadata {
+        duration_ms: stream_metadata.as_ref().and_then(|metadata| {
+            if let Duration::Known(duration) = metadata.duration {
+                (duration.as_millis() > 0).then_some(duration.as_millis())
+            } else {
+                None
+            }
+        }),
+        size_bytes: file_metadata.map(std::fs::Metadata::len),
+        modified_at_ms: file_metadata
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|modified| modified.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
+            .and_then(|duration| u64::try_from(duration.as_millis()).ok()),
+        channels: stream_metadata
+            .as_ref()
+            .and_then(|metadata| (metadata.channels > 0).then_some(metadata.channels)),
+        sample_rate: stream_metadata
+            .as_ref()
+            .and_then(|metadata| (metadata.sample_rate > 0).then_some(metadata.sample_rate)),
+        bit_depth: stream_metadata.as_ref().and_then(|metadata| metadata.bit_depth),
+        codec: stream_metadata.as_ref().map(|metadata| metadata.codec.to_string()),
     }
 }
 
@@ -106,6 +144,45 @@ mod tests {
 
         let result = NativeFolderReader.read_folder(dir.path()).unwrap();
         assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn native_reads_file_and_audio_metadata() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        create_wav(&dir.path().join("audio.wav"));
+
+        let result = NativeFolderReader.read_folder(dir.path()).unwrap();
+        let BrowserEntry::PlayableFile(file) = &result[0] else {
+            panic!("expected playable file");
+        };
+        let metadata = file.metadata.as_ref().expect("metadata should be available");
+
+        assert!(metadata.duration_ms.is_some());
+        assert!(metadata.size_bytes.is_some_and(|size| size > 0));
+        assert!(metadata.modified_at_ms.is_some());
+        assert_eq!(metadata.channels, Some(2));
+        assert_eq!(metadata.sample_rate, Some(44_100));
+        assert_eq!(metadata.bit_depth, Some(16));
+        assert_eq!(metadata.codec.as_deref(), Some("PCM"));
+    }
+
+    #[test]
+    fn zero_stream_values_are_unavailable() {
+        let metadata = playable_file_metadata(
+            Some(pulseseek_domain::decoder::StreamMetadata {
+                sample_rate: 0,
+                channels: 0,
+                duration: Duration::from_millis(0),
+                bit_depth: None,
+                codec: "MP3",
+            }),
+            None,
+        );
+
+        assert_eq!(metadata.duration_ms, None);
+        assert_eq!(metadata.channels, None);
+        assert_eq!(metadata.sample_rate, None);
+        assert_eq!(metadata.codec.as_deref(), Some("MP3"));
     }
 
     #[test]

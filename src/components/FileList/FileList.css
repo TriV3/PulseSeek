@@ -39,7 +39,8 @@
 /* ── Header ──────────────────────────────────────────────────────────── */
 
 .file-list-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 90px 90px 170px 90px 110px 90px 80px;
   align-items: center;
   padding: 6px 12px;
   border-bottom: 1px solid #e0e0e0;
@@ -49,23 +50,28 @@
   text-transform: uppercase;
   color: #666;
   flex-shrink: 0;
+  box-sizing: border-box;
+  min-width: 950px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
-.file-list-header-name {
-  flex: 1;
+.file-list-header > span:not(:first-child) {
+  text-align: right;
 }
 
 /* ── Virtual viewport ────────────────────────────────────────────────── */
 
 .file-list-viewport {
   flex: 1;
-  overflow-y: auto;
+  overflow: auto;
   position: relative;
 }
 
 .file-list-inner {
   position: relative;
-  width: 100%;
+  min-width: 950px;
 }
 
 /* ── Row ─────────────────────────────────────────────────────────────── */
@@ -74,12 +80,18 @@
   position: absolute;
   left: 0;
   width: 100%;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 90px 90px 170px 90px 110px 90px 80px;
   align-items: center;
   padding: 0 12px;
   cursor: pointer;
   border-bottom: 1px solid #f0f0f0;
   box-sizing: border-box;
+}
+
+.file-list-row > span:not(:first-child) {
+  text-align: right;
+  white-space: nowrap;
 }
 
 .file-list-row:hover {
@@ -96,7 +108,6 @@
 }
 
 .file-list-row-name {
-  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
