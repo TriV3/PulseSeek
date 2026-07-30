@@ -1,0 +1,28 @@
+.player-transport {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0 0;
+}
+
+.player-transport-buttons,
+.player-transport-position,
+.player-transport-volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.player-transport-position label,
+.player-transport-volume label {
+  min-width: 130px;
+}
+
+.player-transport-position input,
+.player-transport-volume input {
+  flex: 1;
+}
+
+.player-transport-error {
+  margin: 0;
+  color: #a03030;
+}
