@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use pulseseek_domain::error::{DiagnosticCode, DiagnosticContext, ErrorCategory};
+use pulseseek_domain::playback::mode::PlaybackMode;
 
 use super::*;
 use crate::audio_device_service::{DeviceInfoData, FakeAudioDeviceService};
