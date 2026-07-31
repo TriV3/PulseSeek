@@ -1,5 +1,6 @@
 pub mod audio_device_service;
 pub mod command_envelope;
+mod command_handlers;
 pub mod diagnostics;
 pub mod dialog_service;
 pub mod folder_enumeration_service;
