@@ -17,6 +17,7 @@ export const DEFAULT_PLAYER_PREFERENCES: PlayerPreferences = {
   selected_folder_path: null,
   expanded_folder_paths: [],
   last_played_file_path: null,
+  theme: "system",
 };
 
 export function usePlayerPreferences() {

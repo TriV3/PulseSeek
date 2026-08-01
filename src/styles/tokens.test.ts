@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -10,7 +10,6 @@ function readCss(relativePath: string): string {
   );
 }
 
-const tokensCss = readCss("./tokens.css");
 const appCss = readCss("../App.css");
 const fileListCss = readCss("../components/FileList/FileList.css");
 const folderTreeCss = readCss("../components/FolderTree/FolderTree.css");
@@ -20,6 +19,14 @@ const playerTransportCss = readCss(
 const confirmDialogCss = readCss(
   "../components/ConfirmDialog/ConfirmDialog.css",
 );
+
+// Vite rewrites `new URL(<literal>, import.meta.url)` into an http:// dev
+// URL, so resolve through a variable to keep a file: URL for readdirSync.
+const themesRelative = "./themes";
+const themeFiles = readdirSync(new URL(themesRelative, import.meta.url))
+  .filter((name) => name.endsWith(".css"))
+  .sort()
+  .map((name) => ({ name, css: readCss(`./themes/${name}`) }));
 
 /** The semantic tokens every PulseSeek theme must define. */
 const requiredTokens = [
@@ -82,10 +89,12 @@ const featureStyles = [
 const rawColorPattern =
   /(?:#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|\bcolor\(|transparent)/;
 
-function definedTokens(css: string): Set<string> {
+/** Tokens declared in the first CSS block of a theme file. */
+function tokensInTheme(css: string): Set<string> {
+  const block = css.match(/\{([^}]*)\}/)?.[1] ?? "";
   const defined = new Set<string>();
-  const pattern = /(?:^|\s)--([a-zA-Z0-9-]+)\s*:/g;
-  for (const match of css.matchAll(pattern)) {
+  const pattern = /--([a-zA-Z0-9-]+)\s*:/g;
+  for (const match of block.matchAll(pattern)) {
     defined.add(match[1]);
   }
   return defined;
@@ -101,14 +110,28 @@ function referencedTokens(css: string): Set<string> {
 }
 
 describe("semantic design tokens", () => {
-  const defined = definedTokens(tokensCss);
+  it("defines every required semantic token in each theme file", () => {
+    for (const theme of themeFiles) {
+      const defined = tokensInTheme(theme.css);
+      const missing = requiredTokens.filter((token) => !defined.has(token));
+      expect(missing, `${theme.name} is missing required tokens`).toEqual([]);
+    }
+  });
 
-  it("defines every required semantic token", () => {
-    const missing = requiredTokens.filter((token) => !defined.has(token));
-    expect(missing).toEqual([]);
+  it("discovers at least the light and dark themes", () => {
+    expect(themeFiles.map((theme) => theme.name)).toEqual(
+      expect.arrayContaining(["dark.css", "light.css"]),
+    );
   });
 
   it("resolves every var() reference used by feature styles", () => {
+    const defined = new Set<string>();
+    for (const theme of themeFiles) {
+      for (const token of tokensInTheme(theme.css)) {
+        defined.add(token);
+      }
+    }
+
     const referenced = new Set<string>();
     for (const css of featureStyles) {
       for (const token of referencedTokens(css)) {

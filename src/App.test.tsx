@@ -1,6 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
 import App from "./App";
+import { DEFAULT_PLAYER_PREFERENCES } from "./hooks/usePlayerPreferences";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -12,6 +14,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(invoke).mockReset();
 });
 
 describe("application shell", () => {
@@ -61,5 +64,23 @@ describe("application shell", () => {
     expect(browserSeparator).toHaveAttribute("aria-valuenow", "24");
     fireEvent.keyDown(browserSeparator, { key: "ArrowRight" });
     expect(browserSeparator).toHaveAttribute("aria-valuenow", "26");
+  });
+
+  it("applies the persisted theme without restart", async () => {
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "load_player_preferences") {
+        return {
+          version: 1,
+          preferences: { ...DEFAULT_PLAYER_PREFERENCES, theme: "dark" },
+        };
+      }
+      return undefined;
+    });
+
+    render(<App />);
+
+    await waitFor(() =>
+      expect(document.documentElement.dataset.theme).toBe("dark"),
+    );
   });
 });

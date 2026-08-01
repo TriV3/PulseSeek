@@ -11,7 +11,11 @@ import { useAudioDevices } from "./hooks/useAudioDevices";
 import { AudioDeviceSelector } from "./components/AudioDeviceSelector/AudioDeviceSelector";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { usePlayerPreferences } from "./hooks/usePlayerPreferences";
+import { useTheme } from "./hooks/useTheme";
+import { ThemeSelector } from "./components/ThemeSelector/ThemeSelector";
 import "./styles/tokens.css";
+import "./styles/themes/light.css";
+import "./styles/themes/dark.css";
 import "./App.css";
 
 const clamp = (value: number, minimum: number, maximum: number) =>
@@ -75,6 +79,7 @@ function App() {
   const playbackMode = usePlaybackMode();
   const audioDevices = useAudioDevices();
   const playerPreferences = usePlayerPreferences();
+  useTheme(playerPreferences.preferences.theme);
   const restoredOptions = useRef(false);
   const restoredBrowser = useRef(false);
   const restoredDevice = useRef(false);
@@ -349,6 +354,12 @@ function App() {
                   }
                 }}
                 onRetry={audioDevices.refresh}
+              />
+              <ThemeSelector
+                theme={playerPreferences.preferences.theme}
+                onChange={(theme) => {
+                  playerPreferences.update({ theme });
+                }}
               />
             </div>
           </div>
