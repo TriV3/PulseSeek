@@ -15,7 +15,11 @@ independent SQLite files described in ADR 0003.
 ## Layout
 
 - Schema version 1 creates `cache_meta(key, value, updated_at_ms)` only.
-  Feature record tables (waveform, recent folders, shortcuts, visualization
+- Schema version 2 (PR-063) adds `waveform_cache(cache_key, source_size,
+  source_modified_ms, algorithm_version, data, created_at_ms)` for versioned
+  waveform data keyed by source path. Size, modified timestamp, and algorithm
+  version validate every load; stale or corrupt rows are deleted on access.
+  Remaining feature record tables (recent folders, shortcuts, visualization
   settings) are added by the PRs that own them through later migrations.
 - `migrations(version, applied_at_ms)` records the applied schema version.
   Migrations run in a transaction and are idempotent on repeat startup.
