@@ -78,6 +78,8 @@ function App() {
     entries: fileListEntries,
     selectedEntryId: playback.playback.entryId,
     playbackStatus: playback.playback.status,
+    playbackGeneration: playback.playback.generation,
+    playbackMode: playbackMode.mode,
     onSelectEntry: playback.select,
   });
 
@@ -171,6 +173,7 @@ function App() {
           >
             <PlayerTransport
               status={transport.status}
+              hasSelection={transport.hasSelection}
               positionMs={transport.positionMs}
               durationMs={transport.durationMs}
               volume={transport.volume}
@@ -189,7 +192,6 @@ function App() {
             <div className="transport-options">
               <PlaybackModeSelector
                 mode={playbackMode.mode}
-                disabled={playbackMode.isChanging}
                 error={playbackMode.error}
                 onChange={playbackMode.selectMode}
               />

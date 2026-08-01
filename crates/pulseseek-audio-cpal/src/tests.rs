@@ -31,7 +31,7 @@ fn enumerate_includes_default_device() {
 
     let host = cpal::default_host();
     if let Some(default) = host.default_output_device() {
-        if let Ok(name) = default.name() {
+        if let Ok(name) = default.description().map(|description| description.name().to_string()) {
             let found = devices.iter().any(|d| d.name == name);
             assert!(found, "default device '{}' should be in device list", name);
         }

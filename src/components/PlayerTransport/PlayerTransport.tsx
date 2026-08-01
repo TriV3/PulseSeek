@@ -3,6 +3,7 @@ import "./PlayerTransport.css";
 
 interface PlayerTransportProps {
   status: TransportPlaybackStatus;
+  hasSelection: boolean;
   positionMs: number;
   durationMs: number | null;
   volume: number;
@@ -28,6 +29,7 @@ function formatTime(milliseconds: number | null): string {
 
 export function PlayerTransport({
   status,
+  hasSelection,
   positionMs,
   durationMs,
   volume,
@@ -45,8 +47,6 @@ export function PlayerTransport({
 }: PlayerTransportProps) {
   const playLabel = status === "playing" ? "Pause" : "Play";
   const seekMaximum = durationMs ?? 0;
-  const hasSelection = status !== "idle";
-
   return (
     <section className="player-transport" aria-label="Player transport">
       <div className="player-transport-buttons">

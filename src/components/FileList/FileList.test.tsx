@@ -365,6 +365,35 @@ describe("FileList — file selection", () => {
     ).toHaveAttribute("aria-selected", "true");
   });
 
+  it("moves the visible selection when transport changes track", () => {
+    const { rerender } = render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/test/music"
+        isLoading={false}
+        error={null}
+        playbackEntryId={sampleEntries[0].id}
+        playbackStatus="playing"
+      />,
+    );
+
+    rerender(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/test/music"
+        isLoading={false}
+        error={null}
+        playbackEntryId={sampleEntries[1].id}
+        playbackStatus="playing"
+      />,
+    );
+
+    expect(screen.getByRole("row", { name: /song2\.wav/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
   it("shows playback failure without removing the selected row", () => {
     const onSelect = vi.fn();
     render(

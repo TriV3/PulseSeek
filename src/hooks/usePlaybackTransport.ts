@@ -1,6 +1,13 @@
-import { useEffect, useState } from "react";
-import { pause, resume, seek, setVolume, stop } from "../api/commandEnvelope";
-import { onPosition, onStateChanged } from "../api/playbackEvents";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  pause,
+  resume,
+  seek,
+  setVolume,
+  stop,
+  type PlaybackMode,
+} from "../api/commandEnvelope";
+import { onCompleted, onPosition, onStateChanged } from "../api/playbackEvents";
 import type { BrowserEntry } from "../components/FolderTree/folderTreeTypes";
 
 export type TransportPlaybackStatus =
@@ -10,6 +17,8 @@ interface PlaybackTransportOptions {
   entries: BrowserEntry[];
   selectedEntryId: string | null;
   playbackStatus: TransportPlaybackStatus;
+  playbackGeneration?: number;
+  playbackMode?: PlaybackMode;
   onSelectEntry: (entry: BrowserEntry) => void | Promise<void>;
 }
 
@@ -17,6 +26,8 @@ export function usePlaybackTransport({
   entries,
   selectedEntryId,
   playbackStatus,
+  playbackGeneration = 0,
+  playbackMode = "one-shot",
   onSelectEntry,
 }: PlaybackTransportOptions) {
   const [positionMs, setPositionMs] = useState(0);
@@ -28,20 +39,49 @@ export function usePlaybackTransport({
   const [commandStatus, setCommandStatus] = useState<{
     entryId: string;
     status: "idle" | "playing" | "paused";
+    generation: number;
   } | null>(null);
+  const playbackContext = useRef({
+    entries,
+    selectedEntryId,
+    playbackGeneration,
+    playbackMode,
+    onSelectEntry,
+  });
+  useLayoutEffect(() => {
+    playbackContext.current = {
+      entries,
+      selectedEntryId,
+      playbackGeneration,
+      playbackMode,
+      onSelectEntry,
+    };
+  }, [
+    entries,
+    onSelectEntry,
+    playbackGeneration,
+    playbackMode,
+    selectedEntryId,
+  ]);
 
   useEffect(() => {
     let disposed = false;
     let unlistenState: (() => void) | undefined;
     let unlistenPosition: (() => void) | undefined;
+    let unlistenCompleted: (() => void) | undefined;
 
     void Promise.resolve(
       onStateChanged((payload) => {
         if (disposed) return;
         if (payload.state === "stopped") {
+          const context = playbackContext.current;
           setPositionMs(0);
           setDurationMs(null);
-          setCommandStatus({ entryId: selectedEntryId ?? "", status: "idle" });
+          setCommandStatus({
+            entryId: context.selectedEntryId ?? "",
+            status: "idle",
+            generation: context.playbackGeneration,
+          });
         }
         if (payload.state === "failed") setError("Playback failed.");
       }),
@@ -56,7 +96,7 @@ export function usePlaybackTransport({
     void Promise.resolve(
       onPosition((payload) => {
         if (disposed) return;
-        setPositionEntryId(selectedEntryId);
+        setPositionEntryId(playbackContext.current.selectedEntryId);
         setPositionMs(payload.position_ms);
         setDurationMs(payload.duration_ms);
       }),
@@ -68,13 +108,39 @@ export function usePlaybackTransport({
       .catch(() => {
         if (!disposed) setError("Playback position updates unavailable.");
       });
+    void Promise.resolve(
+      onCompleted(() => {
+        if (disposed) return;
+        const context = playbackContext.current;
+        const index = context.entries.findIndex(
+          (entry) => entry.id === context.selectedEntryId,
+        );
+        const next =
+          context.playbackMode === "sequential"
+            ? index >= 0
+              ? context.entries[index + 1]
+              : undefined
+            : context.playbackMode === "random"
+              ? pickRandomEntry(context.entries, context.selectedEntryId)
+              : undefined;
+        if (next) void context.onSelectEntry(next);
+      }),
+    )
+      .then((cleanup) => {
+        if (disposed) cleanup();
+        else unlistenCompleted = cleanup;
+      })
+      .catch(() => {
+        if (!disposed) setError("Playback completion updates unavailable.");
+      });
 
     return () => {
       disposed = true;
       unlistenState?.();
       unlistenPosition?.();
+      unlistenCompleted?.();
     };
-  }, [selectedEntryId]);
+  }, []);
 
   const runCommand = async (command: () => Promise<void>) => {
     setError(null);
@@ -93,7 +159,8 @@ export function usePlaybackTransport({
   const canPrevious = selectedIndex > 0;
   const canNext = selectedIndex >= 0 && selectedIndex < entries.length - 1;
   const effectiveStatus =
-    commandStatus?.entryId === selectedEntryId
+    commandStatus?.entryId === selectedEntryId &&
+    commandStatus.generation === playbackGeneration
       ? commandStatus.status
       : playbackStatus;
 
@@ -104,6 +171,7 @@ export function usePlaybackTransport({
     muted,
     error,
     status: effectiveStatus,
+    hasSelection: selectedEntryId !== null,
     canPrevious,
     canNext,
     togglePlayPause: () => {
@@ -111,7 +179,11 @@ export function usePlaybackTransport({
         return runCommand(async () => {
           await pause();
           if (selectedEntryId) {
-            setCommandStatus({ entryId: selectedEntryId, status: "paused" });
+            setCommandStatus({
+              entryId: selectedEntryId,
+              status: "paused",
+              generation: playbackGeneration,
+            });
           }
         });
       }
@@ -119,7 +191,11 @@ export function usePlaybackTransport({
         return runCommand(async () => {
           await resume();
           if (selectedEntryId) {
-            setCommandStatus({ entryId: selectedEntryId, status: "playing" });
+            setCommandStatus({
+              entryId: selectedEntryId,
+              status: "playing",
+              generation: playbackGeneration,
+            });
           }
         });
       }
@@ -132,7 +208,11 @@ export function usePlaybackTransport({
         setPositionMs(0);
         setDurationMs(null);
         if (selectedEntryId) {
-          setCommandStatus({ entryId: selectedEntryId, status: "idle" });
+          setCommandStatus({
+            entryId: selectedEntryId,
+            status: "idle",
+            generation: playbackGeneration,
+          });
         }
       }),
     handlePrevious: () => {
@@ -176,4 +256,13 @@ export function usePlaybackTransport({
       });
     },
   };
+}
+
+function pickRandomEntry(
+  entries: BrowserEntry[],
+  currentEntryId: string | null,
+): BrowserEntry | undefined {
+  const alternatives = entries.filter((entry) => entry.id !== currentEntryId);
+  const candidates = alternatives.length > 0 ? alternatives : entries;
+  return candidates[Math.floor(Math.random() * candidates.length)];
 }

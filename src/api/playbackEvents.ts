@@ -117,6 +117,7 @@ function isBrowserEntryData(value: unknown): value is BrowserEntryData {
 
 export const EVENT_STATE_CHANGED = "playback:state-changed";
 export const EVENT_POSITION = "playback:position";
+export const EVENT_COMPLETED = "playback:completed";
 export const EVENT_DEVICE_LOST = "audio:device-lost";
 export const EVENT_FOLDER_CHUNK = "browser:folder-chunk";
 
@@ -146,6 +147,11 @@ export function onPosition(
   return listen<PositionPayload>(EVENT_POSITION, (event) => {
     handler(event.payload);
   });
+}
+
+/** Listens for natural end-of-track completion. */
+export function onCompleted(handler: () => void): Promise<UnlistenFn> {
+  return listen(EVENT_COMPLETED, () => handler());
 }
 
 /**

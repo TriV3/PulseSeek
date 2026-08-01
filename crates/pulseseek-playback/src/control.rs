@@ -21,6 +21,7 @@ pub struct PlaybackControl {
     pub(crate) seeking: Arc<AtomicBool>,
     pub(crate) generation: Arc<AtomicU64>,
     pub(crate) terminal: Arc<AtomicU8>,
+    pub(crate) position_frames: Arc<AtomicU64>,
 }
 
 pub(crate) const TERMINAL_ACTIVE: u8 = 0;
@@ -58,6 +59,21 @@ impl PlaybackControl {
     /// Returns whether this playback session has been stopped.
     pub fn is_stopped(&self) -> bool {
         self.stopped.load(Ordering::Acquire)
+    }
+
+    /// Returns whether playback reached the end naturally.
+    pub fn is_completed(&self) -> bool {
+        self.terminal.load(Ordering::Acquire) == TERMINAL_COMPLETED
+    }
+
+    /// Returns the number of output frames consumed by the audio callback.
+    pub fn position_frames(&self) -> u64 {
+        self.position_frames.load(Ordering::Acquire)
+    }
+
+    /// Resets the callback clock after a successful seek.
+    pub fn set_position_frames(&self, frames: u64) {
+        self.position_frames.store(frames, Ordering::Release);
     }
 
     pub(crate) fn generation(&self) -> u64 {
@@ -124,7 +140,8 @@ impl PlaybackConsumer {
         }
         let mut written = 0;
         for sample in buf.iter_mut() {
-            let mut buffered = [BufferedSample { value: 0.0, generation: 0 }];
+            let mut buffered =
+                [BufferedSample { value: 0.0, generation: 0, resets_position: false }];
             if self.consume_current(&mut buffered) == 0 {
                 break;
             }
@@ -203,6 +220,7 @@ impl PlaybackConsumer {
                 }
             }
             written += frame.len();
+            self.control.position_frames.fetch_add(1, Ordering::Relaxed);
         }
         written
     }
@@ -216,6 +234,9 @@ impl PlaybackConsumer {
         let generation = self.control.generation.load(Ordering::Acquire);
         while self.consumer.pop_slice(output) == 1 {
             if output[0].generation == generation {
+                if output[0].resets_position {
+                    self.control.set_position_frames(0);
+                }
                 return 1;
             }
         }

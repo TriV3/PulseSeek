@@ -107,6 +107,16 @@ export function FileList({
     setTrashError(null);
   }, [selectedPath]);
 
+  useEffect(() => {
+    if (
+      playbackEntryId &&
+      entries.some((entry) => entry.id === playbackEntryId)
+    ) {
+      setSelectedEntryId(playbackEntryId);
+      setActiveEntryId(playbackEntryId);
+    }
+  }, [entries, playbackEntryId]);
+
   const selectEntry = (entry: BrowserEntry) => {
     setSelectedEntryId(entry.id);
     onFileSelect?.(entry);

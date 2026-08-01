@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::path::Path;
 
 use symphonia::core::audio::SampleBuffer;
@@ -23,6 +24,7 @@ struct SymphoniaDecoder {
     bit_depth: Option<u32>,
     codec_name: &'static str,
     sample_buf: SampleBuffer<f32>,
+    pending_samples: VecDeque<f32>,
 }
 
 impl SymphoniaDecoder {
@@ -104,6 +106,7 @@ impl SymphoniaDecoder {
             bit_depth,
             codec_name,
             sample_buf,
+            pending_samples: VecDeque::new(),
         })
     }
 }
@@ -145,6 +148,14 @@ impl Decoder for SymphoniaDecoder {
         let mut total_written = 0usize;
 
         while total_written < buf.len() {
+            let Some(sample) = self.pending_samples.pop_front() else {
+                break;
+            };
+            buf[total_written] = sample;
+            total_written += 1;
+        }
+
+        while total_written < buf.len() {
             let packet = match self.format.next_packet() {
                 Ok(pkt) => pkt,
                 Err(symphonia::core::errors::Error::IoError(ref e))
@@ -173,6 +184,7 @@ impl Decoder for SymphoniaDecoder {
             total_written += to_copy;
 
             if to_copy < samples.len() {
+                self.pending_samples.extend(samples[to_copy..].iter().copied());
                 break;
             }
         }
@@ -193,6 +205,8 @@ impl Decoder for SymphoniaDecoder {
             .map_err(|e| {
                 DecodeError::new(DiagnosticContext::new(DiagnosticCode::BrowserRead), e)
             })?;
+
+        self.pending_samples.clear();
 
         Ok(target.position())
     }

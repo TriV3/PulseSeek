@@ -182,8 +182,8 @@ pub(crate) struct StreamCallbackContext {
 
 pub(crate) fn find_device(host: &cpal::Host, device_id: &DeviceId) -> Option<cpal::Device> {
     if let Some(default) = host.default_output_device() {
-        if let Ok(name) = default.name() {
-            if DeviceId::new(name) == *device_id {
+        if let Ok(id) = default.id() {
+            if DeviceId::new(id.to_string()) == *device_id {
                 return Some(default);
             }
         }
@@ -191,8 +191,8 @@ pub(crate) fn find_device(host: &cpal::Host, device_id: &DeviceId) -> Option<cpa
 
     if let Ok(outputs) = host.output_devices() {
         for device in outputs {
-            if let Ok(name) = device.name() {
-                if DeviceId::new(name) == *device_id {
+            if let Ok(id) = device.id() {
+                if DeviceId::new(id.to_string()) == *device_id {
                     return Some(device);
                 }
             }
@@ -203,11 +203,19 @@ pub(crate) fn find_device(host: &cpal::Host, device_id: &DeviceId) -> Option<cpa
 }
 
 pub(crate) fn device_info(device: &cpal::Device) -> Result<DeviceInfo, AudioOutputError> {
-    let name = device.name().map_err(|e| {
-        AudioOutputError::new(DiagnosticContext::new(DiagnosticCode::AudioOutput), e)
-    })?;
+    let name =
+        device.description().map(|description| description.name().to_string()).map_err(|e| {
+            AudioOutputError::new(DiagnosticContext::new(DiagnosticCode::AudioOutput), e)
+        })?;
 
-    let id = DeviceId::new(name.clone());
+    let id = DeviceId::new(
+        device
+            .id()
+            .map_err(|e| {
+                AudioOutputError::new(DiagnosticContext::new(DiagnosticCode::AudioOutput), e)
+            })?
+            .to_string(),
+    );
 
     let mut max_channels: u16 = 0;
     let mut sample_rates: Vec<u32> = Vec::new();
@@ -219,8 +227,8 @@ pub(crate) fn device_info(device: &cpal::Device) -> Result<DeviceInfo, AudioOutp
             if ch > max_channels {
                 max_channels = ch;
             }
-            let min_rate = cfg.min_sample_rate().0;
-            let max_rate = cfg.max_sample_rate().0;
+            let min_rate = cfg.min_sample_rate();
+            let max_rate = cfg.max_sample_rate();
             for rate in &[min_rate, max_rate] {
                 if seen_rates.insert(*rate) {
                     sample_rates.push(*rate);
