@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFolderTree } from "./hooks/useFolderTree";
 import { FolderTree } from "./components/FolderTree/FolderTree";
 import { FileList } from "./components/FileList/FileList";
@@ -9,6 +10,7 @@ import { usePlaybackMode } from "./hooks/usePlaybackMode";
 import { useAudioDevices } from "./hooks/useAudioDevices";
 import { AudioDeviceSelector } from "./components/AudioDeviceSelector/AudioDeviceSelector";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { usePlayerPreferences } from "./hooks/usePlayerPreferences";
 import "./App.css";
 
 const clamp = (value: number, minimum: number, maximum: number) =>
@@ -71,47 +73,166 @@ function App() {
   const playback = usePlaybackSelection();
   const playbackMode = usePlaybackMode();
   const audioDevices = useAudioDevices();
+  const playerPreferences = usePlayerPreferences();
+  const restoredOptions = useRef(false);
+  const restoredBrowser = useRef(false);
+  const restoredDevice = useRef(false);
+  const restoredFile = useRef(false);
 
   const fileListEntries = state.playableEntries[state.selectedPath ?? ""] ?? [];
   const fileListFolder = state.folders[state.selectedPath ?? ""] ?? undefined;
+  const selectAndRemember = useCallback(
+    async (
+      entry: import("./components/FolderTree/folderTreeTypes").BrowserEntry,
+    ) => {
+      if (await playback.select(entry)) {
+        playerPreferences.update({
+          last_played_file_path: entry.id,
+          selected_folder_path:
+            entry.id.substring(0, entry.id.lastIndexOf("/")) || null,
+        });
+      }
+    },
+    [playback, playerPreferences],
+  );
   const transport = usePlaybackTransport({
     entries: fileListEntries,
     selectedEntryId: playback.playback.entryId,
     playbackStatus: playback.playback.status,
     playbackGeneration: playback.playback.generation,
     playbackMode: playbackMode.mode,
-    onSelectEntry: playback.select,
+    onSelectEntry: selectAndRemember,
   });
+
+  useEffect(() => {
+    if (!playerPreferences.isLoaded || restoredOptions.current) return;
+    restoredOptions.current = true;
+    const saved = playerPreferences.preferences;
+    setWaveformSize(saved.waveform_size);
+    setBrowserSize(saved.browser_size);
+    void playbackMode.selectMode(saved.playback_mode);
+    void transport.restoreVolume(saved.volume, saved.muted);
+  }, [
+    playbackMode,
+    playerPreferences.isLoaded,
+    playerPreferences.preferences,
+    transport,
+  ]);
+
+  useEffect(() => {
+    const saved = playerPreferences.preferences;
+    if (
+      !playerPreferences.isLoaded ||
+      restoredBrowser.current ||
+      state.status !== "ready"
+    ) {
+      return;
+    }
+    restoredBrowser.current = true;
+    if (saved.selected_folder_path) {
+      void folderTree
+        .restoreContext(saved.selected_folder_path)
+        .then((restoredPath) => {
+          if (restoredPath !== saved.selected_folder_path) {
+            playerPreferences.update({
+              selected_folder_path:
+                restoredPath === "computer://" ? null : restoredPath,
+              expanded_folder_paths:
+                restoredPath === "computer://"
+                  ? ["computer://"]
+                  : saved.expanded_folder_paths.filter((path) =>
+                      restoredPath.startsWith(path),
+                    ),
+              last_played_file_path: null,
+            });
+          }
+        });
+    }
+  }, [
+    folderTree,
+    playerPreferences,
+    playerPreferences.isLoaded,
+    playerPreferences.preferences,
+    state.status,
+  ]);
+
+  useEffect(() => {
+    const savedDevice = playerPreferences.preferences.output_device_id;
+    if (
+      !playerPreferences.isLoaded ||
+      restoredDevice.current ||
+      audioDevices.isLoading
+    ) {
+      return;
+    }
+    restoredDevice.current = true;
+    if (
+      savedDevice &&
+      audioDevices.devices.some((device) => device.id === savedDevice)
+    ) {
+      void audioDevices.choose(savedDevice);
+    }
+  }, [
+    audioDevices,
+    playerPreferences.isLoaded,
+    playerPreferences.preferences.output_device_id,
+  ]);
+
+  useEffect(() => {
+    if (!playerPreferences.isLoaded || restoredFile.current) return;
+    const lastPath = playerPreferences.preferences.last_played_file_path;
+    if (!lastPath) {
+      restoredFile.current = true;
+      return;
+    }
+    const restoredEntry = Object.values(state.playableEntries)
+      .flat()
+      .find((entry) => entry.id === lastPath);
+    if (restoredEntry) {
+      restoredFile.current = true;
+      playback.restore(restoredEntry.id);
+    }
+  }, [
+    playback,
+    playerPreferences.isLoaded,
+    playerPreferences.preferences.last_played_file_path,
+    state.playableEntries,
+  ]);
 
   const selectedEntry = fileListEntries.find(
     (entry) => entry.id === playback.playback.entryId,
   );
 
   const startResize = useCallback(
-    (axis: "horizontal" | "vertical", update: (value: number) => void) =>
+    (
+      axis: "horizontal" | "vertical",
+      update: (value: number) => void,
+      commit: (value: number) => void,
+    ) =>
       (event: React.PointerEvent<HTMLDivElement>) => {
         event.preventDefault();
         const container = event.currentTarget.parentElement;
         if (!container) return;
 
+        let latestValue: number | null = null;
         const handleMove = (moveEvent: PointerEvent) => {
           const bounds = container.getBoundingClientRect();
           const value =
             axis === "horizontal"
               ? ((moveEvent.clientY - bounds.top) / bounds.height) * 100
               : ((moveEvent.clientX - bounds.left) / bounds.width) * 100;
-          update(
-            clamp(
-              Math.round(value),
-              axis === "horizontal" ? 22 : 16,
-              axis === "horizontal" ? 62 : 46,
-            ),
+          latestValue = clamp(
+            Math.round(value),
+            axis === "horizontal" ? 22 : 16,
+            axis === "horizontal" ? 62 : 46,
           );
+          update(latestValue);
         };
         const handleUp = () => {
           document.removeEventListener("pointermove", handleMove);
           document.removeEventListener("pointerup", handleUp);
           document.body.classList.remove("is-resizing");
+          if (latestValue !== null) commit(latestValue);
         };
         document.body.classList.add("is-resizing");
         document.addEventListener("pointermove", handleMove);
@@ -132,10 +253,13 @@ function App() {
           ? transport.positionMs + 5_000
           : Math.min(transport.durationMs, transport.positionMs + 5_000),
       ),
-    onToggleLoop: () =>
-      playbackMode.selectMode(
-        playbackMode.mode === "loop-current" ? "one-shot" : "loop-current",
-      ),
+    onToggleLoop: () => {
+      const mode =
+        playbackMode.mode === "loop-current" ? "one-shot" : "loop-current";
+      return playbackMode.selectMode(mode).then((confirmed) => {
+        if (confirmed) playerPreferences.update({ playback_mode: confirmed });
+      });
+    },
   });
 
   return (
@@ -155,13 +279,19 @@ function App() {
           aria-valuemax={62}
           aria-valuenow={waveformSize}
           tabIndex={0}
-          onPointerDown={startResize("horizontal", setWaveformSize)}
+          onPointerDown={startResize("horizontal", setWaveformSize, (size) =>
+            playerPreferences.update({ waveform_size: size }),
+          )}
           onKeyDown={(event) => {
             if (event.key === "ArrowDown" || event.key === "ArrowUp") {
               event.preventDefault();
-              setWaveformSize((size) =>
-                clamp(size + (event.key === "ArrowDown" ? 2 : -2), 22, 62),
+              const next = clamp(
+                waveformSize + (event.key === "ArrowDown" ? 2 : -2),
+                22,
+                62,
               );
+              setWaveformSize(next);
+              playerPreferences.update({ waveform_size: next });
             }
           }}
         />
@@ -186,18 +316,37 @@ function App() {
               onPrevious={transport.handlePrevious}
               onNext={transport.handleNext}
               onSeek={transport.handleSeek}
-              onVolume={transport.handleVolume}
-              onToggleMute={transport.toggleMute}
+              onVolume={async (volume) => {
+                if (await transport.handleVolume(volume)) {
+                  playerPreferences.update({ volume });
+                }
+              }}
+              onToggleMute={async () => {
+                const muted = !transport.muted;
+                if (await transport.toggleMute()) {
+                  playerPreferences.update({ muted });
+                }
+              }}
             />
             <div className="transport-options">
               <PlaybackModeSelector
                 mode={playbackMode.mode}
                 error={playbackMode.error}
-                onChange={playbackMode.selectMode}
+                onChange={async (mode) => {
+                  const confirmed = await playbackMode.selectMode(mode);
+                  if (confirmed) {
+                    playerPreferences.update({ playback_mode: confirmed });
+                  }
+                }}
               />
               <AudioDeviceSelector
                 {...audioDevices}
-                onChange={audioDevices.choose}
+                onChange={async (deviceId) => {
+                  const confirmed = await audioDevices.choose(deviceId);
+                  if (confirmed) {
+                    playerPreferences.update({ output_device_id: confirmed });
+                  }
+                }}
                 onRetry={audioDevices.refresh}
               />
             </div>
@@ -219,7 +368,37 @@ function App() {
             style={{ gridTemplateColumns: `${browserSize}% 7px 1fr` }}
           >
             <aside className="app-sidebar">
-              <FolderTree {...folderTree} />
+              <FolderTree
+                {...folderTree}
+                toggleExpand={(path) => {
+                  const expanded = new Set(
+                    Object.entries(state.folders)
+                      .filter(([, folder]) => folder.expanded)
+                      .map(([folderPath]) => folderPath),
+                  );
+                  if (state.folders[path]?.expanded) expanded.delete(path);
+                  else expanded.add(path);
+                  playerPreferences.update({
+                    expanded_folder_paths: [...expanded],
+                  });
+                  folderTree.toggleExpand(path);
+                }}
+                selectFolder={(path) => {
+                  playerPreferences.update({ selected_folder_path: path });
+                  folderTree.selectFolder(path);
+                }}
+                navigateUp={() => {
+                  const selected = state.selectedPath;
+                  const trimmed = selected?.replace(/\/+$/, "") ?? "";
+                  const separator = trimmed.lastIndexOf("/");
+                  if (separator > 0) {
+                    playerPreferences.update({
+                      selected_folder_path: trimmed.substring(0, separator),
+                    });
+                  }
+                  folderTree.navigateUp();
+                }}
+              />
             </aside>
             <div
               className="splitter splitter--vertical"
@@ -230,13 +409,19 @@ function App() {
               aria-valuemax={46}
               aria-valuenow={browserSize}
               tabIndex={0}
-              onPointerDown={startResize("vertical", setBrowserSize)}
+              onPointerDown={startResize("vertical", setBrowserSize, (size) =>
+                playerPreferences.update({ browser_size: size }),
+              )}
               onKeyDown={(event) => {
                 if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
                   event.preventDefault();
-                  setBrowserSize((size) =>
-                    clamp(size + (event.key === "ArrowRight" ? 2 : -2), 16, 46),
+                  const next = clamp(
+                    browserSize + (event.key === "ArrowRight" ? 2 : -2),
+                    16,
+                    46,
                   );
+                  setBrowserSize(next);
+                  playerPreferences.update({ browser_size: next });
                 }
               }}
             />
@@ -246,7 +431,7 @@ function App() {
                 selectedPath={state.selectedPath}
                 isLoading={fileListFolder?.isLoading ?? false}
                 error={fileListFolder?.error ?? null}
-                onFileSelect={playback.select}
+                onFileSelect={selectAndRemember}
                 playbackEntryId={playback.playback.entryId}
                 playbackStatus={playback.playback.status}
                 playbackError={playback.playback.error}
@@ -265,4 +450,3 @@ function App() {
 }
 
 export default App;
-import { useCallback, useState } from "react";

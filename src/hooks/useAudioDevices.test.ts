@@ -31,9 +31,13 @@ describe("useAudioDevices", () => {
     selectMock.mockRejectedValue(new Error("device missing"));
     const { result } = renderHook(() => useAudioDevices());
     await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
-    await act(async () => result.current.choose("missing"));
+    let confirmed: string | null = "unexpected";
+    await act(async () => {
+      confirmed = await result.current.choose("missing");
+    });
     expect(result.current.selectedDeviceId).toBe("default");
     expect(result.current.error).toBe("device missing");
+    expect(confirmed).toBeNull();
   });
 
   it("reflects native fallback device after selection", async () => {

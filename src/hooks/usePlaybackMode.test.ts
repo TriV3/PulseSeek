@@ -25,11 +25,15 @@ describe("usePlaybackMode", () => {
     setPlaybackModeMock.mockRejectedValue(new Error("mode failed"));
     const { result } = renderHook(() => usePlaybackMode());
 
-    await act(async () => result.current.selectMode("random"));
+    let confirmed: string | null = "unexpected";
+    await act(async () => {
+      confirmed = await result.current.selectMode("random");
+    });
 
     expect(result.current.mode).toBe("one-shot");
     expect(result.current.error).toBe("mode failed");
     expect(result.current.isChanging).toBe(false);
+    expect(confirmed).toBeNull();
   });
 
   it("ignores stale mode results", async () => {

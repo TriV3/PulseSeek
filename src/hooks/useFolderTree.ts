@@ -209,6 +209,33 @@ export function folderTreeReducer(
     case "SELECT_FOLDER":
       return { ...state, selectedPath: action.path };
 
+    case "RESTORE_CONTEXT": {
+      const expanded = new Set(action.expandedPaths);
+      const placeholders = Object.fromEntries(
+        action.expandedPaths.map((path) => [
+          path,
+          state.folders[path] ?? {
+            expanded: true,
+            children: [],
+            isLoading: false,
+            error: null,
+          },
+        ]),
+      );
+      return {
+        ...state,
+        selectedPath: action.selectedPath,
+        folders: Object.fromEntries(
+          Object.entries({ ...state.folders, ...placeholders }).map(
+            ([path, folder]) => [
+              path,
+              { ...folder, expanded: expanded.has(path) },
+            ],
+          ),
+        ),
+      };
+    }
+
     case "NAVIGATE_UP": {
       if (!state.selectedPath) return state;
       const parentPath = getParentPath(state.selectedPath);
@@ -257,10 +284,24 @@ export function folderTreeReducer(
 // ── Hook ─────────────────────────────────────────────────────────────────
 
 const SESSION_PATHS: Record<string, string> = {};
+const SESSION_COMPLETIONS: Record<string, () => void> = {};
 // Buffer for folder-chunk events that arrive before their session mapping
 // is registered (race between Rust worker emitting and JavaScript setting
 // the session→path mapping).
 const PENDING_CHUNKS: Record<string, FolderChunkPayload[]> = {};
+
+export function getRestorationPaths(selectedPath: string): string[] {
+  const ancestors: string[] = [];
+  let current: string | null = selectedPath;
+  while (current && current !== "computer://") {
+    ancestors.push(current);
+    current = getParentPath(current);
+  }
+  if (selectedPath.startsWith("/") && !ancestors.includes("/")) {
+    ancestors.push("/");
+  }
+  return ancestors.reverse();
+}
 
 export interface UseFolderTreeReturn {
   state: FolderTreeState;
@@ -269,6 +310,7 @@ export interface UseFolderTreeReturn {
   navigateUp: () => void;
   clearError: () => void;
   removeEntries: (path: string, entryIds: string[]) => void;
+  restoreContext: (selectedPath: string) => Promise<string>;
 }
 
 export function useFolderTree(): UseFolderTreeReturn {
@@ -309,6 +351,8 @@ export function useFolderTree(): UseFolderTreeReturn {
         });
         if (payload.done) {
           delete SESSION_PATHS[payload.session_id];
+          SESSION_COMPLETIONS[payload.session_id]?.();
+          delete SESSION_COMPLETIONS[payload.session_id];
         }
       });
     })();
@@ -439,6 +483,55 @@ export function useFolderTree(): UseFolderTreeReturn {
     dispatch({ type: "REMOVE_ENTRIES", path, entryIds });
   }, []);
 
+  const restoreContext = useCallback((selectedPath: string) => {
+    const paths = getRestorationPaths(selectedPath);
+    dispatch({
+      type: "RESTORE_CONTEXT",
+      selectedPath,
+      expandedPaths: ["computer://", ...paths],
+    });
+    return (async () => {
+      const restoredPaths: string[] = [];
+      for (const path of paths) {
+        try {
+          const sessionId = await startEnumeration(path);
+          const completed = new Promise<void>((resolve) => {
+            SESSION_COMPLETIONS[sessionId] = resolve;
+          });
+          SESSION_PATHS[sessionId] = path;
+          dispatch({ type: "START_ENUMERATING", path, sessionId });
+          const buffered = PENDING_CHUNKS[sessionId];
+          delete PENDING_CHUNKS[sessionId];
+          for (const payload of buffered ?? []) {
+            dispatch({
+              type: "ENUMERATION_CHUNK",
+              path,
+              entries: payload.entries,
+              foldersDone: payload.folders_done ?? payload.done,
+              done: payload.done,
+            });
+            if (payload.done) {
+              delete SESSION_PATHS[sessionId];
+              SESSION_COMPLETIONS[sessionId]?.();
+              delete SESSION_COMPLETIONS[sessionId];
+            }
+          }
+          await completed;
+          restoredPaths.push(path);
+        } catch {
+          const fallback = restoredPaths.at(-1) ?? "computer://";
+          dispatch({
+            type: "RESTORE_CONTEXT",
+            selectedPath: fallback,
+            expandedPaths: ["computer://", ...restoredPaths],
+          });
+          return fallback;
+        }
+      }
+      return selectedPath;
+    })();
+  }, []);
+
   return {
     state,
     toggleExpand,
@@ -446,5 +539,6 @@ export function useFolderTree(): UseFolderTreeReturn {
     navigateUp,
     clearError,
     removeEntries,
+    restoreContext,
   };
 }

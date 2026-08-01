@@ -22,7 +22,7 @@ export function usePlaybackSelection() {
   const [playback, setPlayback] = useState<PlaybackSelection>(INITIAL_PLAYBACK);
   const generation = useRef(0);
 
-  const select = useCallback(async (entry: BrowserEntry) => {
+  const select = useCallback(async (entry: BrowserEntry): Promise<boolean> => {
     const requestGeneration = ++generation.current;
     setPlayback({
       entryId: entry.id,
@@ -40,17 +40,30 @@ export function usePlaybackSelection() {
           error: null,
           generation: requestGeneration,
         });
+        return true;
       }
+      return false;
     } catch (error: unknown) {
-      if (requestGeneration !== generation.current) return;
+      if (requestGeneration !== generation.current) return false;
       setPlayback({
         entryId: entry.id,
         status: "failed",
         error: error instanceof Error ? error.message : "Unable to play file.",
         generation: requestGeneration,
       });
+      return false;
     }
   }, []);
 
-  return { playback, select };
+  const restore = useCallback((entryId: string) => {
+    const requestGeneration = ++generation.current;
+    setPlayback({
+      entryId,
+      status: "idle",
+      error: null,
+      generation: requestGeneration,
+    });
+  }, []);
+
+  return { playback, select, restore };
 }

@@ -45,7 +45,7 @@ pub fn dispatch(
             playback::handle(&envelope.command, envelope.payload, service, events)
         },
         "list_devices" | "current_device" | "select_device" => {
-            device::handle(&envelope.command, envelope.payload, device_service, events)
+            device::handle(&envelope.command, envelope.payload, service, device_service, events)
         },
         "list_browser_roots" | "start_enumeration" | "cancel_enumeration" | "move_to_trash" => {
             browsing::handle(

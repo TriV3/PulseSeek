@@ -9,6 +9,7 @@ pub mod native_playback_service;
 pub mod path_validation;
 pub mod playback_events;
 pub mod playback_service;
+pub mod player_preferences;
 pub mod trash_service;
 
 use std::sync::{Arc, Mutex};
@@ -17,6 +18,9 @@ use diagnostics::DiagnosticsConfig;
 use pulseseek_audio_cpal::CpalAudioOutput;
 use tauri::Manager;
 
+use crate::player_preferences::{
+    JsonPlayerPreferencesRepository, SharedPlayerPreferencesRepository,
+};
 use crate::trash_service::{NativeTrashService, TrashService};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -66,9 +70,21 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             diagnostics::report_error,
             command_envelope::invoke_command,
-            command_envelope::pick_folder_dialog
+            command_envelope::pick_folder_dialog,
+            player_preferences::load_player_preferences,
+            player_preferences::save_player_preferences
         ])
         .setup(|app| {
+            let preferences_path = app
+                .path()
+                .app_config_dir()
+                .expect("application config directory unavailable")
+                .join("player-preferences.json");
+            let preferences: SharedPlayerPreferencesRepository = Arc::new(Mutex::new(Box::new(
+                JsonPlayerPreferencesRepository::new(preferences_path),
+            )));
+            app.manage(preferences);
+
             // Real event emitter using Tauri's AppHandle.
             let event_emitter: Arc<dyn playback_events::PlaybackEventEmitter> =
                 Arc::new(playback_events::TauriEventEmitter::new(app.handle().clone()));

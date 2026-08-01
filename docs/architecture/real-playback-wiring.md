@@ -27,8 +27,12 @@ NativePlaybackService
 ## Device rebind
 
 When the user selects a different output device while playback is active, the
-device service calls `output.open(new_id)` to select the hardware. The playback
-stream is recreated on the next `play` call.
+playback service snapshots the current path, clock, and playing/paused state,
+opens the replacement hardware, rebuilds the decoder worker for the new output
+sample rate, seeks to the captured clock, and restores the previous state. The
+old stream is not reported as a user-requested stop, and playback never requires
+a second click. A hardware-dependent transition of a few milliseconds may occur
+while CoreAudio activates the replacement device.
 
 Device loss pauses the output stream; the next command returns an error so
 the frontend can prompt the user to select a working device.

@@ -146,10 +146,12 @@ export function usePlaybackTransport({
     setError(null);
     try {
       await command();
+      return true;
     } catch (cause: unknown) {
       setError(
         cause instanceof Error ? cause.message : "Playback command failed.",
       );
+      return false;
     }
   };
 
@@ -185,7 +187,7 @@ export function usePlaybackTransport({
               generation: playbackGeneration,
             });
           }
-        });
+        }).then(() => undefined);
       }
       if (effectiveStatus === "paused") {
         return runCommand(async () => {
@@ -197,7 +199,7 @@ export function usePlaybackTransport({
               generation: playbackGeneration,
             });
           }
-        });
+        }).then(() => undefined);
       }
       const selected = entries[selectedIndex];
       return selected ? onSelectEntry(selected) : Promise.resolve();
@@ -214,7 +216,7 @@ export function usePlaybackTransport({
             generation: playbackGeneration,
           });
         }
-      }),
+      }).then(() => undefined),
     handlePrevious: () => {
       if (canPrevious) return onSelectEntry(entries[selectedIndex - 1]);
       return Promise.resolve();
@@ -233,7 +235,7 @@ export function usePlaybackTransport({
       const bounded = Math.max(0, Math.min(1, nextVolume));
       const previousVolume = volume;
       setVolumeState(bounded);
-      await runCommand(async () => {
+      return runCommand(async () => {
         try {
           await setVolume(bounded, muted);
         } catch (error) {
@@ -246,7 +248,7 @@ export function usePlaybackTransport({
       const nextMuted = !muted;
       const previousMuted = muted;
       setMuted(nextMuted);
-      await runCommand(async () => {
+      return runCommand(async () => {
         try {
           await setVolume(volume, nextMuted);
         } catch (error) {
@@ -254,6 +256,12 @@ export function usePlaybackTransport({
           throw error;
         }
       });
+    },
+    restoreVolume: async (nextVolume: number, nextMuted: boolean) => {
+      const bounded = Math.max(0, Math.min(1, nextVolume));
+      setVolumeState(bounded);
+      setMuted(nextMuted);
+      await runCommand(() => setVolume(bounded, nextMuted));
     },
   };
 }

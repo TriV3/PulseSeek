@@ -706,9 +706,26 @@ behavior test is not applicable.
 - **Acceptance:** Baseline measurements are recorded for the reference machine.
 - **Out of scope:** Waveform and visualization performance.
 
+### PR-055 — Persist Audio Player preferences
+
+- **Branch:** `feature/pr-055-player-preferences`
+- **Depends on:** PR-043, PR-047, PR-048, PR-049-2
+- **Requirements:** FR-AU-014–FR-AU-018
+- **Outcome:** Persist each confirmed player option immediately and restore the
+  browser context, last played file, output device, playback mode, volume,
+  mute, and resizable panel dimensions on launch.
+- **Tests first:** Default state, atomic immediate writes, stale-write rejection,
+  corrupt-state fallback, unavailable paths/devices, browser restoration, and
+  explicit exclusion of transport state and seek position.
+- **Acceptance:** Relaunching PulseSeek restores every selectable Audio Player
+  option and reveals the last played file without autoplay; transport starts
+  stopped at zero.
+- **Out of scope:** Manager database state, session marks, playback resume, seek
+  restoration, and cloud-drive authentication.
+
 ## 10. Milestone G — Themes and visual polish
 
-### PR-055 — Add semantic design tokens
+### PR-056 — Add semantic design tokens
 
 - **Branch:** `feature/pr-055-design-tokens`
 - **Depends on:** PR-003
@@ -719,10 +736,10 @@ behavior test is not applicable.
 - **Acceptance:** Components render without depending on a named palette.
 - **Out of scope:** Multiple themes.
 
-### PR-056 — Add dark and light themes
+### PR-057 — Add dark and light themes
 
 - **Branch:** `feature/pr-056-light-dark-themes`
-- **Depends on:** PR-055
+- **Depends on:** PR-056
 - **Requirements:** Theme architecture
 - **Outcome:** Add PulseSeek Dark, PulseSeek Light, and system preference.
 - **Tests first:** Theme selection, system change, persistence, and no-restart
@@ -730,19 +747,19 @@ behavior test is not applicable.
 - **Acceptance:** Core screens are readable in both modes.
 - **Out of scope:** Midnight Blue and High Contrast.
 
-### PR-057 — Add Midnight Blue theme
+### PR-058 — Add Midnight Blue theme
 
 - **Branch:** `feature/pr-057-midnight-theme`
-- **Depends on:** PR-056
+- **Depends on:** PR-057
 - **Outcome:** Add the complete Midnight Blue token set.
 - **Tests first:** Token completeness and screenshot comparison.
 - **Acceptance:** No component falls back to another theme unintentionally.
 - **Out of scope:** High Contrast.
 
-### PR-058 — Add High Contrast theme
+### PR-059 — Add High Contrast theme
 
 - **Branch:** `feature/pr-058-high-contrast`
-- **Depends on:** PR-056
+- **Depends on:** PR-057
 - **Outcome:** Add a high-contrast accessible theme.
 - **Tests first:** Token completeness, keyboard focus visibility, and automated
   contrast checks where reliable.
@@ -751,7 +768,7 @@ behavior test is not applicable.
 
 ## 11. Milestone H — Waveform
 
-### PR-059 — Define waveform model
+### PR-060 — Define waveform model
 
 - **Branch:** `feature/pr-059-waveform-model`
 - **Depends on:** PR-011, PR-015
@@ -761,10 +778,10 @@ behavior test is not applicable.
 - **Acceptance:** The model has no Canvas, React, or database dependency.
 - **Out of scope:** Peak extraction.
 
-### PR-060 — Extract waveform peaks
+### PR-061 — Extract waveform peaks
 
 - **Branch:** `feature/pr-060-waveform-extraction`
-- **Depends on:** PR-059, PR-019
+- **Depends on:** PR-060, PR-019
 - **Requirements:** FR-VS-001
 - **Outcome:** Generate multiresolution peaks on a cancellable worker.
 - **Tests first:** Known fixtures, mono/stereo policy, cancellation, empty and
@@ -772,7 +789,7 @@ behavior test is not applicable.
 - **Acceptance:** Extraction never runs on the audio callback.
 - **Out of scope:** Persistent cache.
 
-### PR-061 — Define technical cache database
+### PR-062 — Define technical cache database
 
 - **Branch:** `feature/pr-061-cache-database`
 - **Depends on:** PR-002
@@ -784,10 +801,10 @@ behavior test is not applicable.
 - **Acceptance:** Cache failure does not prevent Audio Player startup.
 - **Out of scope:** Waveform records.
 
-### PR-062 — Cache waveform data
+### PR-063 — Cache waveform data
 
 - **Branch:** `feature/pr-062-waveform-cache`
-- **Depends on:** PR-060, PR-061
+- **Depends on:** PR-061, PR-062
 - **Requirements:** FR-VS-010
 - **Outcome:** Store and retrieve waveform data using a versioned file cache key.
 - **Tests first:** Hit, miss, stale timestamp, size change, algorithm version,
@@ -795,10 +812,10 @@ behavior test is not applicable.
 - **Acceptance:** Cache records never create manager items.
 - **Out of scope:** File watcher invalidation.
 
-### PR-063 — Render waveform canvas
+### PR-064 — Render waveform canvas
 
 - **Branch:** `feature/pr-063-waveform-canvas`
-- **Depends on:** PR-006, PR-059, PR-062
+- **Depends on:** PR-006, PR-060, PR-063
 - **Requirements:** FR-VS-001, FR-VS-002
 - **Outcome:** Render waveform data and playback progress with Canvas 2D.
 - **Tests first:** Renderer mapping tests, loading/error states, resize, and
@@ -806,10 +823,10 @@ behavior test is not applicable.
 - **Acceptance:** React does not redraw through high-frequency state updates.
 - **Out of scope:** Seek interaction and style variants.
 
-### PR-064 — Seek from waveform
+### PR-065 — Seek from waveform
 
 - **Branch:** `feature/pr-064-waveform-seek`
-- **Depends on:** PR-028, PR-035, PR-063
+- **Depends on:** PR-028, PR-035, PR-064
 - **Requirements:** FR-VS-003
 - **Outcome:** Convert pointer/keyboard interaction into validated seek commands.
 - **Tests first:** Click, drag, keyboard, bounds, unavailable duration, and
@@ -817,10 +834,10 @@ behavior test is not applicable.
 - **Acceptance:** Visual progress reconciles with confirmed Rust position.
 - **Out of scope:** A–B selection.
 
-### PR-065 — Add waveform styles
+### PR-066 — Add waveform styles
 
 - **Branch:** `feature/pr-065-waveform-styles`
-- **Depends on:** PR-063
+- **Depends on:** PR-064
 - **Requirements:** FR-VS-004
 - **Outcome:** Add solid, gradient, and outline renderer styles.
 - **Tests first:** Renderer selection, theme compatibility, and screenshots.
@@ -829,7 +846,7 @@ behavior test is not applicable.
 
 ## 12. Milestone I — Advanced browser
 
-### PR-066 — Add file sorting
+### PR-067 — Add file sorting
 
 - **Branch:** `feature/pr-066-file-sorting`
 - **Depends on:** PR-045
@@ -840,7 +857,7 @@ behavior test is not applicable.
 - **Acceptance:** Selection survives sort changes.
 - **Out of scope:** Filtering.
 
-### PR-067 — Add folder search
+### PR-068 — Add folder search
 
 - **Branch:** `feature/pr-067-folder-search`
 - **Depends on:** PR-044
@@ -850,7 +867,7 @@ behavior test is not applicable.
 - **Acceptance:** Search does not re-enumerate the filesystem.
 - **Out of scope:** Recursive search and manager search syntax.
 
-### PR-068 — Add format filters
+### PR-069 — Add format filters
 
 - **Branch:** `feature/pr-068-format-filter`
 - **Depends on:** PR-041, PR-044
@@ -860,7 +877,7 @@ behavior test is not applicable.
 - **Acceptance:** Filters operate on decoder capability, not extension.
 - **Out of scope:** Saving filter presets.
 
-### PR-069 — Add multiple selection
+### PR-070 — Add multiple selection
 
 - **Branch:** `feature/pr-069-multi-selection`
 - **Depends on:** PR-044
@@ -870,17 +887,17 @@ behavior test is not applicable.
 - **Acceptance:** Selection uses stable file identity.
 - **Out of scope:** Batch file operations.
 
-### PR-070 — Add session marks
+### PR-071 — Add session marks
 
 - **Branch:** `feature/pr-070-session-marks`
-- **Depends on:** PR-069
+- **Depends on:** PR-070
 - **Requirements:** FR-LS-006–FR-LS-008
 - **Outcome:** Add Keep, Maybe, Reject, and Favorite session-only marks.
 - **Tests first:** Mark/unmark, multi-selection, filters, and folder change.
 - **Acceptance:** No manager database record is created.
 - **Out of scope:** Persistent manager favorites.
 
-### PR-071 — Add recursive enumeration
+### PR-072 — Add recursive enumeration
 
 - **Branch:** `feature/pr-071-recursive-view`
 - **Depends on:** PR-040, PR-041
@@ -891,10 +908,10 @@ behavior test is not applicable.
 - **Acceptance:** Recursive mode streams results and does not block navigation.
 - **Out of scope:** Recursive filesystem watching.
 
-### PR-072 — Add file watcher
+### PR-073 — Add file watcher
 
 - **Branch:** `feature/pr-072-file-watcher`
-- **Depends on:** PR-040, PR-062
+- **Depends on:** PR-040, PR-063
 - **Requirements:** FR-BR-008, FR-FM-010
 - **Outcome:** Observe relevant external changes and invalidate affected cache.
 - **Tests first:** Create, modify, rename, delete, burst coalescing, and watcher
@@ -902,10 +919,10 @@ behavior test is not applicable.
 - **Acceptance:** Current selection is retained when its stable target remains.
 - **Out of scope:** Recursive network-volume guarantees.
 
-### PR-073 — Add recent folders
+### PR-074 — Add recent folders
 
 - **Branch:** `feature/pr-073-recent-folders`
-- **Depends on:** PR-042, PR-061
+- **Depends on:** PR-042, PR-062
 - **Requirements:** FR-BR-011
 - **Outcome:** Persist and reopen bounded recent-folder history.
 - **Tests first:** Add, reorder, limit, missing folder, privacy redaction, and
@@ -913,10 +930,10 @@ behavior test is not applicable.
 - **Acceptance:** Recent history remains technical cache data.
 - **Out of scope:** Favorites.
 
-### PR-074 — Add rename service and UI
+### PR-075 — Add rename service and UI
 
 - **Branch:** `feature/pr-074-rename-file`
-- **Depends on:** PR-069, PR-072
+- **Depends on:** PR-070, PR-073
 - **Requirements:** FR-FM-004, FR-FM-009, FR-FM-010
 - **Outcome:** Rename one selected file safely and reconcile playback/cache.
 - **Tests first:** Success, collision, invalid name, playing file, permission
@@ -924,10 +941,10 @@ behavior test is not applicable.
 - **Acceptance:** The visible item and cache identity update consistently.
 - **Out of scope:** Batch rename.
 
-### PR-075 — Add move service and UI
+### PR-076 — Add move service and UI
 
 - **Branch:** `feature/pr-075-move-files`
-- **Depends on:** PR-069, PR-072
+- **Depends on:** PR-070, PR-073
 - **Requirements:** FR-FM-004, FR-FM-005
 - **Outcome:** Move selected files with progress and partial-failure reporting.
 - **Tests first:** Success, collision, cross-volume, cancellation, permission,
@@ -935,17 +952,17 @@ behavior test is not applicable.
 - **Acceptance:** Successful and failed targets are reported separately.
 - **Out of scope:** Copy.
 
-### PR-076 — Add copy service and UI
+### PR-077 — Add copy service and UI
 
 - **Branch:** `feature/pr-076-copy-files`
-- **Depends on:** PR-075
+- **Depends on:** PR-076
 - **Requirements:** FR-FM-004, FR-FM-005
 - **Outcome:** Copy selected files with progress and collision policy.
 - **Tests first:** Success, collision choices, cancellation, and partial failure.
 - **Acceptance:** Originals remain unchanged.
 - **Out of scope:** Manager import.
 
-### PR-077 — Add reveal and open-with actions
+### PR-078 — Add reveal and open-with actions
 
 - **Branch:** `feature/pr-077-external-actions`
 - **Depends on:** PR-044
@@ -956,7 +973,7 @@ behavior test is not applicable.
 - **Acceptance:** React receives no general process-launch capability.
 - **Out of scope:** Drag-out.
 
-### PR-078 — Add drag-out
+### PR-079 — Add drag-out
 
 - **Branch:** `feature/pr-078-file-drag-out`
 - **Depends on:** PR-044
@@ -966,10 +983,10 @@ behavior test is not applicable.
 - **Acceptance:** Manual verification succeeds with Finder and one DAW/editor.
 - **Out of scope:** DAW bridge plugin.
 
-### PR-079 — Add configurable shortcuts
+### PR-080 — Add configurable shortcuts
 
 - **Branch:** `feature/pr-079-configurable-shortcuts`
-- **Depends on:** PR-052, PR-061
+- **Depends on:** PR-052, PR-062
 - **Requirements:** FR-KB-003, FR-KB-004
 - **Outcome:** Store, edit, validate, reset, and apply shortcut mappings.
 - **Tests first:** Conflict, reserved keys, platform modifiers, persistence, and
@@ -979,7 +996,7 @@ behavior test is not applicable.
 
 ## 13. Milestone J — Real-time visualizations
 
-### PR-080 — Define visualization frame contract
+### PR-081 — Define visualization frame contract
 
 - **Branch:** `feature/pr-080-visualization-contract`
 - **Depends on:** PR-024
@@ -989,50 +1006,50 @@ behavior test is not applicable.
 - **Acceptance:** Publishing never blocks the audio callback.
 - **Out of scope:** FFT and rendering.
 
-### PR-081 — Add FFT worker
+### PR-082 — Add FFT worker
 
 - **Branch:** `feature/pr-081-fft-worker`
-- **Depends on:** PR-080
+- **Depends on:** PR-081
 - **Requirements:** FR-VS-005–FR-VS-007
 - **Outcome:** Compute windowed FFT frames outside the audio callback.
 - **Tests first:** Known tones, silence, mixed tones, cancellation, and lag.
 - **Acceptance:** Frequency bins match fixture tolerances.
 - **Out of scope:** UI.
 
-### PR-082 — Add logarithmic analyzer
+### PR-083 — Add logarithmic analyzer
 
 - **Branch:** `feature/pr-082-log-analyzer`
-- **Depends on:** PR-081, PR-055
+- **Depends on:** PR-082, PR-056
 - **Requirements:** FR-VS-005
 - **Outcome:** Render a theme-aware logarithmic frequency analyzer.
 - **Tests first:** Frequency mapping, resize, disabled state, and screenshot.
 - **Acceptance:** Late frames are dropped without affecting playback.
 - **Out of scope:** Linear analyzer.
 
-### PR-083 — Add linear analyzer
+### PR-084 — Add linear analyzer
 
 - **Branch:** `feature/pr-083-linear-analyzer`
-- **Depends on:** PR-081, PR-055
+- **Depends on:** PR-082, PR-056
 - **Requirements:** FR-VS-006
 - **Outcome:** Render a theme-aware linear frequency analyzer.
 - **Tests first:** Bin mapping, resize, disabled state, and screenshot.
 - **Acceptance:** Analyzer can be switched without restarting playback.
 - **Out of scope:** Musical spectrum.
 
-### PR-084 — Add musical spectrum
+### PR-085 — Add musical spectrum
 
 - **Branch:** `feature/pr-084-musical-spectrum`
-- **Depends on:** PR-081, PR-055
+- **Depends on:** PR-082, PR-056
 - **Requirements:** FR-VS-007
 - **Outcome:** Group frequency energy into pitch-oriented musical bands.
 - **Tests first:** Known-note fixtures, tuning reference, and band boundaries.
 - **Acceptance:** Known sine tones appear in expected musical bands.
 - **Out of scope:** Key detection.
 
-### PR-085 — Add visualization settings
+### PR-086 — Add visualization settings
 
 - **Branch:** `feature/pr-085-visualization-settings`
-- **Depends on:** PR-082, PR-083, PR-084, PR-061
+- **Depends on:** PR-083, PR-084, PR-085, PR-062
 - **Outcome:** Select visualization, quality, enabled state, and persistence.
 - **Tests first:** Selection, disable, persistence, fallback, and reduced-motion.
 - **Acceptance:** Disabling visualizations stops their worker load.
@@ -1040,7 +1057,7 @@ behavior test is not applicable.
 
 ## 14. Milestone K — A–B repeat and advanced playback
 
-### PR-086 — Define loop region
+### PR-087 — Define loop region
 
 - **Branch:** `feature/pr-086-loop-region`
 - **Depends on:** PR-011
@@ -1050,27 +1067,27 @@ behavior test is not applicable.
 - **Acceptance:** Invalid regions cannot reach the audio engine.
 - **Out of scope:** Playback implementation.
 
-### PR-087 — Play A–B repeat
+### PR-088 — Play A–B repeat
 
 - **Branch:** `feature/pr-087-ab-repeat`
-- **Depends on:** PR-032, PR-086
+- **Depends on:** PR-032, PR-087
 - **Requirements:** FR-AU-009
 - **Outcome:** Loop the selected region.
 - **Tests first:** Boundary, seek into/out of region, clear, and short region.
 - **Acceptance:** Region repeats without advancing to another file.
 - **Out of scope:** Waveform selection.
 
-### PR-088 — Select A–B region on waveform
+### PR-089 — Select A–B region on waveform
 
 - **Branch:** `feature/pr-088-waveform-ab-selection`
-- **Depends on:** PR-064, PR-087
+- **Depends on:** PR-065, PR-088
 - **Requirements:** FR-AU-009
 - **Outcome:** Create, adjust, display, and clear A/B points on the waveform.
 - **Tests first:** Pointer, keyboard, bounds, reversed drag, and clear.
 - **Acceptance:** Displayed points reflect confirmed Rust state.
 - **Out of scope:** Saving regions to managers.
 
-### PR-089 — Add sequential playback
+### PR-090 — Add sequential playback
 
 - **Branch:** `feature/pr-089-sequential-playback`
 - **Depends on:** PR-013, PR-030
@@ -1080,7 +1097,7 @@ behavior test is not applicable.
 - **Acceptance:** Sequential playback follows the current browser ordering.
 - **Out of scope:** Random playback.
 
-### PR-090 — Add random playback
+### PR-091 — Add random playback
 
 - **Branch:** `feature/pr-090-random-playback`
 - **Depends on:** PR-013, PR-030
@@ -1094,10 +1111,10 @@ behavior test is not applicable.
 
 ## 15. Milestone L — Sample Manager MVP
 
-### PR-091 — Create Sample Manager database
+### PR-092 — Create Sample Manager database
 
 - **Branch:** `feature/pr-091-sample-database`
-- **Depends on:** PR-061
+- **Depends on:** PR-062
 - **Requirements:** FR-SM-001
 - **Outcome:** Add independent `samples.sqlite`, migrations, worker, and health
   status.
@@ -1106,7 +1123,7 @@ behavior test is not applicable.
 - **Acceptance:** Audio Player starts when this database fails.
 - **Out of scope:** Import and sample fields beyond identity.
 
-### PR-092 — Define sample item model
+### PR-093 — Define sample item model
 
 - **Branch:** `feature/pr-092-sample-model`
 - **Depends on:** PR-002
@@ -1117,10 +1134,10 @@ behavior test is not applicable.
 - **Acceptance:** Model has no SQLite or UI dependency.
 - **Out of scope:** Repository and analysis.
 
-### PR-093 — Persist referenced sample
+### PR-094 — Persist referenced sample
 
 - **Branch:** `feature/pr-093-reference-sample`
-- **Depends on:** PR-091, PR-092
+- **Depends on:** PR-092, PR-093
 - **Requirements:** FR-SM-002, FR-SM-003
 - **Outcome:** Explicitly import one existing file by reference.
 - **Tests first:** Success, duplicate policy, missing file, unsupported file,
@@ -1128,20 +1145,20 @@ behavior test is not applicable.
 - **Acceptance:** Import creates one sample record and leaves the file unchanged.
 - **Out of scope:** Copy and move.
 
-### PR-094 — Copy sample into managed storage
+### PR-095 — Copy sample into managed storage
 
 - **Branch:** `feature/pr-094-copy-sample`
-- **Depends on:** PR-093
+- **Depends on:** PR-094
 - **Requirements:** FR-SM-003, FR-SM-004
 - **Outcome:** Copy one sample into configured managed storage transactionally.
 - **Tests first:** Success, collision, copy failure, database failure, and cleanup.
 - **Acceptance:** Original remains and partial managed copies are cleaned safely.
 - **Out of scope:** Move.
 
-### PR-095 — Move sample into managed storage
+### PR-096 — Move sample into managed storage
 
 - **Branch:** `feature/pr-095-move-sample`
-- **Depends on:** PR-094
+- **Depends on:** PR-095
 - **Requirements:** FR-SM-003, FR-SM-004
 - **Outcome:** Move one sample after explicit confirmation.
 - **Tests first:** Success, database failure compensation, cross-volume move,
@@ -1149,10 +1166,10 @@ behavior test is not applicable.
 - **Acceptance:** UI copy clearly states that the source location changes.
 - **Out of scope:** Batch import.
 
-### PR-096 — Add Sample Manager import UI
+### PR-097 — Add Sample Manager import UI
 
 - **Branch:** `feature/pr-096-sample-import-ui`
-- **Depends on:** PR-069, PR-093, PR-094, PR-095
+- **Depends on:** PR-070, PR-094, PR-095, PR-096
 - **Requirements:** FR-SM-002–FR-SM-004
 - **Outcome:** Import selected browsed files by reference, copy, or move.
 - **Tests first:** Mode choice, consequences, progress, duplicates, and partial
@@ -1160,10 +1177,10 @@ behavior test is not applicable.
 - **Acceptance:** Browsing alone never invokes an import command.
 - **Out of scope:** Sample library view.
 
-### PR-097 — Add Sample Manager list
+### PR-098 — Add Sample Manager list
 
 - **Branch:** `feature/pr-097-sample-list`
-- **Depends on:** PR-092, PR-093
+- **Depends on:** PR-093, PR-094
 - **Requirements:** FR-SM-005
 - **Outcome:** Display virtualized sample items and play a selected item.
 - **Tests first:** Loading, empty, pagination/streaming, selection, and missing
@@ -1171,40 +1188,40 @@ behavior test is not applicable.
 - **Acceptance:** Sample playback reuses the shared playback service.
 - **Out of scope:** Search, tags, and editing.
 
-### PR-098 — Add sample tags
+### PR-099 — Add sample tags
 
 - **Branch:** `feature/pr-098-sample-tags`
-- **Depends on:** PR-097
+- **Depends on:** PR-098
 - **Requirements:** FR-SM-005, FR-SM-006
 - **Outcome:** Create, assign, remove, and filter by sample tags.
 - **Tests first:** Duplicate tag, multi-assign, remove, rollback, and filter.
 - **Acceptance:** Tag writes are transactional.
 - **Out of scope:** Rating and favorites.
 
-### PR-099 — Add sample rating and favorite
+### PR-100 — Add sample rating and favorite
 
 - **Branch:** `feature/pr-099-sample-rating`
-- **Depends on:** PR-097
+- **Depends on:** PR-098
 - **Requirements:** FR-SM-005
 - **Outcome:** Persist rating and favorite state.
 - **Tests first:** Bounds, clear, toggle, batch update, and rollback.
 - **Acceptance:** Browser session marks remain separate from manager favorites.
 - **Out of scope:** Notes.
 
-### PR-100 — Add sample notes and category
+### PR-101 — Add sample notes and category
 
 - **Branch:** `feature/pr-100-sample-details`
-- **Depends on:** PR-097
+- **Depends on:** PR-098
 - **Requirements:** FR-SM-005, FR-SM-006
 - **Outcome:** Edit notes, instrument/type category, source, and license.
 - **Tests first:** Validation, save, clear, Unicode, and rollback.
 - **Acceptance:** Metadata may remain PulseSeek-only.
 - **Out of scope:** Embedded tag writes.
 
-### PR-101 — Add Sample Manager search
+### PR-102 — Add Sample Manager search
 
 - **Branch:** `feature/pr-101-sample-search`
-- **Depends on:** PR-098, PR-099, PR-100
+- **Depends on:** PR-099, PR-100, PR-101
 - **Requirements:** FR-SM-005
 - **Outcome:** Search and combine sample metadata filters.
 - **Tests first:** Text, tag, category, favorite, rating, empty, and combined
@@ -1212,19 +1229,19 @@ behavior test is not applicable.
 - **Acceptance:** Search remains responsive at the agreed fixture size.
 - **Out of scope:** Similarity search.
 
-### PR-102 — Detect missing sample files
+### PR-103 — Detect missing sample files
 
 - **Branch:** `feature/pr-102-missing-samples`
-- **Depends on:** PR-097
+- **Depends on:** PR-098
 - **Outcome:** Mark unavailable referenced locations without removing items.
 - **Tests first:** Missing, restored, disconnected volume, and managed copy.
 - **Acceptance:** Missing items remain searchable and clearly unavailable.
 - **Out of scope:** Relinking.
 
-### PR-103 — Relink missing sample
+### PR-104 — Relink missing sample
 
 - **Branch:** `feature/pr-103-relink-sample`
-- **Depends on:** PR-102
+- **Depends on:** PR-103
 - **Outcome:** Select and validate a replacement path.
 - **Tests first:** Matching file, incompatible file, duplicate path, cancellation,
   and rollback.
@@ -1233,7 +1250,7 @@ behavior test is not applicable.
 
 ## 16. Milestone M — Analysis job foundation
 
-### PR-104 — Define cancellable analysis jobs
+### PR-105 — Define cancellable analysis jobs
 
 - **Branch:** `feature/pr-104-analysis-jobs`
 - **Depends on:** PR-008
@@ -1243,30 +1260,30 @@ behavior test is not applicable.
 - **Acceptance:** Jobs run outside UI and audio threads.
 - **Out of scope:** Any analyzer.
 
-### PR-105 — Persist analysis versions
+### PR-106 — Persist analysis versions
 
 - **Branch:** `feature/pr-105-analysis-versions`
-- **Depends on:** PR-091, PR-104
+- **Depends on:** PR-092, PR-105
 - **Requirements:** FR-SM-007, FR-SM-008
 - **Outcome:** Store analyzer ID, version, status, and result ownership.
 - **Tests first:** New result, stale version, retry, cancellation, and rollback.
 - **Acceptance:** Algorithm upgrades can mark old results stale.
 - **Out of scope:** Waveform, BPM, and key algorithms.
 
-### PR-106 — Add loudness analysis
+### PR-107 — Add loudness analysis
 
 - **Branch:** `feature/pr-106-loudness-analysis`
-- **Depends on:** PR-104, PR-105
+- **Depends on:** PR-105, PR-106
 - **Requirements:** FR-SM-007
 - **Outcome:** Analyze and persist loudness and peak values.
 - **Tests first:** Calibrated fixtures, silence, cancellation, and corrupt file.
 - **Acceptance:** Results include analyzer version and units.
 - **Out of scope:** True Peak if unsupported by the first implementation.
 
-### PR-107 — Add BPM analysis
+### PR-108 — Add BPM analysis
 
 - **Branch:** `feature/pr-107-bpm-analysis`
-- **Depends on:** PR-104, PR-105
+- **Depends on:** PR-105, PR-106
 - **Requirements:** FR-SM-007
 - **Outcome:** Analyze and persist BPM with confidence.
 - **Tests first:** Click-track fixtures, half/double-time cases, silence, and
@@ -1274,30 +1291,30 @@ behavior test is not applicable.
 - **Acceptance:** Low-confidence results are distinguishable from confirmed BPM.
 - **Out of scope:** Manual BPM correction UI.
 
-### PR-108 — Add key analysis
+### PR-109 — Add key analysis
 
 - **Branch:** `feature/pr-108-key-analysis`
-- **Depends on:** PR-104, PR-105
+- **Depends on:** PR-105, PR-106
 - **Requirements:** FR-SM-007
 - **Outcome:** Analyze and persist musical key with confidence.
 - **Tests first:** Key fixtures, ambiguous audio, silence, and cancellation.
 - **Acceptance:** Unknown/ambiguous results are supported.
 - **Out of scope:** Harmonic mixing display.
 
-### PR-109 — Add transient analysis
+### PR-110 — Add transient analysis
 
 - **Branch:** `feature/pr-109-transient-analysis`
-- **Depends on:** PR-104, PR-105
+- **Depends on:** PR-105, PR-106
 - **Requirements:** FR-SM-007
 - **Outcome:** Detect and persist transient positions.
 - **Tests first:** Percussive fixtures, smooth audio, threshold, and cancellation.
 - **Acceptance:** Positions are valid within file duration.
 - **Out of scope:** Slice export.
 
-### PR-110 — Add loop classification
+### PR-111 — Add loop classification
 
 - **Branch:** `feature/pr-110-loop-classification`
-- **Depends on:** PR-104, PR-105
+- **Depends on:** PR-105, PR-106
 - **Requirements:** FR-SM-006, FR-SM-007
 - **Outcome:** Estimate loop versus one-shot with confidence.
 - **Tests first:** Known loops, one-shots, ambiguous clips, and cancellation.
@@ -1306,10 +1323,10 @@ behavior test is not applicable.
 
 ## 17. Milestone N — Music Manager MVP
 
-### PR-111 — Create Music Manager database
+### PR-112 — Create Music Manager database
 
 - **Branch:** `feature/pr-111-music-database`
-- **Depends on:** PR-061
+- **Depends on:** PR-062
 - **Requirements:** FR-MM-001
 - **Outcome:** Add independent `music.sqlite`, migrations, worker, and health
   status.
@@ -1318,7 +1335,7 @@ behavior test is not applicable.
 - **Acceptance:** Other modules start when this database fails.
 - **Out of scope:** Track import.
 
-### PR-112 — Define music track model
+### PR-113 — Define music track model
 
 - **Branch:** `feature/pr-112-music-model`
 - **Depends on:** PR-002
@@ -1329,10 +1346,10 @@ behavior test is not applicable.
 - **Acceptance:** Model has no SQLite or UI dependency.
 - **Out of scope:** Cue points, loops, and analysis.
 
-### PR-113 — Reference music track
+### PR-114 — Reference music track
 
 - **Branch:** `feature/pr-113-reference-track`
-- **Depends on:** PR-111, PR-112
+- **Depends on:** PR-112, PR-113
 - **Requirements:** FR-MM-002, FR-MM-003
 - **Outcome:** Explicitly import one existing music file by reference.
 - **Tests first:** Success, duplicate policy, missing/unsupported file, rollback,
@@ -1340,70 +1357,70 @@ behavior test is not applicable.
 - **Acceptance:** Import leaves the source unchanged.
 - **Out of scope:** Copy and move.
 
-### PR-114 — Copy music into managed storage
+### PR-115 — Copy music into managed storage
 
 - **Branch:** `feature/pr-114-copy-track`
-- **Depends on:** PR-113
+- **Depends on:** PR-114
 - **Requirements:** FR-MM-003
 - **Outcome:** Copy one track transactionally.
 - **Tests first:** Success, collision, copy failure, database failure, and cleanup.
 - **Acceptance:** Original remains unchanged.
 - **Out of scope:** Move.
 
-### PR-115 — Move music into managed storage
+### PR-116 — Move music into managed storage
 
 - **Branch:** `feature/pr-115-move-track`
-- **Depends on:** PR-114
+- **Depends on:** PR-115
 - **Requirements:** FR-MM-003
 - **Outcome:** Move one track after explicit confirmation.
 - **Tests first:** Success, compensation, cross-volume, and cancellation.
 - **Acceptance:** Source-location change is explicit.
 - **Out of scope:** Batch import.
 
-### PR-116 — Add Music Manager import UI
+### PR-117 — Add Music Manager import UI
 
 - **Branch:** `feature/pr-116-music-import-ui`
-- **Depends on:** PR-069, PR-113, PR-114, PR-115
+- **Depends on:** PR-070, PR-114, PR-115, PR-116
 - **Requirements:** FR-MM-002, FR-MM-003
 - **Outcome:** Import selected browsed files by reference, copy, or move.
 - **Tests first:** Mode, consequences, progress, duplicates, and partial failure.
 - **Acceptance:** Browsing alone never imports.
 - **Out of scope:** Music library view.
 
-### PR-117 — Add Music Manager list
+### PR-118 — Add Music Manager list
 
 - **Branch:** `feature/pr-117-music-list`
-- **Depends on:** PR-112, PR-113
+- **Depends on:** PR-113, PR-114
 - **Requirements:** FR-MM-004
 - **Outcome:** Display virtualized tracks and play a selected track.
 - **Tests first:** Loading, empty, streaming, selection, and missing location.
 - **Acceptance:** Playback reuses the shared service.
 - **Out of scope:** Metadata editing and filters.
 
-### PR-118 — Edit core music metadata
+### PR-119 — Edit core music metadata
 
 - **Branch:** `feature/pr-118-music-metadata`
-- **Depends on:** PR-117
+- **Depends on:** PR-118
 - **Requirements:** FR-MM-004, FR-MM-005
 - **Outcome:** Edit title, artist, album, genre, year, color, and notes.
 - **Tests first:** Save, clear, validation, Unicode, and rollback.
 - **Acceptance:** Changes remain PulseSeek-only unless explicitly exported.
 - **Out of scope:** Writing embedded tags.
 
-### PR-119 — Add music tags, rating, and favorite
+### PR-120 — Add music tags, rating, and favorite
 
 - **Branch:** `feature/pr-119-music-tags-rating`
-- **Depends on:** PR-117
+- **Depends on:** PR-118
 - **Requirements:** FR-MM-004, FR-MM-005
 - **Outcome:** Assign tags, rating, and favorite state.
 - **Tests first:** Tag lifecycle, bounds, batch update, and rollback.
 - **Acceptance:** Updates are transactional.
 - **Out of scope:** Search.
 
-### PR-120 — Add Music Manager search
+### PR-121 — Add Music Manager search
 
 - **Branch:** `feature/pr-120-music-search`
-- **Depends on:** PR-118, PR-119
+- **Depends on:** PR-119, PR-120
 - **Requirements:** FR-MM-004
 - **Outcome:** Search and combine core track filters.
 - **Tests first:** Text, artist, album, genre, tag, favorite, rating, and combined
@@ -1411,10 +1428,10 @@ behavior test is not applicable.
 - **Acceptance:** Search remains responsive at the agreed fixture size.
 - **Out of scope:** Similarity and harmonic search.
 
-### PR-121 — Detect and relink missing tracks
+### PR-122 — Detect and relink missing tracks
 
 - **Branch:** `feature/pr-121-relink-track`
-- **Depends on:** PR-117
+- **Depends on:** PR-118
 - **Requirements:** FR-MM-008
 - **Outcome:** Detect missing locations and relink one track.
 - **Tests first:** Missing, restored, compatible replacement, cancellation, and
@@ -1424,10 +1441,10 @@ behavior test is not applicable.
 
 ## 18. Milestone O — Playlist Manager
 
-### PR-122 — Create Playlist Manager database
+### PR-123 — Create Playlist Manager database
 
 - **Branch:** `feature/pr-122-playlist-database`
-- **Depends on:** PR-061
+- **Depends on:** PR-062
 - **Requirements:** FR-PM-001
 - **Outcome:** Add independent `playlists.sqlite`, migrations, worker, and
   health status.
@@ -1436,30 +1453,30 @@ behavior test is not applicable.
 - **Acceptance:** Other modules start when this database fails.
 - **Out of scope:** Playlist behavior.
 
-### PR-123 — Define playlist model
+### PR-124 — Define playlist model
 
 - **Branch:** `feature/pr-123-playlist-model`
-- **Depends on:** PR-092, PR-112
+- **Depends on:** PR-093, PR-113
 - **Requirements:** FR-PM-002, FR-PM-005
 - **Outcome:** Define `PlaylistId` and typed sample/music entry references.
 - **Tests first:** Ordering, typed reference, identity, and deletion semantics.
 - **Acceptance:** Entry removal cannot imply source deletion.
 - **Out of scope:** Persistence.
 
-### PR-124 — Create and rename playlist
+### PR-125 — Create and rename playlist
 
 - **Branch:** `feature/pr-124-create-playlist`
-- **Depends on:** PR-122, PR-123
+- **Depends on:** PR-123, PR-124
 - **Requirements:** FR-PM-003
 - **Outcome:** Create, list, rename, and annotate playlists.
 - **Tests first:** Validation, duplicate name policy, Unicode, save, and rollback.
 - **Acceptance:** Playlist is usable without source entries.
 - **Out of scope:** Duplicate and delete.
 
-### PR-125 — Add sample to playlist
+### PR-126 — Add sample to playlist
 
 - **Branch:** `feature/pr-125-add-sample-to-playlist`
-- **Depends on:** PR-093, PR-124
+- **Depends on:** PR-094, PR-125
 - **Requirements:** FR-SM-009, FR-PM-004
 - **Outcome:** Append a typed `SampleId` entry.
 - **Tests first:** Success, missing sample, duplicate policy, ordering, and
@@ -1467,10 +1484,10 @@ behavior test is not applicable.
 - **Acceptance:** No audio file or sample metadata is duplicated.
 - **Out of scope:** Music entries.
 
-### PR-126 — Add music to playlist
+### PR-127 — Add music to playlist
 
 - **Branch:** `feature/pr-126-add-music-to-playlist`
-- **Depends on:** PR-113, PR-124
+- **Depends on:** PR-114, PR-125
 - **Requirements:** FR-MM-007, FR-PM-004
 - **Outcome:** Append a typed `MusicTrackId` entry.
 - **Tests first:** Success, missing track, duplicate policy, ordering, and
@@ -1478,20 +1495,20 @@ behavior test is not applicable.
 - **Acceptance:** Mixed playlists retain typed references.
 - **Out of scope:** Browser-only files.
 
-### PR-127 — Reorder playlist entries
+### PR-128 — Reorder playlist entries
 
 - **Branch:** `feature/pr-127-reorder-playlist`
-- **Depends on:** PR-125, PR-126
+- **Depends on:** PR-126, PR-127
 - **Requirements:** FR-PM-003
 - **Outcome:** Move one or multiple entries deterministically.
 - **Tests first:** First/last, range, same position, mixed types, and rollback.
 - **Acceptance:** Ordering is stable and gap-free.
 - **Out of scope:** Drag UI.
 
-### PR-128 — Add Playlist Manager UI
+### PR-129 — Add Playlist Manager UI
 
 - **Branch:** `feature/pr-128-playlist-ui`
-- **Depends on:** PR-124, PR-127
+- **Depends on:** PR-125, PR-128
 - **Requirements:** FR-PM-003, FR-PM-004
 - **Outcome:** Create/select playlists, add manager items, and reorder by drag or
   keyboard.
@@ -1499,30 +1516,30 @@ behavior test is not applicable.
 - **Acceptance:** Mixed sample/music entries are visibly distinguishable.
 - **Out of scope:** Browser-only entry import and export.
 
-### PR-129 — Duplicate playlist
+### PR-130 — Duplicate playlist
 
 - **Branch:** `feature/pr-129-duplicate-playlist`
-- **Depends on:** PR-127
+- **Depends on:** PR-128
 - **Requirements:** FR-PM-003
 - **Outcome:** Duplicate playlist metadata and ordered references.
 - **Tests first:** Empty, mixed entries, naming conflict, and rollback.
 - **Acceptance:** Source and duplicate have independent playlist identities.
 - **Out of scope:** Duplicating source manager items.
 
-### PR-130 — Delete playlist safely
+### PR-131 — Delete playlist safely
 
 - **Branch:** `feature/pr-130-delete-playlist`
-- **Depends on:** PR-127
+- **Depends on:** PR-128
 - **Requirements:** FR-PM-003, FR-PM-005
 - **Outcome:** Delete a playlist after confirmation.
 - **Tests first:** Empty, populated, cancel, rollback, and source survival.
 - **Acceptance:** Samples, tracks, and audio files are unchanged.
 - **Out of scope:** Undo.
 
-### PR-131 — Add browser selection to playlist
+### PR-132 — Add browser selection to playlist
 
 - **Branch:** `feature/pr-131-browser-to-playlist`
-- **Depends on:** PR-069, PR-096, PR-116, PR-128
+- **Depends on:** PR-070, PR-097, PR-117, PR-129
 - **Requirements:** FR-PM-004
 - **Outcome:** Explicitly choose Sample or Music import, then add resulting item
   to a playlist.
@@ -1533,10 +1550,10 @@ behavior test is not applicable.
 
 ## 19. Milestone P — Playlist exports
 
-### PR-132 — Define playlist export port
+### PR-133 — Define playlist export port
 
 - **Branch:** `feature/pr-132-export-port`
-- **Depends on:** PR-123
+- **Depends on:** PR-124
 - **Requirements:** FR-PM-006
 - **Outcome:** Define resolved export entries, validation, warnings, and output
   result.
@@ -1544,10 +1561,10 @@ behavior test is not applicable.
 - **Acceptance:** Export adapters do not query manager databases directly.
 - **Out of scope:** File formats.
 
-### PR-133 — Export M3U8
+### PR-134 — Export M3U8
 
 - **Branch:** `feature/pr-133-export-m3u8`
-- **Depends on:** PR-132
+- **Depends on:** PR-133
 - **Requirements:** FR-PM-006
 - **Outcome:** Export Unicode-safe ordered M3U8.
 - **Tests first:** Relative/absolute paths, Unicode, missing file warning, and
@@ -1555,20 +1572,20 @@ behavior test is not applicable.
 - **Acceptance:** Fixture opens in two external players.
 - **Out of scope:** Legacy M3U.
 
-### PR-134 — Export M3U
+### PR-135 — Export M3U
 
 - **Branch:** `feature/pr-134-export-m3u`
-- **Depends on:** PR-133
+- **Depends on:** PR-134
 - **Requirements:** FR-PM-006
 - **Outcome:** Export legacy-compatible M3U with explicit encoding policy.
 - **Tests first:** Encoding, unsupported characters, order, and warnings.
 - **Acceptance:** Encoding loss is reported, never silent.
 - **Out of scope:** CSV.
 
-### PR-135 — Export JSON
+### PR-136 — Export JSON
 
 - **Branch:** `feature/pr-135-export-json`
-- **Depends on:** PR-132
+- **Depends on:** PR-133
 - **Requirements:** FR-PM-006
 - **Outcome:** Export versioned JSON with typed entries and warnings.
 - **Tests first:** Schema version, sample/music entries, Unicode, and
@@ -1576,10 +1593,10 @@ behavior test is not applicable.
 - **Acceptance:** JSON is round-trip parseable by the same schema.
 - **Out of scope:** Import.
 
-### PR-136 — Export CSV
+### PR-137 — Export CSV
 
 - **Branch:** `feature/pr-136-export-csv`
-- **Depends on:** PR-132
+- **Depends on:** PR-133
 - **Requirements:** FR-PM-006
 - **Outcome:** Export documented UTF-8 CSV columns.
 - **Tests first:** Quoting, delimiters, newlines, Unicode, mixed entries, and
@@ -1587,10 +1604,10 @@ behavior test is not applicable.
 - **Acceptance:** CSV imports correctly into a reference spreadsheet tool.
 - **Out of scope:** DJ-specific columns.
 
-### PR-137 — Add export UI and dry-run summary
+### PR-138 — Add export UI and dry-run summary
 
 - **Branch:** `feature/pr-137-export-ui`
-- **Depends on:** PR-133, PR-134, PR-135, PR-136
+- **Depends on:** PR-134, PR-135, PR-136, PR-137
 - **Requirements:** FR-PM-006
 - **Outcome:** Choose format/path, preview warnings, export, and reveal result.
 - **Tests first:** Format choice, warnings, cancellation, success, and failure.
@@ -1604,20 +1621,20 @@ has been captured in a versioned ADR. Research is performed within the PR and
 must end in production documentation, fixtures, and tests; there are no
 research-only branches.
 
-### PR-138 — Document Rekordbox exchange contract
+### PR-139 — Document Rekordbox exchange contract
 
 - **Branch:** `feature/pr-138-rekordbox-contract`
-- **Depends on:** PR-132
+- **Depends on:** PR-133
 - **Requirements:** FR-PM-008
 - **Outcome:** Add ADR, supported XML subset, fixtures, and adapter port mapping.
 - **Tests first:** Parse official-format fixtures into neutral export entries.
 - **Acceptance:** Supported and unsupported fields are explicit.
 - **Out of scope:** Writing XML.
 
-### PR-139 — Export Rekordbox XML
+### PR-140 — Export Rekordbox XML
 
 - **Branch:** `feature/pr-139-rekordbox-export`
-- **Depends on:** PR-138
+- **Depends on:** PR-139
 - **Requirements:** FR-PM-007, FR-PM-008
 - **Outcome:** Generate deterministic XML for the supported subset.
 - **Tests first:** Escaping, paths, metadata, playlist order, and round-trip
@@ -1625,29 +1642,29 @@ research-only branches.
 - **Acceptance:** Rekordbox accepts a manually verified export fixture.
 - **Out of scope:** Modifying Rekordbox databases.
 
-### PR-140 — Add Rekordbox export UI
+### PR-141 — Add Rekordbox export UI
 
 - **Branch:** `feature/pr-140-rekordbox-ui`
-- **Depends on:** PR-137, PR-139
+- **Depends on:** PR-138, PR-140
 - **Outcome:** Add target selection, dry run, warnings, export, and audit record.
 - **Tests first:** Dry run, confirmation, success, failure, and audit entry.
 - **Acceptance:** No external data is changed before confirmation.
 - **Out of scope:** Two-way synchronization.
 
-### PR-141 — Document Serato safe exchange contract
+### PR-142 — Document Serato safe exchange contract
 
 - **Branch:** `feature/pr-141-serato-contract`
-- **Depends on:** PR-132
+- **Depends on:** PR-133
 - **Requirements:** FR-PM-009
 - **Outcome:** Add ADR, safe supported mechanism, fixtures, and limitations.
 - **Tests first:** Parse supported fixture or validate supported output contract.
 - **Acceptance:** Undocumented internal database writes are explicitly excluded.
 - **Out of scope:** Export implementation.
 
-### PR-142 — Implement Serato safe export
+### PR-143 — Implement Serato safe export
 
 - **Branch:** `feature/pr-142-serato-export`
-- **Depends on:** PR-141
+- **Depends on:** PR-142
 - **Requirements:** FR-PM-007, FR-PM-009
 - **Outcome:** Implement only the documented/safe exchange mechanism.
 - **Tests first:** Deterministic fixtures, path handling, warnings, and
@@ -1655,20 +1672,20 @@ research-only branches.
 - **Acceptance:** Manual compatibility test succeeds without internal DB writes.
 - **Out of scope:** Unsupported Serato metadata.
 
-### PR-143 — Document Engine DJ exchange contract
+### PR-144 — Document Engine DJ exchange contract
 
 - **Branch:** `feature/pr-143-engine-dj-contract`
-- **Depends on:** PR-132
+- **Depends on:** PR-133
 - **Requirements:** FR-PM-010
 - **Outcome:** Add ADR, supported mechanism, fixtures, and limitations.
 - **Tests first:** Contract fixture tests.
 - **Acceptance:** Safe read/write boundaries are explicit.
 - **Out of scope:** Adapter implementation.
 
-### PR-144 — Implement Engine DJ adapter
+### PR-145 — Implement Engine DJ adapter
 
 - **Branch:** `feature/pr-144-engine-dj-adapter`
-- **Depends on:** PR-143
+- **Depends on:** PR-144
 - **Requirements:** FR-PM-007, FR-PM-010
 - **Outcome:** Implement the documented safe subset with dry run and audit log.
 - **Tests first:** Deterministic fixtures, warnings, backup, and failure recovery.
@@ -1677,7 +1694,7 @@ research-only branches.
 
 ## 21. Milestone R — Effect chain and visualizer plugins
 
-### PR-145 — Define effect-chain contract
+### PR-146 — Define effect-chain contract
 
 - **Branch:** `feature/pr-145-effect-chain`
 - **Depends on:** PR-024
@@ -1687,19 +1704,19 @@ research-only branches.
 - **Acceptance:** Contract prohibits blocking and allocation in process calls.
 - **Out of scope:** Third-party plugins.
 
-### PR-146 — Add built-in gain effect
+### PR-147 — Add built-in gain effect
 
 - **Branch:** `feature/pr-146-gain-effect`
-- **Depends on:** PR-145
+- **Depends on:** PR-146
 - **Outcome:** Prove the chain with a tested built-in gain processor.
 - **Tests first:** Gain, bypass, ordering, and state restore.
 - **Acceptance:** Global bypass restores the clean path.
 - **Out of scope:** VST3.
 
-### PR-147 — Define visualizer plugin API
+### PR-148 — Define visualizer plugin API
 
 - **Branch:** `feature/pr-147-visualizer-api`
-- **Depends on:** PR-080
+- **Depends on:** PR-081
 - **Requirements:** FR-PL-008
 - **Outcome:** Define a versioned read-only visualization-frame API and manifest.
 - **Tests first:** Version compatibility, malformed manifest, frame access, and
@@ -1707,30 +1724,30 @@ research-only branches.
 - **Acceptance:** Plugins cannot control playback.
 - **Out of scope:** Dynamic loading.
 
-### PR-148 — Load one PulseSeek visualizer plugin
+### PR-149 — Load one PulseSeek visualizer plugin
 
 - **Branch:** `feature/pr-148-load-visualizer`
-- **Depends on:** PR-147
+- **Depends on:** PR-148
 - **Requirements:** FR-VS-008, FR-PL-008
 - **Outcome:** Discover, validate, load, render, and unload one plugin.
 - **Tests first:** Valid, incompatible, corrupt, duplicate, and unload fixtures.
 - **Acceptance:** A failing plugin leaves built-in visualizations usable.
 - **Out of scope:** Marketplace and hot reload.
 
-### PR-149 — Add plugin safe mode
+### PR-150 — Add plugin safe mode
 
 - **Branch:** `feature/pr-149-plugin-safe-mode`
-- **Depends on:** PR-148
+- **Depends on:** PR-149
 - **Requirements:** FR-PL-006, FR-PL-007
 - **Outcome:** Start with third-party plugins disabled and reset scan state.
 - **Tests first:** Crash marker, safe startup, user enable, and persistent choice.
 - **Acceptance:** Plugin failure cannot prevent Audio Player startup.
 - **Out of scope:** Out-of-process VST scan.
 
-### PR-150 — Document VST3 hosting constraints
+### PR-151 — Document VST3 hosting constraints
 
 - **Branch:** `feature/pr-150-vst3-host-contract`
-- **Depends on:** PR-145
+- **Depends on:** PR-146
 - **Requirements:** FR-PL-001–FR-PL-003
 - **Outcome:** Add ADR for SDK/license, lifecycle, scanning, state, and platform
   constraints plus a compile-time host interface.
@@ -1739,20 +1756,20 @@ research-only branches.
   maintainable code.
 - **Out of scope:** Loading a real VST3.
 
-### PR-151 — Scan VST3 plugins out of process
+### PR-152 — Scan VST3 plugins out of process
 
 - **Branch:** `feature/pr-151-vst3-scanner`
-- **Depends on:** PR-150
+- **Depends on:** PR-151
 - **Requirements:** FR-PL-001, FR-PL-007
 - **Outcome:** Scan configured plugin paths in an isolated helper process.
 - **Tests first:** Valid fake, crash, timeout, duplicate, and cache invalidation.
 - **Acceptance:** Scanner crash does not crash the desktop app.
 - **Out of scope:** Audio processing.
 
-### PR-152 — Load one VST3 effect
+### PR-153 — Load one VST3 effect
 
 - **Branch:** `feature/pr-152-load-vst3-effect`
-- **Depends on:** PR-146, PR-151
+- **Depends on:** PR-147, PR-152
 - **Requirements:** FR-PL-001, FR-PL-002, FR-PL-004
 - **Outcome:** Instantiate one validated effect in the effect chain.
 - **Tests first:** Lifecycle through host contract, bypass, failure, and state.
@@ -1760,10 +1777,10 @@ research-only branches.
   output.
 - **Out of scope:** Plugin editor UI.
 
-### PR-153 — Persist VST3 state
+### PR-154 — Persist VST3 state
 
 - **Branch:** `feature/pr-153-vst3-state`
-- **Depends on:** PR-152, PR-061
+- **Depends on:** PR-153, PR-062
 - **Requirements:** FR-PL-009
 - **Outcome:** Save and restore plugin-chain state outside audio files.
 - **Tests first:** Save, restore, missing plugin, incompatible state, and reset.
@@ -1772,10 +1789,10 @@ research-only branches.
 
 ## 22. Milestone S — DAW bridge
 
-### PR-154 — Define local bridge protocol
+### PR-155 — Define local bridge protocol
 
 - **Branch:** `feature/pr-154-daw-bridge-protocol`
-- **Depends on:** PR-101
+- **Depends on:** PR-102
 - **Requirements:** FR-SM-010, FR-SM-011
 - **Outcome:** Define versioned local IPC for discovery, search, preview request,
   and file transfer.
@@ -1784,10 +1801,10 @@ research-only branches.
 - **Acceptance:** Protocol exposes application services, not SQLite.
 - **Out of scope:** VST3 binary.
 
-### PR-155 — Add desktop bridge server
+### PR-156 — Add desktop bridge server
 
 - **Branch:** `feature/pr-155-desktop-bridge`
-- **Depends on:** PR-154
+- **Depends on:** PR-155
 - **Requirements:** FR-SM-011
 - **Outcome:** Serve the minimal protocol locally with explicit enable/disable.
 - **Tests first:** Start/stop, local-only binding, client lifecycle, invalid
@@ -1795,30 +1812,30 @@ research-only branches.
 - **Acceptance:** Bridge is disabled safely when not configured.
 - **Out of scope:** DAW plugin.
 
-### PR-156 — Create DAW VST3 shell
+### PR-157 — Create DAW VST3 shell
 
 - **Branch:** `feature/pr-156-daw-vst3-shell`
-- **Depends on:** PR-150, PR-154
+- **Depends on:** PR-151, PR-155
 - **Requirements:** FR-SM-010
 - **Outcome:** Build a loadable VST3 that negotiates protocol version.
 - **Tests first:** Protocol client tests and plugin lifecycle contract.
 - **Acceptance:** A reference DAW loads the plugin and reports connection state.
 - **Out of scope:** Search and preview.
 
-### PR-157 — Search samples from DAW
+### PR-158 — Search samples from DAW
 
 - **Branch:** `feature/pr-157-daw-sample-search`
-- **Depends on:** PR-155, PR-156
+- **Depends on:** PR-156, PR-157
 - **Requirements:** FR-SM-010
 - **Outcome:** Search and filter Sample Manager items from the plugin.
 - **Tests first:** Query, pagination, disconnect, empty, and incompatible version.
 - **Acceptance:** Results contain stable IDs and safe display metadata.
 - **Out of scope:** Preview.
 
-### PR-158 — Preview sample from DAW
+### PR-159 — Preview sample from DAW
 
 - **Branch:** `feature/pr-158-daw-preview`
-- **Depends on:** PR-157
+- **Depends on:** PR-158
 - **Requirements:** FR-SM-010
 - **Outcome:** Request start/stop preview through the desktop playback service.
 - **Tests first:** Start, replace, stop, disconnect, unavailable file, and
@@ -1826,10 +1843,10 @@ research-only branches.
 - **Acceptance:** The DAW plugin does not implement a second library database.
 - **Out of scope:** Tempo synchronization.
 
-### PR-159 — Transfer sample to DAW
+### PR-160 — Transfer sample to DAW
 
 - **Branch:** `feature/pr-159-daw-transfer`
-- **Depends on:** PR-157
+- **Depends on:** PR-158
 - **Requirements:** FR-SM-010
 - **Outcome:** Transfer or drag an authorized sample file into the DAW.
 - **Tests first:** Referenced/managed path, missing file, permission, cancellation,
@@ -1839,7 +1856,7 @@ research-only branches.
 
 ## 23. Release preparation PRs
 
-### PR-160 — Add cross-platform CI matrix
+### PR-161 — Add cross-platform CI matrix
 
 - **Branch:** `ci/pr-160-platform-ci`
 - **Depends on:** PR-053
@@ -1849,7 +1866,7 @@ research-only branches.
 - **Acceptance:** Failures are isolated by platform and use stable check names.
 - **Out of scope:** Installers.
 
-### PR-161 — Add macOS application bundle
+### PR-162 — Add macOS application bundle
 
 - **Branch:** `build/pr-161-macos-bundle`
 - **Depends on:** PR-053
@@ -1858,29 +1875,29 @@ research-only branches.
 - **Acceptance:** Bundle contains required assets and no development server.
 - **Out of scope:** Signing, notarization, and Intel.
 
-### PR-162 — Add universal macOS build
+### PR-163 — Add universal macOS build
 
 - **Branch:** `build/pr-162-universal-macos`
-- **Depends on:** PR-161
+- **Depends on:** PR-162
 - **Outcome:** Build Apple Silicon and Intel universal artifact.
 - **Tests/verification:** Architecture inspection and launch on available
   reference systems.
 - **Acceptance:** One artifact contains both supported architectures.
 - **Out of scope:** Notarization.
 
-### PR-163 — Add Windows installer
+### PR-164 — Add Windows installer
 
 - **Branch:** `build/pr-163-windows-installer`
-- **Depends on:** PR-160
+- **Depends on:** PR-161
 - **Outcome:** Configure Windows installer and WebView2 strategy.
 - **Tests/verification:** Clean VM installation, launch, uninstall, and size.
 - **Acceptance:** Installer behavior and runtime requirements are documented.
 - **Out of scope:** Store distribution.
 
-### PR-164 — Add Linux packages
+### PR-165 — Add Linux packages
 
 - **Branch:** `build/pr-164-linux-packages`
-- **Depends on:** PR-160
+- **Depends on:** PR-161
 - **Outcome:** Configure the selected initial Linux package formats.
 - **Tests/verification:** Clean environment installation, launch, uninstall, and
   dependency report.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { INITIAL_FOLDER_TREE_STATE } from "../components/FolderTree/folderTreeTypes";
-import { folderTreeReducer } from "./useFolderTree";
+import { folderTreeReducer, getRestorationPaths } from "./useFolderTree";
 
 const path = "/test/music";
 
@@ -27,6 +27,25 @@ function enumeratingState() {
 }
 
 describe("folderTreeReducer playable entries", () => {
+  it("never scans the synthetic Computer root during restoration", () => {
+    expect(getRestorationPaths("/Users/me/Music")).toEqual([
+      "/",
+      "/Users",
+      "/Users/me",
+      "/Users/me/Music",
+    ]);
+  });
+
+  it("checks every parent so a missing saved folder can fall back", () => {
+    expect(getRestorationPaths("/Volumes/NAS/music/album")).toEqual([
+      "/",
+      "/Volumes",
+      "/Volumes/NAS",
+      "/Volumes/NAS/music",
+      "/Volumes/NAS/music/album",
+    ]);
+  });
+
   it("loads every system root into a collapsed Computer root", () => {
     const state = folderTreeReducer(INITIAL_FOLDER_TREE_STATE, {
       type: "ROOTS_LOADED",
@@ -44,6 +63,24 @@ describe("folderTreeReducer playable entries", () => {
     expect(state.folders["computer://"]?.expanded).toBe(false);
     expect(state.selectedPath).toBe("computer://");
     expect(state.folders["/"]?.expanded).toBe(false);
+  });
+
+  it("restores the selected folder and only the saved expanded paths", () => {
+    const roots = folderTreeReducer(INITIAL_FOLDER_TREE_STATE, {
+      type: "ROOTS_LOADED",
+      roots: [{ path: "/", name: "System" }],
+    });
+
+    const restored = folderTreeReducer(roots, {
+      type: "RESTORE_CONTEXT",
+      selectedPath: "/music/album",
+      expandedPaths: ["computer://", "/", "/music"],
+    });
+
+    expect(restored.selectedPath).toBe("/music/album");
+    expect(restored.folders["computer://"]?.expanded).toBe(true);
+    expect(restored.folders["/music"]?.expanded).toBe(true);
+    expect(restored.folders["/music/album"]).toBeUndefined();
   });
 
   it("resets stale entries when enumeration starts", () => {

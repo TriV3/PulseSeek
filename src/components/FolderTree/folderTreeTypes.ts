@@ -71,6 +71,11 @@ export type FolderTreeAction =
   | { type: "ENUMERATION_ERROR"; path: string; message: string }
   | { type: "TOGGLE_EXPAND"; path: string }
   | { type: "SELECT_FOLDER"; path: string }
+  | {
+      type: "RESTORE_CONTEXT";
+      selectedPath: string;
+      expandedPaths: string[];
+    }
   | { type: "NAVIGATE_UP" }
   | { type: "CLEAR_ERROR" }
   | { type: "REMOVE_ENTRIES"; path: string; entryIds: string[] };

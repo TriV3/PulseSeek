@@ -34,6 +34,10 @@ pub trait PlaybackService: Send {
     /// Changes end-of-file playback mode.
     fn set_mode(&mut self, mode: PlaybackMode) -> Result<PlaybackMode, ApplicationError>;
 
+    /// Rebinds the active playback session to another output device while
+    /// preserving its file, position, and playing/paused state.
+    fn select_output_device(&mut self, device_id: &str) -> Result<(), ApplicationError>;
+
     /// Provides a real event emitter to a native service. No-op default for
     /// fake implementations.
     fn set_events(&mut self, _events: Option<Arc<dyn PlaybackEventEmitter>>) {}
@@ -49,10 +53,12 @@ pub struct FakePlaybackService {
     pub stop_call_count: u64,
     pub seek_call_count: u64,
     pub set_volume_call_count: u64,
+    pub select_output_device_call_count: u64,
     pub last_play_path: Option<String>,
     pub last_seek_position: Option<u64>,
     pub last_volume_gain: Option<f64>,
     pub last_volume_muted: Option<bool>,
+    pub last_output_device_id: Option<String>,
     /// When `Some`, all mutating methods return an error with this category.
     pub fail_with: Option<ErrorCategory>,
     /// When set, seek returns this position.
@@ -69,10 +75,12 @@ impl FakePlaybackService {
             stop_call_count: 0,
             seek_call_count: 0,
             set_volume_call_count: 0,
+            select_output_device_call_count: 0,
             last_play_path: None,
             last_seek_position: None,
             last_volume_gain: None,
             last_volume_muted: None,
+            last_output_device_id: None,
             fail_with: None,
             seek_result: None,
             mode: PlaybackMode::OneShot,
@@ -131,6 +139,12 @@ impl PlaybackService for FakePlaybackService {
         self.check_fail()?;
         self.mode = mode;
         Ok(self.mode)
+    }
+
+    fn select_output_device(&mut self, device_id: &str) -> Result<(), ApplicationError> {
+        self.select_output_device_call_count += 1;
+        self.last_output_device_id = Some(device_id.to_string());
+        self.check_fail()
     }
 }
 
