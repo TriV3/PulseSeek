@@ -134,7 +134,9 @@ enum WorkerCommand {
 ///
 /// Opening and migrating the database happens on `start`; every subsequent
 /// operation runs on the worker thread. The worker exits when this handle is
-/// dropped and the command channel disconnects.
+/// dropped and the command channel disconnects. Cloning shares the same
+/// worker so the cache can back multiple ports.
+#[derive(Clone)]
 pub struct TechnicalCache {
     commands: Sender<WorkerCommand>,
     status: CacheStatus,

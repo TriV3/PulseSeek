@@ -17,6 +17,18 @@ if (typeof window.matchMedia !== "function") {
   })) as typeof window.matchMedia;
 }
 
+// jsdom does not implement ResizeObserver. Components that measure a canvas
+// guard against it, and tests replace this inert stub with a triggerable fake.
+if (typeof window.ResizeObserver !== "function") {
+  class InertResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  window.ResizeObserver =
+    InertResizeObserver as unknown as typeof ResizeObserver;
+}
+
 afterEach(() => {
   cleanup();
   delete document.documentElement.dataset.theme;
