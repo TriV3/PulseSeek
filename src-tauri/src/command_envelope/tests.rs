@@ -1207,9 +1207,9 @@ fn select_device_command_dispatches_to_service() {
     );
 
     assert!(response.ok);
-    assert_eq!(device_service.select_call_count, 1);
-    assert_eq!(device_service.last_select_id, Some("hdmi".to_string()));
-    assert_eq!(device_service.current.as_ref().map(|d| d.id.as_str()), Some("hdmi"));
+    assert_eq!(service.select_output_device_call_count, 1);
+    assert_eq!(service.last_output_device_id, Some("hdmi".to_string()));
+    assert_eq!(device_service.select_call_count, 0);
 }
 
 #[test]
@@ -1235,6 +1235,7 @@ fn select_device_command_invalid_payload_rejected() {
 
     assert!(!response.ok);
     assert_eq!(device_service.select_call_count, 0);
+    assert_eq!(service.select_output_device_call_count, 0);
 }
 
 #[test]
@@ -1260,13 +1261,14 @@ fn select_device_command_missing_id_rejected() {
 
     assert!(!response.ok);
     assert_eq!(device_service.select_call_count, 0);
+    assert_eq!(service.select_output_device_call_count, 0);
 }
 
 #[test]
 fn select_device_service_error_maps_to_boundary() {
     let mut service = FakePlaybackService::new();
     let mut device_service = FakeAudioDeviceService::new();
-    device_service.fail_select = true;
+    service.fail_with = Some(ErrorCategory::Unavailable);
 
     let envelope = CommandEnvelope {
         version: CURRENT_COMMAND_VERSION,

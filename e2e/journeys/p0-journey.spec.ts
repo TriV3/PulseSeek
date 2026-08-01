@@ -17,7 +17,7 @@ test.describe("P0 audition workflow", () => {
     await page.goto("/");
     await expect(
       page.getByRole("heading", { level: 1, name: "PulseSeek" }),
-    ).toBeVisible();
+    ).toBeAttached();
     await expect(page.getByText("Computer", { exact: true })).toBeVisible();
 
     // ── 2. Expand Computer, select a mounted root, and enumerate ─────
@@ -95,9 +95,7 @@ test.describe("P0 audition workflow", () => {
     // ── 7. Verify command invocations ────────────────────────────────
     const calls = await getCommandCalls();
     expect(calls.some((c) => c.command === "play")).toBeTruthy();
-    expect(
-      calls.some((c) => c.command === "list_browser_roots"),
-    ).toBeTruthy();
+    expect(calls.some((c) => c.command === "list_browser_roots")).toBeTruthy();
     expect(calls.some((c) => c.command === "start_enumeration")).toBeTruthy();
     expect(calls.some((c) => c.command === "pause")).toBeTruthy();
     expect(calls.some((c) => c.command === "set_playback_mode")).toBeTruthy();

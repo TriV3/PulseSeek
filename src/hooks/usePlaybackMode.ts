@@ -7,7 +7,9 @@ export function usePlaybackMode() {
   const [isChanging, setIsChanging] = useState(false);
   const generation = useRef(0);
 
-  async function selectMode(nextMode: PlaybackMode) {
+  async function selectMode(
+    nextMode: PlaybackMode,
+  ): Promise<PlaybackMode | null> {
     const requestGeneration = ++generation.current;
     const previousMode = mode;
     setMode(nextMode);
@@ -15,12 +17,17 @@ export function usePlaybackMode() {
     setIsChanging(true);
     try {
       const confirmedMode = await setPlaybackMode(nextMode);
-      if (requestGeneration === generation.current) setMode(confirmedMode);
+      if (requestGeneration === generation.current) {
+        setMode(confirmedMode);
+        return confirmedMode;
+      }
+      return null;
     } catch (cause: unknown) {
       if (requestGeneration === generation.current) {
         setMode(previousMode);
         setError(cause instanceof Error ? cause.message : "Mode unavailable.");
       }
+      return null;
     } finally {
       if (requestGeneration === generation.current) setIsChanging(false);
     }

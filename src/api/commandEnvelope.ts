@@ -95,6 +95,77 @@ export interface SelectDeviceRequest {
   device_id: string;
 }
 
+// ── Player preferences ────────────────────────────────────────────────
+
+export interface PlayerPreferences {
+  schema_version: 1;
+  revision: number;
+  playback_mode: PlaybackMode;
+  output_device_id: string | null;
+  volume: number;
+  muted: boolean;
+  waveform_size: number;
+  browser_size: number;
+  selected_folder_path: string | null;
+  expanded_folder_paths: string[];
+  last_played_file_path: string | null;
+}
+
+interface PlayerPreferencesResponse {
+  version: number;
+  preferences: PlayerPreferences;
+}
+
+function isPlayerPreferences(value: unknown): value is PlayerPreferences {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    candidate.schema_version === 1 &&
+    typeof candidate.revision === "number" &&
+    ["one-shot", "loop-current", "sequential", "random"].includes(
+      String(candidate.playback_mode),
+    ) &&
+    (candidate.output_device_id === null ||
+      typeof candidate.output_device_id === "string") &&
+    typeof candidate.volume === "number" &&
+    typeof candidate.muted === "boolean" &&
+    typeof candidate.waveform_size === "number" &&
+    typeof candidate.browser_size === "number" &&
+    (candidate.selected_folder_path === null ||
+      typeof candidate.selected_folder_path === "string") &&
+    Array.isArray(candidate.expanded_folder_paths) &&
+    candidate.expanded_folder_paths.every((path) => typeof path === "string") &&
+    (candidate.last_played_file_path === null ||
+      typeof candidate.last_played_file_path === "string")
+  );
+}
+
+function preferencesFromResponse(
+  response: PlayerPreferencesResponse,
+): PlayerPreferences {
+  if (!isPlayerPreferences(response?.preferences)) {
+    throw new Error("Invalid player preferences response.");
+  }
+  return response.preferences;
+}
+
+export async function loadPlayerPreferences(): Promise<PlayerPreferences> {
+  const response = await invoke<PlayerPreferencesResponse>(
+    "load_player_preferences",
+  );
+  return preferencesFromResponse(response);
+}
+
+export async function savePlayerPreferences(
+  preferences: PlayerPreferences,
+): Promise<PlayerPreferences> {
+  const response = await invoke<PlayerPreferencesResponse>(
+    "save_player_preferences",
+    { preferences },
+  );
+  return preferencesFromResponse(response);
+}
+
 export type SelectDeviceResponse = Record<string, never>;
 
 // ── Typed invoke wrapper ──────────────────────────────────────────────

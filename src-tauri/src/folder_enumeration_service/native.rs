@@ -40,6 +40,7 @@ impl FolderEnumerationService for NativeFolderEnumerationService {
         active: &ActiveEnumerations,
         events: Arc<dyn PlaybackEventEmitter>,
     ) -> Result<String, ApplicationError> {
+        crate::path_validation::validate_directory(path)?;
         if batch_size == 0 {
             return Err(ApplicationError::new(
                 ErrorCategory::InvalidInput,

@@ -63,7 +63,7 @@ export function useAudioDevices() {
     };
   }, [refresh]);
 
-  const choose = async (deviceId: string) => {
+  const choose = async (deviceId: string): Promise<string | null> => {
     const generation = ++selectionGeneration.current;
     const previous = selectedDeviceId;
     setSelectedDeviceId(deviceId);
@@ -73,9 +73,10 @@ export function useAudioDevices() {
       await selectDevice(deviceId);
       const confirmed = await currentDevice();
       if (generation !== selectionGeneration.current || !mounted.current)
-        return;
+        return null;
       setSelectedDeviceId(confirmed?.id ?? null);
       await refresh();
+      return confirmed?.id ?? null;
     } catch (cause: unknown) {
       if (generation === selectionGeneration.current && mounted.current) {
         setSelectedDeviceId(previous);
@@ -85,6 +86,7 @@ export function useAudioDevices() {
             : "Could not select output device.",
         );
       }
+      return null;
     } finally {
       if (generation === selectionGeneration.current && mounted.current)
         setIsSelecting(false);

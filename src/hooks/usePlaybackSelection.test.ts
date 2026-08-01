@@ -8,12 +8,25 @@ vi.mock("../api/commandEnvelope", () => ({ play: playMock }));
 beforeEach(() => vi.resetAllMocks());
 
 describe("usePlaybackSelection", () => {
+  it("restores the last file selected without starting playback", () => {
+    const { result } = renderHook(() => usePlaybackSelection());
+
+    act(() => result.current.restore("/music/last.wav"));
+
+    expect(playMock).not.toHaveBeenCalled();
+    expect(result.current.playback).toMatchObject({
+      entryId: "/music/last.wav",
+      status: "idle",
+    });
+  });
+
   it("starts playback and marks the current entry playing", async () => {
     playMock.mockResolvedValueOnce(undefined);
     const { result } = renderHook(() => usePlaybackSelection());
 
+    let played = true;
     await act(async () => {
-      await result.current.select({
+      played = await result.current.select({
         id: "/music/a.wav",
         name: "a.wav",
         kind: "playable",
@@ -26,6 +39,7 @@ describe("usePlaybackSelection", () => {
       status: "playing",
       error: null,
     });
+    expect(played).toBe(true);
   });
 
   it("ignores a stale play failure after a newer selection succeeds", async () => {
@@ -64,8 +78,9 @@ describe("usePlaybackSelection", () => {
     playMock.mockRejectedValueOnce(new Error("decoder unavailable"));
     const { result } = renderHook(() => usePlaybackSelection());
 
+    let played = true;
     await act(async () => {
-      await result.current.select({
+      played = await result.current.select({
         id: "/music/bad.wav",
         name: "bad.wav",
         kind: "playable",
@@ -77,5 +92,6 @@ describe("usePlaybackSelection", () => {
       status: "failed",
       error: "decoder unavailable",
     });
+    expect(played).toBe(false);
   });
 });

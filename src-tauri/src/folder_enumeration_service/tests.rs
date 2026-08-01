@@ -75,6 +75,20 @@ fn native_service_lists_system_and_mounted_roots() {
 }
 
 #[test]
+fn native_service_rejects_a_missing_saved_folder_before_starting_a_worker() {
+    let mut service = NativeFolderEnumerationService::new();
+    let active = ActiveEnumerations::new();
+    let events = Arc::new(FakeEventEmitter::new()) as Arc<dyn PlaybackEventEmitter>;
+    let missing = tempfile::tempdir().unwrap().path().join("removed-folder");
+
+    let error = service
+        .start_enumeration(&missing.to_string_lossy(), 50, false, &active, events)
+        .expect_err("missing saved folder must fail synchronously");
+
+    assert_eq!(error.user_descriptor().category(), ErrorCategory::InvalidInput);
+}
+
+#[test]
 fn browser_entry_to_data_converts_folder() {
     use pulseseek_domain::browser::entry::{EntryId, FolderEntry};
     let entry = pulseseek_domain::browser::entry::BrowserEntry::Folder(FolderEntry {

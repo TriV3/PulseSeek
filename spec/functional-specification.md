@@ -173,6 +173,17 @@ Priorities:
   or changing files.
 - **FR-AU-013 (P0):** Corrupt, missing, or inaccessible files shall produce a
   recoverable error and shall not stop browsing other files.
+- **FR-AU-014 (P0):** Every user-selectable Audio Player preference shall be
+  persisted immediately after the interaction and restored on the next launch.
+- **FR-AU-015 (P0):** Restored player preferences shall include playback mode,
+  output device when still available, volume, mute, resizable panel dimensions,
+  selected browser folder, expanded folders, and the last played file.
+- **FR-AU-016 (P0):** Restoring the last played file shall reveal and select it
+  in the browser without starting playback.
+- **FR-AU-017 (P0):** Playback state and seek position shall remain ephemeral;
+  PulseSeek shall always start stopped at position zero.
+- **FR-AU-018 (P0):** Missing files, folders, volumes, or output devices in
+  saved preferences shall fall back safely without blocking startup.
 
 ### 4.4 Waveform and visualizations
 
@@ -242,6 +253,9 @@ phase correlation meter, oscilloscope, loudness history, and stereo spectrum.
   size, and exclusive/shared mode.
 - **FR-IO-006 (P1):** Audio shall be processed internally with a floating-point
   signal path.
+- **FR-IO-007 (P0):** Selecting another available output device during playback
+  shall preserve the current file, playback position, volume, playback mode,
+  and playing or paused state; the user shall not need to restart playback.
 
 ### 4.8 Sample Manager
 
@@ -364,6 +378,11 @@ The technical cache may contain:
 - Cached metadata.
 - Waveform peaks.
 - Temporary analysis results.
+
+Audio Player preferences are written when the corresponding interaction is
+confirmed, not deferred until application shutdown. They are application state,
+remain independent from all manager databases, and must not contain playback
+position or a playing, paused, or stopped transport state.
 
 A technical-cache record is never a Sample Manager or Music Manager item.
 

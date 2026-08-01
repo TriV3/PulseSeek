@@ -4,7 +4,7 @@ use std::thread::JoinHandle;
 use std::time::Duration as ThreadDuration;
 
 use pulseseek_audio_cpal::CpalAudioOutput;
-use pulseseek_domain::audio_output::{AudioOutput, DeviceId};
+use pulseseek_domain::audio_output::{AudioOutput, DeviceId, StreamState};
 use pulseseek_domain::decoder::StreamMetadata;
 use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContext, ErrorCategory};
 use pulseseek_domain::playback::mode::PlaybackMode;
@@ -325,6 +325,68 @@ impl PlaybackService for NativePlaybackService {
         }
         self.mode = mode;
         Ok(mode)
+    }
+
+    fn select_output_device(&mut self, device_id: &str) -> Result<(), ApplicationError> {
+        let output_is_already_usable = {
+            let output =
+                self.output.lock().map_err(|_| Self::unavailable("output lock poisoned"))?;
+            !output.is_device_lost()
+                && output.current_device().is_some_and(|current| current.as_str() == device_id)
+        };
+        if output_is_already_usable {
+            return Ok(());
+        }
+        let session_is_active = self
+            .control
+            .as_ref()
+            .is_some_and(|control| !control.is_stopped() && !control.is_completed());
+        if !session_is_active {
+            let mut output =
+                self.output.lock().map_err(|_| Self::unavailable("output lock poisoned"))?;
+            return output
+                .open(&DeviceId::new(device_id))
+                .map_err(|error| Self::unavailable(&format!("device change failed: {error}")));
+        }
+
+        let path = self
+            .current_path
+            .clone()
+            .ok_or_else(|| Self::unavailable("active playback path unavailable"))?;
+        let sample_rate = self.output_sample_rate.unwrap_or(44_100);
+        let position_ms = self
+            .control
+            .as_ref()
+            .map(|control| frames_to_millis(control.position_frames(), sample_rate))
+            .unwrap_or(0);
+        let was_paused =
+            self.output.lock().map_err(|_| Self::unavailable("output lock poisoned"))?.state()
+                == StreamState::Paused;
+
+        if let Some(mut reporter) = self.position_reporter.take() {
+            reporter.stop();
+        }
+        {
+            let mut output =
+                self.output.lock().map_err(|_| Self::unavailable("output lock poisoned"))?;
+            output
+                .open(&DeviceId::new(device_id))
+                .map_err(|error| Self::unavailable(&format!("device change failed: {error}")))?;
+        }
+        self.worker = None;
+        self.control = None;
+        self.current_path = None;
+        self.current_metadata = None;
+        self.output_sample_rate = None;
+
+        self.play(&path)?;
+        if position_ms > 0 {
+            self.seek(position_ms)?;
+        }
+        if was_paused {
+            self.pause()?;
+        }
+        Ok(())
     }
 }
 

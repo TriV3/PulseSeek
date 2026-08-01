@@ -299,13 +299,6 @@ impl AudioOutput for CpalAudioOutput {
     }
 
     fn open(&mut self, device_id: &DeviceId) -> Result<(), AudioOutputError> {
-        if let Some(control) = &self.playback_control {
-            control.stop();
-        }
-        if let Some(stream) = self.stream.take() {
-            stream.stop()?;
-        }
-        self.playback_control = None;
         let host = cpal::default_host();
 
         // Try to find the requested device by ID.
@@ -320,6 +313,16 @@ impl AudioOutput for CpalAudioOutput {
                     std::io::Error::other("no output device available"),
                 )
             })?;
+
+        // Resolve the replacement before touching the active stream. A bad
+        // selection must not terminate playback on the current device.
+        if let Some(control) = &self.playback_control {
+            control.stop();
+        }
+        if let Some(stream) = self.stream.take() {
+            stream.stop()?;
+        }
+        self.playback_control = None;
 
         self.current_device = if let Ok(id) = device.id() {
             Some(DeviceId::new(id.to_string()))

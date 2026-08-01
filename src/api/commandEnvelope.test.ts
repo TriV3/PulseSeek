@@ -4,6 +4,7 @@ import {
   CommandError,
   healthCheck,
   invokeCommand,
+  loadPlayerPreferences,
   setPlaybackMode,
 } from "./commandEnvelope";
 
@@ -80,6 +81,16 @@ describe("invokeCommand", () => {
     } satisfies CommandResponse);
 
     await expect(invokeCommand("health", {})).rejects.toThrow(CommandError);
+  });
+});
+
+describe("player preferences boundary", () => {
+  it("rejects malformed persisted state instead of leaking undefined into React", async () => {
+    mockInvoke.mockResolvedValueOnce({ version: 1 });
+
+    await expect(loadPlayerPreferences()).rejects.toThrow(
+      "Invalid player preferences response.",
+    );
   });
 });
 
