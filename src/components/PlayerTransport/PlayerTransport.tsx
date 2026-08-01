@@ -50,21 +50,41 @@ export function PlayerTransport({
   return (
     <section className="player-transport" aria-label="Player transport">
       <div className="player-transport-buttons">
-        <button type="button" onClick={onPrevious} disabled={!canPrevious}>
-          Previous
+        <button
+          type="button"
+          onClick={onPrevious}
+          disabled={!canPrevious}
+          aria-label="Previous"
+          title="Previous"
+        >
+          ◀|
         </button>
         <button
           type="button"
           onClick={onTogglePlayPause}
           disabled={!hasSelection || status === "loading"}
+          aria-label={playLabel}
+          title={playLabel}
         >
-          {playLabel}
+          {status === "playing" ? "Ⅱ" : "▶"}
         </button>
-        <button type="button" onClick={onStop} disabled={status === "idle"}>
-          Stop
+        <button
+          type="button"
+          onClick={onStop}
+          disabled={status === "idle"}
+          aria-label="Stop"
+          title="Stop"
+        >
+          ■
         </button>
-        <button type="button" onClick={onNext} disabled={!canNext}>
-          Next
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={!canNext}
+          aria-label="Next"
+          title="Next"
+        >
+          |▶
         </button>
       </div>
       <div className="player-transport-position">
@@ -96,8 +116,9 @@ export function PlayerTransport({
           type="button"
           onClick={onToggleMute}
           aria-label={muted ? "Unmute" : "Mute"}
+          title={muted ? "Unmute" : "Mute"}
         >
-          {muted ? "Unmute" : "Mute"}
+          {muted ? "×♪" : "♪"}
         </button>
       </div>
       {error ? (

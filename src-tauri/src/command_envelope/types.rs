@@ -125,6 +125,14 @@ pub struct PickFolderResponse {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ListBrowserRootsRequest {}
+
+#[derive(Debug, Serialize)]
+pub struct ListBrowserRootsResponse {
+    pub roots: Vec<crate::folder_enumeration_service::BrowserRootData>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct StartEnumerationRequest {
     pub path: String,
     pub batch_size: Option<u64>,

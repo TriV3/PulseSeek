@@ -1402,6 +1402,43 @@ fn start_enumeration_returns_session_id() {
 }
 
 #[test]
+fn list_browser_roots_returns_typed_roots() {
+    let mut playback = FakePlaybackService::new();
+    let mut devices = FakeAudioDeviceService::new();
+    let mut enumeration = FakeFolderEnumerationService::new();
+    enumeration.roots = vec![
+        crate::folder_enumeration_service::BrowserRootData {
+            path: "/".to_string(),
+            name: "System".to_string(),
+        },
+        crate::folder_enumeration_service::BrowserRootData {
+            path: "/Volumes/NAS".to_string(),
+            name: "NAS".to_string(),
+        },
+    ];
+    let active = ActiveEnumerations::new();
+
+    let response = dispatch(
+        CommandEnvelope {
+            version: CURRENT_COMMAND_VERSION,
+            command: "list_browser_roots".to_string(),
+            payload: serde_json::json!({}),
+        },
+        &mut playback,
+        &mut devices,
+        &mut enumeration,
+        &noop_trash(),
+        &active,
+        &noop_events(),
+    );
+
+    assert!(response.ok);
+    let roots = response.data.unwrap()["roots"].as_array().unwrap().clone();
+    assert_eq!(roots.len(), 2);
+    assert_eq!(roots[1]["name"], "NAS");
+}
+
+#[test]
 fn start_enumeration_defaults_batch_size() {
     let mut service = FakePlaybackService::new();
     let mut device_service = FakeAudioDeviceService::new();

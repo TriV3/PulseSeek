@@ -44,6 +44,7 @@ export interface PlayableFileMetadataData {
 export interface FolderChunkPayload {
   session_id: string;
   entries: BrowserEntryData[];
+  folders_done?: boolean;
   done: boolean;
 }
 
@@ -53,6 +54,8 @@ export function isFolderChunkPayload(
   if (!isRecord(value)) return false;
   return (
     typeof value.session_id === "string" &&
+    (value.folders_done === undefined ||
+      typeof value.folders_done === "boolean") &&
     typeof value.done === "boolean" &&
     Array.isArray(value.entries) &&
     value.entries.every(isBrowserEntryData)

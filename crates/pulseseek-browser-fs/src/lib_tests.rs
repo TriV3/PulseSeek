@@ -199,3 +199,17 @@ fn native_rejects_corrupt_audio_as_unsupported() {
 
     assert!(matches!(result[0], BrowserEntry::UnsupportedFile(_)));
 }
+
+#[test]
+fn preview_returns_audio_names_without_decoding_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let audio_path = dir.path().join("large.wav");
+    std::fs::write(&audio_path, b"not decoded during preview").unwrap();
+    std::fs::create_dir(dir.path().join("Samples")).unwrap();
+
+    let entries = NativeFolderReader.read_folder_preview(dir.path(), false).unwrap();
+
+    assert_eq!(entries.len(), 2);
+    assert!(entries.iter().any(|entry| entry.name() == "Samples"));
+    assert!(entries.iter().any(|entry| entry.name() == "large.wav"));
+}

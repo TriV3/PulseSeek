@@ -12,6 +12,7 @@ interface FolderNodeProps {
   state: FolderState;
   /** Loaded state for descendant folders. */
   folders: Record<string, FolderState>;
+  playableEntries: Record<string, Array<{ id: string }>>;
   /** Path of the currently selected item (for computing aria-selected). */
   selectedPath: string | null;
   /** Called when the expand/collapse toggle is clicked. */
@@ -26,6 +27,7 @@ export function FolderNode({
   depth,
   state,
   folders,
+  playableEntries,
   selectedPath,
   onToggle,
   onSelect,
@@ -42,19 +44,19 @@ export function FolderNode({
 
   const handleSelect = useCallback(() => {
     onSelect(path);
-  }, [path, onSelect]);
+    onToggle(path);
+  }, [path, onSelect, onToggle]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
+        onSelect(path);
         onToggle(path);
       }
     },
-    [path, onToggle],
+    [path, onSelect, onToggle],
   );
-
-  const indent = depth * 16;
 
   return (
     <li
@@ -63,7 +65,7 @@ export function FolderNode({
       aria-selected={isSelected}
       tabIndex={isSelected ? 0 : -1}
       className={`folder-node${isSelected ? " selected" : ""}`}
-      style={{ paddingLeft: `${indent + 8}px` }}
+      data-depth={depth}
       onKeyDown={handleKeyDown}
     >
       <div className="folder-node-row" onClick={handleSelect}>
@@ -94,34 +96,19 @@ export function FolderNode({
       </div>
 
       {/* Error message */}
-      {state.error && (
-        <div
-          className="folder-error"
-          style={{ paddingLeft: `${indent + 24}px` }}
-        >
-          {state.error}
-        </div>
-      )}
+      {state.error && <div className="folder-error">{state.error}</div>}
 
       {/* Children (subfolders) */}
       {state.expanded && !state.error && (
         <ul role="group" className="folder-children">
           {state.isLoading && state.children.length === 0 && (
-            <li
-              className="folder-empty"
-              style={{ paddingLeft: `${indent + 24}px` }}
-            >
-              Loading&#8230;
-            </li>
+            <li className="folder-empty">Loading&#8230;</li>
           )}
-          {!state.isLoading && state.children.length === 0 && (
-            <li
-              className="folder-empty"
-              style={{ paddingLeft: `${indent + 24}px` }}
-            >
-              (empty)
-            </li>
-          )}
+          {!state.isLoading &&
+            state.children.length === 0 &&
+            (playableEntries[path]?.length ?? 0) === 0 && (
+              <li className="folder-empty">(empty)</li>
+            )}
           {state.children.map((child) => {
             const childPath = child.id;
             return (
@@ -139,6 +126,7 @@ export function FolderNode({
                   }
                 }
                 folders={folders}
+                playableEntries={playableEntries}
                 selectedPath={selectedPath}
                 onToggle={onToggle}
                 onSelect={onSelect}

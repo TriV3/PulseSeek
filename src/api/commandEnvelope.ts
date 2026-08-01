@@ -224,6 +224,24 @@ export interface StartEnumerationRequest {
   show_unsupported?: boolean;
 }
 
+export interface BrowserRoot {
+  path: string;
+  name: string;
+}
+
+export interface ListBrowserRootsResponse {
+  roots: BrowserRoot[];
+}
+
+/** Lists local disks and network volumes currently mounted by the OS. */
+export async function listBrowserRoots(): Promise<BrowserRoot[]> {
+  const response = await invokeCommand<ListBrowserRootsResponse>(
+    "list_browser_roots",
+    {},
+  );
+  return response.roots;
+}
+
 export interface StartEnumerationResponse {
   session_id: string;
 }

@@ -5,8 +5,9 @@ use pulseseek_domain::error::ErrorContract;
 use serde_json::Value;
 
 use crate::command_envelope::types::{
-    CancelEnumerationRequest, CancelEnumerationResponse, MoveToTrashItemResult, MoveToTrashRequest,
-    MoveToTrashResponse, PickFolderResponse, StartEnumerationRequest, StartEnumerationResponse,
+    CancelEnumerationRequest, CancelEnumerationResponse, ListBrowserRootsRequest,
+    ListBrowserRootsResponse, MoveToTrashItemResult, MoveToTrashRequest, MoveToTrashResponse,
+    PickFolderResponse, StartEnumerationRequest, StartEnumerationResponse,
 };
 use crate::command_envelope::{from_application_error, CommandResponse};
 use crate::command_handlers::parse_payload;
@@ -26,6 +27,19 @@ pub(crate) fn handle(
     events: &Arc<dyn PlaybackEventEmitter>,
 ) -> CommandResponse {
     match command {
+        "list_browser_roots" => {
+            let _request: ListBrowserRootsRequest =
+                match parse_payload("list_browser_roots", payload) {
+                    Ok(request) => request,
+                    Err(response) => return response,
+                };
+            match enum_service.list_roots() {
+                Ok(roots) => CommandResponse::ok(
+                    serde_json::to_value(ListBrowserRootsResponse { roots }).unwrap(),
+                ),
+                Err(error) => CommandResponse::err(from_application_error(&error)),
+            }
+        },
         "start_enumeration" => {
             let request: StartEnumerationRequest = match parse_payload("start_enumeration", payload)
             {

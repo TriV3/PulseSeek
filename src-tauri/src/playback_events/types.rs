@@ -45,5 +45,7 @@ pub struct PlayableFileMetadataData {
 pub struct FolderChunkPayload {
     pub session_id: String,
     pub entries: Vec<BrowserEntryData>,
+    #[serde(default)]
+    pub folders_done: bool,
     pub done: bool,
 }

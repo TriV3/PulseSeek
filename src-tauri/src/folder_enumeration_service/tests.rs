@@ -64,6 +64,17 @@ fn fake_service_records_show_unsupported_preference() {
 }
 
 #[test]
+fn native_service_lists_system_and_mounted_roots() {
+    let service = NativeFolderEnumerationService::new();
+
+    let roots = service.list_roots().unwrap();
+
+    assert!(!roots.is_empty());
+    assert!(roots.iter().all(|root| std::path::Path::new(&root.path).is_dir()));
+    assert!(roots.iter().any(|root| root.path == std::path::MAIN_SEPARATOR.to_string()));
+}
+
+#[test]
 fn browser_entry_to_data_converts_folder() {
     use pulseseek_domain::browser::entry::{EntryId, FolderEntry};
     let entry = pulseseek_domain::browser::entry::BrowserEntry::Folder(FolderEntry {
@@ -98,7 +109,7 @@ fn emit_folder_chunk_emits_correct_event() {
     });
     let events = Arc::new(FakeEventEmitter::new());
 
-    emit_folder_chunk(&*events, "sid-1", &[entry], false);
+    emit_folder_chunk_phase(&*events, "sid-1", &[entry], false, false);
 
     let recorded = events.recorded_events();
     assert_eq!(recorded.len(), 1);
@@ -112,7 +123,7 @@ fn emit_folder_chunk_emits_correct_event() {
 #[test]
 fn emit_folder_chunk_done_flag() {
     let events = Arc::new(FakeEventEmitter::new());
-    emit_folder_chunk(&*events, "sid-1", &[], true);
+    emit_folder_chunk_phase(&*events, "sid-1", &[], true, true);
     let recorded = events.recorded_events();
     let payload: FolderChunkPayload = serde_json::from_value(recorded[0].payload.clone()).unwrap();
     assert!(payload.done);

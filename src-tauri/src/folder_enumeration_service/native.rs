@@ -8,7 +8,7 @@ use crate::playback_events::{
     EVENT_FOLDER_CHUNK,
 };
 
-use super::{ActiveEnumerations, FolderEnumerationService};
+use super::{ActiveEnumerations, BrowserRootData, FolderEnumerationService};
 
 /// Native folder enumeration service. Reads and probes files on worker thread.
 pub struct NativeFolderEnumerationService {
@@ -28,6 +28,10 @@ impl Default for NativeFolderEnumerationService {
 }
 
 impl FolderEnumerationService for NativeFolderEnumerationService {
+    fn list_roots(&self) -> Result<Vec<BrowserRootData>, ApplicationError> {
+        Ok(system_roots())
+    }
+
     fn start_enumeration(
         &mut self,
         path: &str,
@@ -53,15 +57,42 @@ impl FolderEnumerationService for NativeFolderEnumerationService {
         std::thread::Builder::new()
             .name("pulseseek-folder-enumeration".to_string())
             .spawn(move || {
-                let result = pulseseek_browser_fs::NativeFolderReader
-                    .read_folder_with_options(std::path::Path::new(&path), show_unsupported);
+                let reader = pulseseek_browser_fs::NativeFolderReader;
+                let preview =
+                    reader.read_folder_preview(std::path::Path::new(&path), show_unsupported);
+                if let Ok(entries) = preview {
+                    for chunk in entries.chunks(batch_size) {
+                        if cancelled.load(Ordering::Acquire) || events.is_disconnected() {
+                            break;
+                        }
+                        emit_folder_chunk_phase(&*events, &session_for_thread, chunk, true, false);
+                    }
+                    if entries.is_empty()
+                        && !cancelled.load(Ordering::Acquire)
+                        && !events.is_disconnected()
+                    {
+                        emit_folder_chunk_phase(&*events, &session_for_thread, &[], true, false);
+                    }
+                }
+
+                let result = reader.read_folder_with_options_cancellable(
+                    std::path::Path::new(&path),
+                    true,
+                    || cancelled.load(Ordering::Acquire) || events.is_disconnected(),
+                );
                 match result {
                     Ok(entries) => {
                         for chunk in entries.chunks(batch_size) {
                             if cancelled.load(Ordering::Acquire) || events.is_disconnected() {
                                 break;
                             }
-                            emit_folder_chunk(&*events, &session_for_thread, chunk, false);
+                            emit_folder_chunk_phase(
+                                &*events,
+                                &session_for_thread,
+                                chunk,
+                                true,
+                                false,
+                            );
                         }
                     },
                     Err(error) => {
@@ -75,7 +106,7 @@ impl FolderEnumerationService for NativeFolderEnumerationService {
                 // Always emit done=true so the frontend exits its loading
                 // state, even when enumeration failed or was cancelled.
                 if !cancelled.load(Ordering::Acquire) && !events.is_disconnected() {
-                    emit_folder_chunk(&*events, &session_for_thread, &[], true);
+                    emit_folder_chunk_phase(&*events, &session_for_thread, &[], true, true);
                 }
                 active_for_thread.remove(&session_for_thread);
             })
@@ -89,6 +120,59 @@ impl FolderEnumerationService for NativeFolderEnumerationService {
             })?;
 
         Ok(session_id)
+    }
+}
+
+fn system_roots() -> Vec<BrowserRootData> {
+    let mut roots = Vec::new();
+
+    #[cfg(unix)]
+    roots.push(BrowserRootData { path: "/".to_string(), name: "System".to_string() });
+
+    #[cfg(target_os = "macos")]
+    add_child_mounts(std::path::Path::new("/Volumes"), &mut roots);
+
+    #[cfg(target_os = "linux")]
+    {
+        add_child_mounts(std::path::Path::new("/mnt"), &mut roots);
+        add_child_mounts(std::path::Path::new("/media"), &mut roots);
+        add_child_mounts(std::path::Path::new("/run/media"), &mut roots);
+    }
+
+    #[cfg(windows)]
+    for letter in b'A'..=b'Z' {
+        let path = format!("{}:\\", char::from(letter));
+        if std::path::Path::new(&path).is_dir() {
+            roots.push(BrowserRootData { name: path.clone(), path });
+        }
+    }
+
+    roots.sort_by(|left, right| {
+        (left.path != std::path::MAIN_SEPARATOR.to_string())
+            .cmp(&(right.path != std::path::MAIN_SEPARATOR.to_string()))
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+    });
+    roots.dedup_by(|left, right| left.path == right.path);
+    roots
+}
+
+#[cfg(unix)]
+fn add_child_mounts(parent: &std::path::Path, roots: &mut Vec<BrowserRootData>) {
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if path.canonicalize().is_ok_and(|canonical| canonical == std::path::Path::new("/")) {
+            continue;
+        }
+        roots.push(BrowserRootData {
+            name: entry.file_name().to_string_lossy().to_string(),
+            path: path.to_string_lossy().to_string(),
+        });
     }
 }
 
@@ -129,15 +213,21 @@ fn js_safe_integer(value: u64) -> Option<u64> {
     (value <= MAX_JAVASCRIPT_SAFE_INTEGER).then_some(value)
 }
 
-/// Emits a folder chunk event for a batch of entries.
-pub fn emit_folder_chunk(
+/// Emits a folder chunk event for either the preview or verification phase.
+pub(crate) fn emit_folder_chunk_phase(
     events: &dyn PlaybackEventEmitter,
     session_id: &str,
     entries: &[pulseseek_domain::browser::entry::BrowserEntry],
+    folders_done: bool,
     done: bool,
 ) {
     let data: Vec<BrowserEntryData> = entries.iter().map(browser_entry_to_data).collect();
-    let payload = FolderChunkPayload { session_id: session_id.to_string(), entries: data, done };
+    let payload = FolderChunkPayload {
+        session_id: session_id.to_string(),
+        entries: data,
+        folders_done,
+        done,
+    };
     let _ = events.emit(
         EVENT_FOLDER_CHUNK,
         serde_json::to_value(payload).expect("folder chunk serialization"),

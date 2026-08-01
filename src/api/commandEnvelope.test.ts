@@ -163,3 +163,31 @@ describe("moveToTrash", () => {
     });
   });
 });
+
+describe("listBrowserRoots", () => {
+  it("returns local and network-mounted roots", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: true,
+      data: {
+        roots: [
+          { path: "/", name: "System" },
+          { path: "/Volumes/NAS", name: "NAS" },
+        ],
+      },
+    });
+
+    const { listBrowserRoots } = await import("./commandEnvelope");
+    await expect(listBrowserRoots()).resolves.toEqual([
+      { path: "/", name: "System" },
+      { path: "/Volumes/NAS", name: "NAS" },
+    ]);
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: {
+        version: 1,
+        command: "list_browser_roots",
+        payload: {},
+      },
+    });
+  });
+});
