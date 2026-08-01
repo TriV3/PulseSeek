@@ -58,9 +58,11 @@ pub struct Level {
 /// Multiresolution peak data for one audio item.
 ///
 /// Levels are ordered from coarsest to finest and their indices must be
-/// contiguous starting at zero.
+/// contiguous starting at zero. Each level stores one envelope per channel,
+/// interleaved by bucket: `[ch0, ch1, ch0, ch1, ...]`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MultiresolutionWaveform {
+    channels: u16,
     levels: Vec<Level>,
 }
 
@@ -69,10 +71,14 @@ pub struct MultiresolutionWaveform {
 pub enum WaveformError {
     /// A waveform needs at least one level.
     Empty,
+    /// A waveform needs at least one audio channel.
+    ZeroChannels,
     /// Level indices must be contiguous starting at zero.
     NonContiguousIndices,
     /// Every level must contain at least one peak bucket.
     ZeroPeaks,
+    /// Every level's peak count must be divisible by the channel count.
+    PeaksNotAlignedToChannels,
     /// Every level must have a positive samples-per-peak resolution.
     NonPositiveSamplesPerPeak,
     /// Coarser levels must cover more samples per peak than finer levels.
@@ -83,10 +89,14 @@ impl fmt::Display for WaveformError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty => write!(f, "waveform requires at least one level"),
+            Self::ZeroChannels => write!(f, "waveform requires at least one channel"),
             Self::NonContiguousIndices => {
                 write!(f, "waveform level indices must be contiguous from zero")
             },
             Self::ZeroPeaks => write!(f, "waveform level must contain at least one peak"),
+            Self::PeaksNotAlignedToChannels => {
+                write!(f, "waveform level peaks must align to the channel count")
+            },
             Self::NonPositiveSamplesPerPeak => {
                 write!(f, "waveform level resolution must be positive")
             },
@@ -102,10 +112,14 @@ impl std::error::Error for WaveformError {}
 impl MultiresolutionWaveform {
     /// Validates and stores a resolution pyramid.
     ///
-    /// Fails when the level set is empty, indices are not contiguous from
-    /// zero, a level has no peaks or a zero resolution, or a finer level does
-    /// not strictly increase resolution.
-    pub fn from_levels(levels: Vec<Level>) -> Result<Self, WaveformError> {
+    /// Fails when the channel count is zero, the level set is empty, indices
+    /// are not contiguous from zero, a level has no peaks or a zero
+    /// resolution, a level's peak count does not align to the channel count,
+    /// or a finer level does not strictly increase resolution.
+    pub fn from_levels(channels: u16, levels: Vec<Level>) -> Result<Self, WaveformError> {
+        if channels == 0 {
+            return Err(WaveformError::ZeroChannels);
+        }
         if levels.is_empty() {
             return Err(WaveformError::Empty);
         }
@@ -116,6 +130,9 @@ impl MultiresolutionWaveform {
             if lvl.peaks.is_empty() {
                 return Err(WaveformError::ZeroPeaks);
             }
+            if lvl.peaks.len() % channels as usize != 0 {
+                return Err(WaveformError::PeaksNotAlignedToChannels);
+            }
             if lvl.samples_per_peak == 0 {
                 return Err(WaveformError::NonPositiveSamplesPerPeak);
             }
@@ -123,7 +140,12 @@ impl MultiresolutionWaveform {
                 return Err(WaveformError::NonDecreasingResolution);
             }
         }
-        Ok(Self { levels })
+        Ok(Self { channels, levels })
+    }
+
+    /// Number of interleaved audio channels in every level.
+    pub fn channels(&self) -> u16 {
+        self.channels
     }
 
     /// Levels ordered from coarsest to finest.
@@ -158,11 +180,14 @@ impl MultiresolutionWaveform {
 
     /// Selects the coarsest level holding at least `target_peaks` buckets.
     ///
-    /// Falls back to the finest level when the target exceeds every level.
+    /// A bucket holds one envelope per channel, so the level's usable bucket
+    /// count is its peak count divided by the channel count. Falls back to the
+    /// finest level when the target exceeds every level.
     pub fn select_level(&self, target_peaks: u64) -> &Level {
+        let buckets_per_peak = self.channels as u64;
         self.levels
             .iter()
-            .find(|lvl| lvl.peaks.len() as u64 >= target_peaks)
+            .find(|lvl| lvl.peaks.len() as u64 / buckets_per_peak >= target_peaks)
             .unwrap_or_else(|| self.finest())
     }
 }
