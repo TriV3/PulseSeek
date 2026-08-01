@@ -1,15 +1,14 @@
 /*
- * PulseSeek semantic design tokens.
+ * PulseSeek design foundation.
  *
- * Feature components and the application shell must consume colors through
- * these tokens only. Themes (dark, light, Midnight Blue, High Contrast) will
- * redefine this `:root` block without touching component styles.
+ * Semantic tokens live in one file per theme under `themes/`:
+ *   themes/light.css → :root, [data-theme="light"]
+ *   themes/dark.css  → [data-theme="dark"]
+ * Future themes (Midnight Blue, High Contrast) add their own file.
+ * Feature components must consume colors through tokens only.
  */
 
 :root {
-  /* Base document */
-  color: #27333f;
-  background: #e9edf1;
   font-family:
     Inter,
     ui-sans-serif,
@@ -18,65 +17,4 @@
     "Segoe UI",
     sans-serif;
   font-synthesis: none;
-
-  /* Surfaces */
-  --bg-canvas: #e9edf1;
-  --bg-surface: #fff;
-  --bg-subtle: #fbfcfd;
-  --bg-panel: #f0f3f6;
-  --bg-chrome: #f6f8fa;
-  --bg-chrome-strong: #e5eaf0;
-  --bg-hover: #edf2f5;
-  --bg-selected: #d4e88b;
-  --bg-header: #fbfcfd;
-  --bg-header-strong: #e7ecf0;
-  --bg-button: #fff;
-  --bg-button-strong: #e8edf1;
-  --bg-browser-tabs: #f2f5f7;
-
-  /* Text */
-  --text: #27333f;
-  --text-strong: #405263;
-  --text-muted: #6f7d8c;
-  --text-subtle: #8c9aa7;
-  --text-brand: #50677a;
-  --text-danger: #a03030;
-  --text-on-accent: #fff;
-
-  /* Borders */
-  --line: #b9c3ce;
-  --line-strong: #8fa2b3;
-  --line-soft: #d7dde3;
-
-  /* Accent */
-  --accent: #bada4b;
-  --accent-strong: #91b52e;
-  --accent-play: #c8df63;
-  --accent-play-soft: #e9f4a7;
-  --accent-play-ink: #47592b;
-  --accent-play-border: #aabe61;
-  --accent-range: #7c93a6;
-
-  /* Danger */
-  --bg-danger: #c00;
-  --bg-danger-strong: #a00;
-  --bg-danger-subtle: #fce4e4;
-  --line-danger: #e8b0b0;
-  --line-danger-strong: #a00;
-
-  /* Waveform */
-  --wave: #7f91a2;
-  --wave-grid: #cbd3db;
-  --wave-selection: #f5ec58;
-  --wave-selection-border: #9aa32d;
-  --wave-playhead: #f29c38;
-
-  /* Focus and overlay */
-  --focus-ring: #4a90d9;
-  --overlay-backdrop: rgba(0, 0, 0, 0.3);
-  --shadow-overlay: 0 4px 16px rgba(0, 0, 0, 0.2);
-
-  /* Spinner */
-  --spinner-track: #ccc;
-  --spinner-head: #555;
 }

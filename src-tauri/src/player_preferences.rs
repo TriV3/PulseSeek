@@ -9,6 +9,10 @@ use crate::command_envelope::{BoundaryError, CURRENT_COMMAND_VERSION};
 
 const PREFERENCES_SCHEMA_VERSION: u32 = 1;
 
+fn default_theme() -> String {
+    "system".to_string()
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PlayerPreferences {
     pub schema_version: u32,
@@ -22,6 +26,8 @@ pub struct PlayerPreferences {
     pub selected_folder_path: Option<String>,
     pub expanded_folder_paths: Vec<String>,
     pub last_played_file_path: Option<String>,
+    #[serde(default = "default_theme")]
+    pub theme: String,
 }
 
 impl Default for PlayerPreferences {
@@ -38,6 +44,7 @@ impl Default for PlayerPreferences {
             selected_folder_path: None,
             expanded_folder_paths: Vec::new(),
             last_played_file_path: None,
+            theme: default_theme(),
         }
     }
 }
@@ -49,6 +56,9 @@ impl PlayerPreferences {
             "one-shot" | "loop-current" | "sequential" | "random"
         ) {
             self.playback_mode = "one-shot".to_string();
+        }
+        if !matches!(self.theme.as_str(), "system" | "light" | "dark") {
+            self.theme = default_theme();
         }
         if !self.volume.is_finite() {
             self.volume = 1.0;
@@ -192,6 +202,63 @@ mod tests {
         stale.volume = 0.9;
         assert_eq!(restarted_repository.save(stale).unwrap().volume, 0.35);
         assert_eq!(restarted_repository.load().unwrap().volume, 0.35);
+    }
+
+    #[test]
+    fn theme_defaults_to_system() {
+        assert_eq!(PlayerPreferences::default().theme, "system");
+    }
+
+    #[test]
+    fn validated_theme_accepts_supported_values() {
+        for theme in ["system", "light", "dark"] {
+            let preferences =
+                PlayerPreferences { theme: theme.to_string(), ..PlayerPreferences::default() }
+                    .validated();
+            assert_eq!(preferences.theme, theme);
+        }
+    }
+
+    #[test]
+    fn validated_theme_falls_back_to_system_for_unknown_values() {
+        let preferences = PlayerPreferences {
+            theme: "midnight-blue".to_string(),
+            ..PlayerPreferences::default()
+        }
+        .validated();
+        assert_eq!(preferences.theme, "system");
+    }
+
+    #[test]
+    fn legacy_file_without_theme_field_deserializes_with_default() {
+        let serialized = r#"{
+            "schema_version": 1,
+            "revision": 3,
+            "playback_mode": "loop-current",
+            "output_device_id": null,
+            "volume": 0.5,
+            "muted": true,
+            "waveform_size": 40,
+            "browser_size": 25,
+            "selected_folder_path": "/music",
+            "expanded_folder_paths": ["/music"],
+            "last_played_file_path": "/music/track.wav"
+        }"#;
+        let preferences: PlayerPreferences = serde_json::from_str(serialized).unwrap();
+        assert_eq!(preferences.theme, "system");
+        assert_eq!(preferences.revision, 3);
+        assert_eq!(preferences.volume, 0.5);
+    }
+
+    #[test]
+    fn theme_round_trips_through_repository() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("player-preferences.json");
+        let mut repository = JsonPlayerPreferencesRepository::new(path.clone());
+        let preferences =
+            PlayerPreferences { theme: "dark".to_string(), ..PlayerPreferences::default() };
+        repository.save(preferences.clone()).unwrap();
+        assert_eq!(repository.load().unwrap().theme, "dark");
     }
 
     #[test]

@@ -61,4 +61,21 @@ describe("usePlayerPreferences", () => {
       revision: 2,
     });
   });
+
+  it("defaults the theme preference to system", () => {
+    expect(DEFAULT_PLAYER_PREFERENCES.theme).toBe("system");
+  });
+
+  it("persists theme changes immediately", async () => {
+    const { result } = renderHook(() => usePlayerPreferences());
+    await waitFor(() => expect(result.current.isLoaded).toBe(true));
+
+    act(() => result.current.update({ theme: "dark" }));
+
+    expect(api.save).toHaveBeenCalledTimes(1);
+    expect(api.save.mock.calls[0][0]).toMatchObject({
+      theme: "dark",
+      revision: 1,
+    });
+  });
 });
