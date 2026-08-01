@@ -6,9 +6,9 @@
     sans-serif;
   font-size: 11px;
   line-height: 1.25;
-  color: #1a1a1a;
+  color: var(--text);
   height: 100%;
-  background: #fbfcfd;
+  background: var(--bg-subtle);
   border: 0;
   border-radius: 0;
   padding: 0;
@@ -27,17 +27,17 @@
   gap: 4px;
   min-height: 30px;
   padding: 3px 5px;
-  border-bottom: 1px solid #d4dbe1;
+  border-bottom: 1px solid var(--line-soft);
   margin-bottom: 0;
-  background: #f4f7f9;
+  background: var(--bg-chrome);
 }
 
 .open-folder-btn,
 .go-up-btn {
   padding: 3px 7px;
-  border: 1px solid #b0b0b0;
+  border: 1px solid var(--line-strong);
   border-radius: 2px;
-  background: #fff;
+  background: var(--bg-surface);
   cursor: pointer;
   font-size: 10px;
 }
@@ -50,13 +50,13 @@
 
 .open-folder-btn:hover:not(:disabled),
 .go-up-btn:hover:not(:disabled) {
-  background: #e8e8e8;
+  background: var(--bg-hover);
 }
 
 .current-path {
   margin-left: auto;
   font-size: 10px;
-  color: #666;
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -76,9 +76,9 @@
 }
 
 .folder-tree-banner--error {
-  background: #fce4e4;
-  border: 1px solid #e8b0b0;
-  color: #a03030;
+  background: var(--bg-danger-subtle);
+  border: 1px solid var(--line-danger);
+  color: var(--text-danger);
 }
 
 .banner-close-btn {
@@ -114,11 +114,11 @@
 }
 
 .folder-node:hover {
-  background: #eef0f5;
+  background: var(--bg-hover);
 }
 
 .folder-node.selected {
-  background: #d8e8a0;
+  background: var(--bg-selected);
 }
 
 .folder-node-row {
@@ -127,7 +127,7 @@
   gap: 4px;
   min-height: 20px;
   padding: 1px 4px;
-  border-bottom: 1px solid #edf0f2;
+  border-bottom: 1px solid var(--line-soft);
   cursor: pointer;
 }
 
@@ -160,8 +160,8 @@
   display: inline-block;
   width: 10px;
   height: 10px;
-  border: 2px solid #ccc;
-  border-top-color: #555;
+  border: 2px solid var(--spinner-track);
+  border-top-color: var(--spinner-head);
   border-radius: 50%;
   animation: folder-spin 0.6s linear infinite;
 }
@@ -190,13 +190,13 @@
 
 .folder-error {
   font-size: 12px;
-  color: #a03030;
+  color: var(--text-danger);
   padding: 2px 0 2px 20px;
 }
 
 .folder-empty {
   font-size: 12px;
-  color: #999;
+  color: var(--text-muted);
   font-style: italic;
   padding: 2px 0 2px 20px;
 }
