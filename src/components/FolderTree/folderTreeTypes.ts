@@ -51,6 +51,11 @@ export interface FolderTreeState {
 }
 
 export type FolderTreeAction =
+  | {
+      type: "ROOTS_LOADED";
+      roots: Array<{ path: string; name: string }>;
+    }
+  | { type: "ROOTS_ERROR"; message: string }
   | { type: "START_PICKING" }
   | { type: "FOLDER_PICKED"; path: string }
   | { type: "PICK_CANCELLED" }
@@ -61,6 +66,7 @@ export type FolderTreeAction =
       path: string;
       entries: BrowserEntry[];
       done: boolean;
+      foldersDone?: boolean;
     }
   | { type: "ENUMERATION_ERROR"; path: string; message: string }
   | { type: "TOGGLE_EXPAND"; path: string }

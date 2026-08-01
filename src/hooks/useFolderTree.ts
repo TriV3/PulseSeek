@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import {
   cancelEnumeration,
-  pickFolder,
+  listBrowserRoots,
   startEnumeration,
 } from "../api/commandEnvelope";
 import { onFolderChunk, type FolderChunkPayload } from "../api/playbackEvents";
@@ -21,6 +21,45 @@ export function folderTreeReducer(
   action: FolderTreeAction,
 ): FolderTreeState {
   switch (action.type) {
+    case "ROOTS_LOADED": {
+      const rootPath = "computer://";
+      const rootEntries = action.roots.map((root) => ({
+        id: root.path,
+        name: root.name,
+        kind: "folder" as const,
+      }));
+      const rootFolders = Object.fromEntries(
+        action.roots.map((root) => [
+          root.path,
+          {
+            expanded: false,
+            children: [],
+            isLoading: false,
+            error: null,
+          },
+        ]),
+      );
+      return {
+        ...state,
+        rootPath,
+        selectedPath: rootPath,
+        folders: {
+          ...rootFolders,
+          [rootPath]: {
+            expanded: false,
+            children: rootEntries,
+            isLoading: false,
+            error: null,
+          },
+        },
+        status: "ready",
+        errorMessage: null,
+      };
+    }
+
+    case "ROOTS_ERROR":
+      return { ...state, status: "error", errorMessage: action.message };
+
     case "START_PICKING":
       return { ...state, status: "picking", errorMessage: null };
 
@@ -77,7 +116,19 @@ export function folderTreeReducer(
       const newFolders = action.entries.filter((e) => e.kind === "folder");
 
       // Accumulate playable entries for the file list.
-      const newPlayable = action.entries.filter((e) => e.kind === "playable");
+      const playableById = new Map(
+        (state.playableEntries[action.path] ?? []).map((entry) => [
+          entry.id,
+          entry,
+        ]),
+      );
+      for (const entry of action.entries) {
+        if (entry.kind === "playable") {
+          playableById.set(entry.id, entry);
+        } else if (entry.kind !== "folder") {
+          playableById.delete(entry.id);
+        }
+      }
 
       // Deduplicate folder names.
       const childrenById = new Map(
@@ -87,23 +138,33 @@ export function folderTreeReducer(
         childrenById.set(entry.id, entry);
       }
 
+      const discoveredFolderStates = Object.fromEntries(
+        newFolders.map((entry) => [
+          entry.id,
+          state.folders[entry.id] ?? {
+            expanded: false,
+            children: [],
+            isLoading: false,
+            error: null,
+          },
+        ]),
+      );
+
       return {
         ...state,
         folders: {
           ...state.folders,
+          ...discoveredFolderStates,
           [action.path]: {
             ...current,
             children: [...childrenById.values()],
-            isLoading: !action.done,
+            isLoading: !(action.foldersDone ?? action.done),
             expanded: true,
           },
         },
         playableEntries: {
           ...state.playableEntries,
-          [action.path]: [
-            ...(state.playableEntries[action.path] ?? []),
-            ...newPlayable,
-          ],
+          [action.path]: [...playableById.values()],
         },
         status: action.done
           ? state.status === "error"
@@ -203,7 +264,6 @@ const PENDING_CHUNKS: Record<string, FolderChunkPayload[]> = {};
 
 export interface UseFolderTreeReturn {
   state: FolderTreeState;
-  openFolder: () => Promise<void>;
   toggleExpand: (path: string) => void;
   selectFolder: (path: string) => void;
   navigateUp: () => void;
@@ -244,6 +304,7 @@ export function useFolderTree(): UseFolderTreeReturn {
           type: "ENUMERATION_CHUNK",
           path,
           entries: payload.entries,
+          foldersDone: payload.folders_done ?? payload.done,
           done: payload.done,
         });
         if (payload.done) {
@@ -286,6 +347,7 @@ export function useFolderTree(): UseFolderTreeReturn {
             type: "ENUMERATION_CHUNK",
             path,
             entries: payload.entries,
+            foldersDone: payload.folders_done ?? payload.done,
             done: payload.done,
           });
           if (payload.done) {
@@ -300,22 +362,36 @@ export function useFolderTree(): UseFolderTreeReturn {
     }
   }, []);
 
-  const openFolder = useCallback(async () => {
-    dispatch({ type: "START_PICKING" });
+  useEffect(() => {
+    let active = true;
     try {
-      const path = await pickFolder();
-      if (path === null) {
-        dispatch({ type: "PICK_CANCELLED" });
-        return;
-      }
-      dispatch({ type: "FOLDER_PICKED", path });
-      // Enumerate the root folder immediately.
-      await enumeratePath(path);
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to pick folder.";
-      dispatch({ type: "PICK_ERROR", message });
+      void listBrowserRoots()
+        .then((roots) => {
+          if (!active) return;
+          dispatch({ type: "ROOTS_LOADED", roots });
+        })
+        .catch((error: unknown) => {
+          if (!active) return;
+          dispatch({
+            type: "ROOTS_ERROR",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Failed to list disks and network volumes.",
+          });
+        });
+    } catch (error: unknown) {
+      dispatch({
+        type: "ROOTS_ERROR",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to list disks and network volumes.",
+      });
     }
+    return () => {
+      active = false;
+    };
   }, [enumeratePath]);
 
   const toggleExpand = useCallback(
@@ -365,7 +441,6 @@ export function useFolderTree(): UseFolderTreeReturn {
 
   return {
     state,
-    openFolder,
     toggleExpand,
     selectFolder,
     navigateUp,

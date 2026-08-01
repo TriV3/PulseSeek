@@ -5,7 +5,6 @@ import "./FolderTree.css";
 
 export interface FolderTreeProps {
   state: FolderTreeState;
-  openFolder: () => Promise<void>;
   toggleExpand: (path: string) => void;
   selectFolder: (path: string) => void;
   navigateUp: () => void;
@@ -14,7 +13,6 @@ export interface FolderTreeProps {
 
 export function FolderTree({
   state,
-  openFolder,
   toggleExpand,
   selectFolder,
   navigateUp,
@@ -72,14 +70,7 @@ export function FolderTree({
     return (
       <div className="folder-tree" role="tree" aria-label="Folder browser">
         <div className="folder-tree-toolbar">
-          <button
-            type="button"
-            className="open-folder-btn"
-            onClick={openFolder}
-            disabled={state.status === "picking"}
-          >
-            {state.status === "picking" ? "Opening\u2026" : "Open Folder"}
-          </button>
+          <span className="folder-tree-loading">Loading disks…</span>
         </div>
         {state.errorMessage && (
           <div
@@ -120,14 +111,6 @@ export function FolderTree({
       <div className="folder-tree-toolbar">
         <button
           type="button"
-          className="open-folder-btn"
-          onClick={openFolder}
-          disabled={state.status === "picking"}
-        >
-          {state.status === "picking" ? "Opening\u2026" : "Open Folder"}
-        </button>
-        <button
-          type="button"
           className="go-up-btn"
           onClick={navigateUp}
           disabled={!state.selectedPath}
@@ -163,11 +146,15 @@ export function FolderTree({
         <FolderNode
           path={state.rootPath}
           name={
-            state.rootPath.split("/").filter(Boolean).pop() ?? state.rootPath
+            state.rootPath === "computer://"
+              ? "Computer"
+              : (state.rootPath.split("/").filter(Boolean).pop() ??
+                state.rootPath)
           }
           depth={0}
           state={rootFolderState}
           folders={state.folders}
+          playableEntries={state.playableEntries}
           selectedPath={state.selectedPath}
           onToggle={toggleExpand}
           onSelect={selectFolder}

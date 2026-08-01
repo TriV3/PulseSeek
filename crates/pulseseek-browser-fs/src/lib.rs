@@ -21,16 +21,62 @@ impl FolderReader for NativeFolderReader {
 }
 
 impl NativeFolderReader {
-    pub fn read_folder_with_options(
+    /// Returns folder names and likely supported audio files without opening
+    /// decoders. This keeps navigation responsive while verified metadata is
+    /// collected in a second pass.
+    pub fn read_folder_preview(
         &self,
         path: &Path,
         show_unsupported: bool,
     ) -> Result<Vec<BrowserEntry>, FolderReadError> {
         let dir_reader =
             std::fs::read_dir(path).map_err(|e| FolderReadError::from_io_error(e, path))?;
+        let mut entries = Vec::new();
+        for entry in dir_reader {
+            let entry = entry.map_err(|e| FolderReadError::from_io_error(e, path))?;
+            let file_type =
+                entry.file_type().map_err(|e| FolderReadError::from_io_error(e, &entry.path()))?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            let path_string = entry.path().to_string_lossy().to_string();
+            let id = EntryId::new(&path_string);
+            if file_type.is_dir() {
+                entries.push(BrowserEntry::Folder(FolderEntry { id, name }));
+            } else if likely_supported_audio(&entry.path()) {
+                entries.push(BrowserEntry::PlayableFile(PlayableFileEntry {
+                    id,
+                    name,
+                    metadata: None,
+                }));
+            } else if show_unsupported {
+                entries.push(BrowserEntry::UnsupportedFile(UnsupportedFileEntry { id, name }));
+            }
+        }
+        entries.sort();
+        Ok(entries)
+    }
+
+    pub fn read_folder_with_options(
+        &self,
+        path: &Path,
+        show_unsupported: bool,
+    ) -> Result<Vec<BrowserEntry>, FolderReadError> {
+        self.read_folder_with_options_cancellable(path, show_unsupported, || false)
+    }
+
+    pub fn read_folder_with_options_cancellable(
+        &self,
+        path: &Path,
+        show_unsupported: bool,
+        is_cancelled: impl Fn() -> bool,
+    ) -> Result<Vec<BrowserEntry>, FolderReadError> {
+        let dir_reader =
+            std::fs::read_dir(path).map_err(|e| FolderReadError::from_io_error(e, path))?;
 
         let mut entries = Vec::new();
         for entry in dir_reader {
+            if is_cancelled() {
+                break;
+            }
             let entry = entry.map_err(|e| FolderReadError::from_io_error(e, path))?;
             let file_type =
                 entry.file_type().map_err(|e| FolderReadError::from_io_error(e, &entry.path()))?;
@@ -63,6 +109,12 @@ impl NativeFolderReader {
         entries.sort();
         Ok(entries)
     }
+}
+
+fn likely_supported_audio(path: &Path) -> bool {
+    path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| {
+        matches!(extension.to_ascii_lowercase().as_str(), "mp3" | "flac" | "wav" | "wave")
+    })
 }
 
 fn playable_file_metadata(

@@ -27,6 +27,25 @@ function enumeratingState() {
 }
 
 describe("folderTreeReducer playable entries", () => {
+  it("loads every system root into a collapsed Computer root", () => {
+    const state = folderTreeReducer(INITIAL_FOLDER_TREE_STATE, {
+      type: "ROOTS_LOADED",
+      roots: [
+        { path: "/", name: "System" },
+        { path: "/Volumes/NAS", name: "NAS" },
+      ],
+    });
+
+    expect(state.rootPath).toBe("computer://");
+    expect(state.folders["computer://"]?.children).toEqual([
+      { id: "/", name: "System", kind: "folder" },
+      { id: "/Volumes/NAS", name: "NAS", kind: "folder" },
+    ]);
+    expect(state.folders["computer://"]?.expanded).toBe(false);
+    expect(state.selectedPath).toBe("computer://");
+    expect(state.folders["/"]?.expanded).toBe(false);
+  });
+
   it("resets stale entries when enumeration starts", () => {
     const state = enumeratingState();
 
@@ -62,6 +81,78 @@ describe("folderTreeReducer playable entries", () => {
       { id: "folder", name: "Samples", kind: "folder" },
     ]);
     expect(complete.folders[path]?.isLoading).toBe(false);
+  });
+
+  it("replaces preview entries with metadata and removes rejected candidates", () => {
+    const preview = folderTreeReducer(enumeratingState(), {
+      type: "ENUMERATION_CHUNK",
+      path,
+      entries: [
+        { id: "preview", name: "preview.wav", kind: "playable" },
+        { id: "rejected", name: "rejected.wav", kind: "playable" },
+      ],
+      done: false,
+      foldersDone: true,
+    });
+    const verified = folderTreeReducer(preview, {
+      type: "ENUMERATION_CHUNK",
+      path,
+      entries: [
+        {
+          id: "preview",
+          name: "preview.wav",
+          kind: "playable",
+          metadata: {
+            duration_ms: 1_000,
+            size_bytes: 100,
+            modified_at_ms: null,
+            channels: 2,
+            sample_rate: 44_100,
+            bit_depth: 16,
+            codec: "wav",
+          },
+        },
+        { id: "rejected", name: "rejected.wav", kind: "unsupported" },
+      ],
+      done: true,
+      foldersDone: true,
+    });
+
+    expect(verified.playableEntries[path]).toHaveLength(1);
+    expect(verified.playableEntries[path]?.[0].metadata?.duration_ms).toBe(
+      1_000,
+    );
+    expect(verified.folders[path]?.isLoading).toBe(false);
+  });
+
+  it("registers discovered folders so navigation can continue past two levels", () => {
+    const parent = folderTreeReducer(enumeratingState(), {
+      type: "ENUMERATION_CHUNK",
+      path,
+      entries: [{ id: "/test/music/one", name: "one", kind: "folder" }],
+      done: true,
+    });
+
+    expect(parent.folders["/test/music/one"]).toEqual({
+      expanded: false,
+      children: [],
+      isLoading: false,
+      error: null,
+    });
+
+    const childLoading = folderTreeReducer(parent, {
+      type: "START_ENUMERATING",
+      path: "/test/music/one",
+      sessionId: "session-2",
+    });
+    const child = folderTreeReducer(childLoading, {
+      type: "ENUMERATION_CHUNK",
+      path: "/test/music/one",
+      entries: [{ id: "/test/music/one/two", name: "two", kind: "folder" }],
+      done: true,
+    });
+
+    expect(child.folders["/test/music/one/two"]).toBeDefined();
   });
 
   it("removes trashed entries without changing unrelated entries", () => {

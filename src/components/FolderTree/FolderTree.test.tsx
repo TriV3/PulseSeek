@@ -6,10 +6,6 @@ import { INITIAL_FOLDER_TREE_STATE } from "./folderTreeTypes";
 
 // ── Test helpers ───────────────────────────────────────────────────────
 
-function noopPromise() {
-  return Promise.resolve();
-}
-
 function createMockFolderTreeProps(overrides?: Partial<FolderTreeState>) {
   const state: FolderTreeState = {
     ...INITIAL_FOLDER_TREE_STATE,
@@ -18,7 +14,6 @@ function createMockFolderTreeProps(overrides?: Partial<FolderTreeState>) {
 
   return {
     state,
-    openFolder: vi.fn().mockReturnValue(noopPromise()),
     toggleExpand: vi.fn(),
     selectFolder: vi.fn(),
     navigateUp: vi.fn(),
@@ -41,11 +36,10 @@ beforeEach(() => {
 });
 
 describe("FolderTree — initial state", () => {
-  it("renders an Open Folder button when no folder is selected", () => {
+  it("shows a loading state without an Open Folder button", () => {
     render(<FolderTree {...createMockFolderTreeProps()} />);
-    expect(
-      screen.getByRole("button", { name: "Open Folder" }),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Loading disks…")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open Folder" })).toBeNull();
   });
 
   it("renders a tree with accessible label", () => {
@@ -53,28 +47,6 @@ describe("FolderTree — initial state", () => {
     expect(
       screen.getByRole("tree", { name: "Folder browser" }),
     ).toBeInTheDocument();
-  });
-});
-
-describe("FolderTree — opening a folder", () => {
-  it("opens the folder picker when the button is clicked", async () => {
-    const props = createMockFolderTreeProps();
-
-    render(<FolderTree {...props} />);
-    fireEvent.click(screen.getByRole("button", { name: "Open Folder" }));
-
-    expect(props.openFolder).toHaveBeenCalledOnce();
-  });
-
-  it("disables the button while picking", () => {
-    const props = createMockFolderTreeProps({
-      status: "picking",
-    });
-
-    render(<FolderTree {...props} />);
-    const btn = screen.getByRole("button", { name: "Opening\u2026" });
-
-    expect(btn).toBeDisabled();
   });
 });
 
@@ -95,6 +67,68 @@ describe("FolderTree — selected path display", () => {
 
     render(<FolderTree {...props} />);
     expect(screen.getByText("/test/music")).toBeInTheDocument();
+  });
+});
+
+describe("FolderTree — indentation", () => {
+  it("uses one fixed indentation step per nested list", () => {
+    const props = createMockFolderTreeProps({
+      rootPath: "/test",
+      selectedPath: "/test/one/two",
+      folders: {
+        "/test": {
+          expanded: true,
+          children: [{ id: "/test/one", name: "one", kind: "folder" }],
+          isLoading: false,
+          error: null,
+        },
+        "/test/one": {
+          expanded: true,
+          children: [{ id: "/test/one/two", name: "two", kind: "folder" }],
+          isLoading: false,
+          error: null,
+        },
+        "/test/one/two": {
+          expanded: false,
+          children: [],
+          isLoading: false,
+          error: null,
+        },
+      },
+    });
+
+    render(<FolderTree {...props} />);
+
+    for (const item of screen.getAllByRole("treeitem")) {
+      expect(item).not.toHaveStyle({ paddingLeft: "24px" });
+      expect(item).not.toHaveStyle({ paddingLeft: "40px" });
+    }
+  });
+});
+
+describe("FolderTree — audio-only folders", () => {
+  it("does not label a folder empty when it contains playable files", () => {
+    const props = createMockFolderTreeProps({
+      rootPath: "/music",
+      selectedPath: "/music",
+      folders: {
+        "/music": {
+          expanded: true,
+          children: [],
+          isLoading: false,
+          error: null,
+        },
+      },
+      playableEntries: {
+        "/music": [
+          { id: "/music/song.wav", name: "song.wav", kind: "playable" },
+        ],
+      },
+    });
+
+    render(<FolderTree {...props} />);
+
+    expect(screen.queryByText("(empty)")).not.toBeInTheDocument();
   });
 });
 
@@ -193,6 +227,7 @@ describe("FolderTree — selection", () => {
     fireEvent.click(screen.getByText("Sub1"));
 
     expect(props.selectFolder).toHaveBeenCalledWith("/test/music/Sub1");
+    expect(props.toggleExpand).toHaveBeenCalledWith("/test/music/Sub1");
   });
 });
 

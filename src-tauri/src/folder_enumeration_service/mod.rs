@@ -6,6 +6,12 @@ use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContex
 
 use crate::playback_events::PlaybackEventEmitter;
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BrowserRootData {
+    pub path: String,
+    pub name: String,
+}
+
 /// Manages active folder enumeration sessions and their cancellation flags.
 #[derive(Clone)]
 pub struct ActiveEnumerations {
@@ -52,6 +58,10 @@ impl Default for ActiveEnumerations {
 /// and emits chunked events. The fake implementation records calls for
 /// test assertions.
 pub trait FolderEnumerationService: Send {
+    /// Lists filesystem roots currently available to browse, including mounted
+    /// network volumes exposed by the operating system.
+    fn list_roots(&self) -> Result<Vec<BrowserRootData>, ApplicationError>;
+
     /// Starts enumerating a folder.
     ///
     /// Returns a session_id that can be used to cancel the enumeration.
@@ -67,6 +77,7 @@ pub trait FolderEnumerationService: Send {
 
 /// Fake implementation of [`FolderEnumerationService`] for tests.
 pub struct FakeFolderEnumerationService {
+    pub roots: Vec<BrowserRootData>,
     pub start_call_count: u64,
     pub last_path: Option<String>,
     pub last_batch_size: Option<usize>,
@@ -78,6 +89,10 @@ pub struct FakeFolderEnumerationService {
 impl FakeFolderEnumerationService {
     pub fn new() -> Self {
         Self {
+            roots: vec![BrowserRootData {
+                path: std::path::MAIN_SEPARATOR.to_string(),
+                name: "System".to_string(),
+            }],
             start_call_count: 0,
             last_path: None,
             last_batch_size: None,
@@ -95,6 +110,10 @@ impl Default for FakeFolderEnumerationService {
 }
 
 impl FolderEnumerationService for FakeFolderEnumerationService {
+    fn list_roots(&self) -> Result<Vec<BrowserRootData>, ApplicationError> {
+        Ok(self.roots.clone())
+    }
+
     fn start_enumeration(
         &mut self,
         path: &str,

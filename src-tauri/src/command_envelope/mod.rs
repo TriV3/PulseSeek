@@ -47,14 +47,16 @@ pub fn dispatch(
         "list_devices" | "current_device" | "select_device" => {
             device::handle(&envelope.command, envelope.payload, device_service, events)
         },
-        "start_enumeration" | "cancel_enumeration" | "move_to_trash" => browsing::handle(
-            &envelope.command,
-            envelope.payload,
-            enum_service,
-            trash_service,
-            active,
-            events,
-        ),
+        "list_browser_roots" | "start_enumeration" | "cancel_enumeration" | "move_to_trash" => {
+            browsing::handle(
+                &envelope.command,
+                envelope.payload,
+                enum_service,
+                trash_service,
+                active,
+                events,
+            )
+        },
         _ => CommandResponse::err(BoundaryError {
             category: "Unsupported".to_string(),
             message: format!("Unknown command: {}", envelope.command),
