@@ -13,6 +13,7 @@ pub const CURRENT_EVENT_VERSION: u32 = 1;
 
 pub const EVENT_STATE_CHANGED: &str = "playback:state-changed";
 pub const EVENT_POSITION: &str = "playback:position";
+pub const EVENT_COMPLETED: &str = "playback:completed";
 pub const EVENT_DEVICE_LOST: &str = "audio:device-lost";
 pub const EVENT_FOLDER_CHUNK: &str = "browser:folder-chunk";
 

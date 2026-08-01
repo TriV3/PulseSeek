@@ -10,6 +10,7 @@ const seekMock = vi.hoisted(() => vi.fn());
 const setVolumeMock = vi.hoisted(() => vi.fn());
 const onStateChangedMock = vi.hoisted(() => vi.fn());
 const onPositionMock = vi.hoisted(() => vi.fn());
+const onCompletedMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../api/commandEnvelope", () => ({
   pause: pauseMock,
@@ -21,6 +22,7 @@ vi.mock("../api/commandEnvelope", () => ({
 vi.mock("../api/playbackEvents", () => ({
   onStateChanged: onStateChangedMock,
   onPosition: onPositionMock,
+  onCompleted: onCompletedMock,
 }));
 
 const entries: BrowserEntry[] = [
@@ -32,6 +34,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   onStateChangedMock.mockResolvedValue(() => undefined);
   onPositionMock.mockResolvedValue(() => undefined);
+  onCompletedMock.mockResolvedValue(() => undefined);
 });
 
 describe("usePlaybackTransport", () => {
@@ -76,6 +79,102 @@ describe("usePlaybackTransport", () => {
     expect(stopMock).toHaveBeenCalledOnce();
     expect(result.current.positionMs).toBe(0);
     expect(result.current.status).toBe("idle");
+  });
+
+  it("starts the selected track again after stop", async () => {
+    stopMock.mockResolvedValue(undefined);
+    const onSelectEntry = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        playbackMode: "one-shot",
+        onSelectEntry,
+      }),
+    );
+
+    await act(async () => result.current.handleStop());
+    await act(async () => result.current.togglePlayPause());
+
+    expect(onSelectEntry).toHaveBeenCalledWith(entries[0]);
+    expect(result.current.hasSelection).toBe(true);
+  });
+
+  it("advances to the next track after completion in sequential mode", async () => {
+    let complete: (() => void) | undefined;
+    onCompletedMock.mockImplementationOnce(async (handler: () => void) => {
+      complete = handler;
+      return () => undefined;
+    });
+    const onSelectEntry = vi.fn().mockResolvedValue(undefined);
+    renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        playbackMode: "sequential",
+        onSelectEntry,
+      }),
+    );
+
+    await act(async () => complete?.());
+
+    expect(onSelectEntry).toHaveBeenCalledWith(entries[1]);
+  });
+
+  it("keeps the completion listener while switching from one-shot to sequential", async () => {
+    let complete: (() => void) | undefined;
+    onCompletedMock.mockImplementationOnce(async (handler: () => void) => {
+      complete = handler;
+      return () => undefined;
+    });
+    const onSelectEntry = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = renderHook(
+      ({ playbackMode }: { playbackMode: "one-shot" | "sequential" }) =>
+        usePlaybackTransport({
+          entries,
+          selectedEntryId: "a.wav",
+          playbackStatus: "playing",
+          playbackMode,
+          onSelectEntry,
+        }),
+      {
+        initialProps: {
+          playbackMode: "one-shot" as "one-shot" | "sequential",
+        },
+      },
+    );
+
+    rerender({ playbackMode: "sequential" });
+    await act(async () => complete?.());
+
+    expect(onCompletedMock).toHaveBeenCalledOnce();
+    expect(onSelectEntry).toHaveBeenCalledWith(entries[1]);
+  });
+
+  it("selects another track after completion in random mode", async () => {
+    let complete: (() => void) | undefined;
+    onCompletedMock.mockImplementationOnce(async (handler: () => void) => {
+      complete = handler;
+      return () => undefined;
+    });
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const onSelectEntry = vi.fn().mockResolvedValue(undefined);
+    renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        playbackMode: "random",
+        onSelectEntry,
+      }),
+    );
+
+    await act(async () => complete?.());
+
+    expect(onSelectEntry).toHaveBeenCalledWith(entries[1]);
+    random.mockRestore();
   });
 
   it("seeks, changes volume, and mutes", async () => {

@@ -1,4 +1,7 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::Duration as ThreadDuration;
 
 use pulseseek_audio_cpal::CpalAudioOutput;
 use pulseseek_domain::audio_output::{AudioOutput, DeviceId};
@@ -8,7 +11,7 @@ use pulseseek_domain::playback::mode::PlaybackMode;
 use pulseseek_domain::playback::position::Position;
 use pulseseek_playback::{PlaybackControl, PlaybackWorker};
 
-use crate::playback_events::{NoopEventEmitter, PlaybackEventEmitter};
+use crate::playback_events::{NoopEventEmitter, PlaybackEventEmitter, EVENT_COMPLETED};
 use crate::playback_service::PlaybackService;
 
 pub struct NativePlaybackService {
@@ -20,6 +23,70 @@ pub struct NativePlaybackService {
     current_metadata: Option<StreamMetadata>,
     mode: PlaybackMode,
     buffer_frames: usize,
+    output_sample_rate: Option<u32>,
+    position_reporter: Option<PositionReporter>,
+}
+
+struct PositionReporter {
+    stop: Arc<AtomicBool>,
+    join: Option<JoinHandle<()>>,
+}
+
+impl PositionReporter {
+    fn start(
+        control: PlaybackControl,
+        sample_rate: u32,
+        duration_ms: Option<u64>,
+        events: Arc<dyn PlaybackEventEmitter>,
+    ) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let reporter_stop = Arc::clone(&stop);
+        let join = std::thread::spawn(move || {
+            let _ = events.emit_position(0, duration_ms);
+            while !reporter_stop.load(Ordering::Acquire) && !control.is_stopped() {
+                std::thread::sleep(ThreadDuration::from_millis(50));
+                if reporter_stop.load(Ordering::Acquire) {
+                    break;
+                }
+                let position_ms = frames_to_millis(control.position_frames(), sample_rate);
+                let _ = events.emit_position(position_ms, duration_ms);
+            }
+            if !reporter_stop.load(Ordering::Acquire) && control.is_completed() {
+                let _ = events.emit(EVENT_COMPLETED, serde_json::json!({}));
+                let _ = events.emit_state("stopped");
+            }
+        });
+        Self { stop, join: Some(join) }
+    }
+
+    fn stop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
+impl Drop for PositionReporter {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+fn frames_to_millis(frames: u64, sample_rate: u32) -> u64 {
+    if sample_rate == 0 {
+        return 0;
+    }
+    frames.saturating_mul(1_000) / u64::from(sample_rate)
+}
+
+fn metadata_duration_ms(metadata: &StreamMetadata) -> Option<u64> {
+    match metadata.duration {
+        pulseseek_domain::playback::position::Duration::Known(position) => {
+            Some(position.as_millis())
+        },
+        pulseseek_domain::playback::position::Duration::Unknown => None,
+    }
 }
 
 impl NativePlaybackService {
@@ -36,6 +103,8 @@ impl NativePlaybackService {
             // worker loop (instead of thread::yield_now), this buffer gives
             // smooth playback without underruns across long files.
             buffer_frames: 131_072,
+            output_sample_rate: None,
+            position_reporter: None,
         }
     }
 
@@ -55,6 +124,9 @@ impl PlaybackService for NativePlaybackService {
         }
     }
     fn play(&mut self, path: &str) -> Result<(), ApplicationError> {
+        if let Some(mut reporter) = self.position_reporter.take() {
+            reporter.stop();
+        }
         let mut decoder = pulseseek_decoder_symphonia::registry::DecoderRegistry::open(path)
             .map_err(|e| {
                 ApplicationError::new(
@@ -97,11 +169,21 @@ impl PlaybackService for NativePlaybackService {
             }
         }
 
+        let output_sample_rate = output
+            .output_sample_rate()
+            .map_err(|e| Self::unavailable(&format!("failed to read output sample rate: {e}")))?;
         drop(output);
 
-        // Use the source sample rate directly to avoid resampling. The
-        // output stream will use this rate; CoreAudio handles conversion.
-        let (worker, consumer) = PlaybackWorker::start(decoder, self.buffer_frames);
+        let (worker, consumer) = PlaybackWorker::start_resampled(
+            decoder,
+            self.buffer_frames,
+            channels,
+            sample_rate,
+            output_sample_rate,
+        )
+        .map_err(|e| {
+            Self::unavailable(&format!("failed to configure sample-rate conversion: {e}"))
+        })?;
 
         if let Err(mode_result) = worker.set_mode(self.mode) {
             drop(worker);
@@ -118,15 +200,24 @@ impl PlaybackService for NativePlaybackService {
         let mut output =
             self.output.lock().map_err(|_| Self::unavailable("output lock poisoned"))?;
         output
-            .open_stream(consumer, channels, sample_rate)
+            .open_stream(consumer, channels)
             .map_err(|e| Self::unavailable(&format!("failed to open output stream: {e}")))?;
         output.play().map_err(|e| Self::unavailable(&format!("failed to start playback: {e}")))?;
         drop(output);
 
         self.worker = Some(worker);
-        self.control = Some(control);
+        self.control = Some(control.clone());
         self.current_path = Some(path.to_string());
         self.current_metadata = Some(metadata);
+        self.output_sample_rate = Some(output_sample_rate);
+
+        let duration_ms = self.current_metadata.as_ref().and_then(metadata_duration_ms);
+        self.position_reporter = Some(PositionReporter::start(
+            control,
+            output_sample_rate,
+            duration_ms,
+            Arc::clone(&self.events),
+        ));
 
         let _ = self.events.emit_state("playing");
         Ok(())
@@ -165,6 +256,9 @@ impl PlaybackService for NativePlaybackService {
     }
 
     fn stop(&mut self) -> Result<(), ApplicationError> {
+        if let Some(mut reporter) = self.position_reporter.take() {
+            reporter.stop();
+        }
         if let Some(ref control) = self.control {
             control.stop();
         }
@@ -178,6 +272,7 @@ impl PlaybackService for NativePlaybackService {
         self.control = None;
         self.current_path = None;
         self.current_metadata = None;
+        self.output_sample_rate = None;
         let _ = self.events.emit_state("stopped");
         Ok(())
     }
@@ -196,6 +291,12 @@ impl PlaybackService for NativePlaybackService {
             .map_err(|_| Self::unavailable("seek position out of bounds"))?;
         let actual =
             worker.seek(target).map_err(|e| Self::unavailable(&format!("seek failed: {e}")))?;
+        if let (Some(control), Some(sample_rate)) = (&self.control, self.output_sample_rate) {
+            let frames = actual.as_millis().saturating_mul(u64::from(sample_rate)) / 1_000;
+            control.set_position_frames(frames);
+        }
+        let duration_ms = self.current_metadata.as_ref().and_then(metadata_duration_ms);
+        let _ = self.events.emit_position(actual.as_millis(), duration_ms);
         Ok(actual.as_millis())
     }
 
@@ -213,12 +314,27 @@ impl PlaybackService for NativePlaybackService {
     }
 
     fn set_mode(&mut self, mode: PlaybackMode) -> Result<PlaybackMode, ApplicationError> {
-        self.mode = mode;
         if let Some(ref worker) = self.worker {
-            worker
-                .set_mode(mode)
-                .map_err(|e| Self::unavailable(&format!("set mode failed: {e}")))?;
+            if let Err(error) = worker.set_mode(mode) {
+                let playback_has_ended =
+                    self.control.as_ref().is_some_and(|control| control.is_stopped());
+                if !playback_has_ended {
+                    return Err(Self::unavailable(&format!("set mode failed: {error}")));
+                }
+            }
         }
+        self.mode = mode;
         Ok(mode)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::frames_to_millis;
+
+    #[test]
+    fn output_frames_are_converted_to_wall_clock_milliseconds() {
+        assert_eq!(frames_to_millis(48_000, 48_000), 1_000);
+        assert_eq!(frames_to_millis(44_100, 44_100), 1_000);
     }
 }

@@ -34,6 +34,7 @@ pub struct PlaybackEngine {
 pub(crate) struct BufferedSample {
     pub(crate) value: f32,
     pub(crate) generation: u64,
+    pub(crate) resets_position: bool,
 }
 
 impl PlaybackEngine {
@@ -66,6 +67,7 @@ impl PlaybackEngine {
             seeking: Arc::new(AtomicBool::new(false)),
             generation: Arc::new(AtomicU64::new(0)),
             terminal: Arc::new(AtomicU8::new(TERMINAL_ACTIVE)),
+            position_frames: Arc::new(AtomicU64::new(0)),
         };
         (
             Self {
@@ -135,9 +137,12 @@ impl PlaybackEngine {
 
         // Push available frames into the ring buffer (non-blocking).
         let generation = self.control.generation();
-        let pushed = self.producer.push_iter(
-            buf[..frames].iter().copied().map(|value| BufferedSample { value, generation }),
-        );
+        let pushed =
+            self.producer.push_iter(buf[..frames].iter().copied().map(|value| BufferedSample {
+                value,
+                generation,
+                resets_position: false,
+            }));
         self.cache_cycle_samples(&buf[..pushed]);
         self.frames_written += pushed as u64;
         self.cycle_produced |= pushed > 0;
@@ -163,7 +168,11 @@ impl PlaybackEngine {
         let generation = self.control.generation();
         while self.producer.vacant_len() > 0 {
             let Some(value) = self.pending.pop_front() else { break };
-            let _ = self.producer.try_push(BufferedSample { value, generation });
+            let _ = self.producer.try_push(BufferedSample {
+                value,
+                generation,
+                resets_position: false,
+            });
             self.cache_cycle_sample(value);
             self.frames_written += 1;
             self.cycle_produced = true;
@@ -197,9 +206,10 @@ impl PlaybackEngine {
         let generation = self.control.generation();
         let mut pushed = false;
         while self.producer.vacant_len() > 0 {
+            let resets_position = self.loop_cache_offset == 0;
             let value = self.loop_cache[self.loop_cache_offset];
             self.loop_cache_offset = (self.loop_cache_offset + 1) % self.loop_cache.len();
-            let _ = self.producer.try_push(BufferedSample { value, generation });
+            let _ = self.producer.try_push(BufferedSample { value, generation, resets_position });
             self.frames_written += 1;
             pushed = true;
         }
@@ -219,6 +229,7 @@ impl PlaybackEngine {
                 if let Some(resampler) = &mut self.resampler {
                     resampler.reset();
                 }
+                self.control.set_position_frames(0);
                 self.control.complete_seek();
                 Ok(())
             },

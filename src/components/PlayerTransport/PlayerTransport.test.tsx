@@ -4,6 +4,7 @@ import { PlayerTransport } from "./PlayerTransport";
 
 const props = {
   status: "playing" as const,
+  hasSelection: true,
   positionMs: 12_000,
   durationMs: 60_000,
   volume: 1,
@@ -65,6 +66,7 @@ describe("PlayerTransport", () => {
       <PlayerTransport
         {...props}
         status="idle"
+        hasSelection={false}
         durationMs={null}
         canPrevious={false}
         canNext={false}

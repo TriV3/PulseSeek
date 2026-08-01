@@ -54,8 +54,7 @@ impl CpalAudioOutput {
             .map_err(|error| {
                 AudioOutputError::new(DiagnosticContext::new(DiagnosticCode::AudioOutput), error)
             })?
-            .sample_rate()
-            .0)
+            .sample_rate())
     }
 }
 
@@ -74,14 +73,13 @@ impl Default for CpalAudioOutput {
 }
 
 impl CpalAudioOutput {
-    /// Builds an output stream using decoder interleaved channel count.
-    /// Uses `source_sample_rate` for the stream config when possible to
-    /// avoid resampling; falls back to the device default otherwise.
+    /// Builds an output stream using the device's native default configuration.
+    /// The playback worker is responsible for converting source samples to
+    /// this rate before they reach the real-time callback.
     pub fn open_stream(
         &mut self,
         consumer: PlaybackConsumer,
         source_channels: usize,
-        source_sample_rate: u32,
     ) -> Result<(), AudioOutputError> {
         if source_channels == 0 {
             return Err(AudioOutputError::new(
@@ -106,11 +104,7 @@ impl CpalAudioOutput {
             AudioOutputError::new(DiagnosticContext::new(DiagnosticCode::AudioOutput), e)
         })?;
         let device = device.clone();
-        // Try to use the source sample rate to avoid resampling. On macOS
-        // CoreAudio this is handled transparently; on other platforms cpal
-        // will use the device default if the requested rate is unsupported.
-        let mut config: cpal::StreamConfig = supported.clone().into();
-        config.sample_rate = cpal::SampleRate(source_sample_rate);
+        let config: cpal::StreamConfig = supported.clone().into();
         let output_channels = config.channels as usize;
         if output_channels == 0 || output_channels > 32 {
             return Err(AudioOutputError::new(
@@ -327,8 +321,8 @@ impl AudioOutput for CpalAudioOutput {
                 )
             })?;
 
-        self.current_device = if let Ok(name) = device.name() {
-            Some(DeviceId::new(name))
+        self.current_device = if let Ok(id) = device.id() {
+            Some(DeviceId::new(id.to_string()))
         } else {
             Some(device_id.clone())
         };

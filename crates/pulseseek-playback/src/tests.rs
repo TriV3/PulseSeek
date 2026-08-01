@@ -167,6 +167,21 @@ fn mono_source_is_duplicated_for_stereo_output() {
 
     assert_eq!(written, 4);
     assert_eq!(output, [0.0, 0.0, 1.0, 1.0]);
+    assert_eq!(consumer.control().position_frames(), 2);
+}
+
+#[test]
+fn playback_position_counts_frames_not_interleaved_samples() {
+    let (mut engine, mut consumer) = PlaybackEngine::new(Box::new(RampDecoder::new(8)), 16);
+    assert!(engine.process_chunk().unwrap());
+
+    let control = consumer.control();
+    let mut output = [0.0f32; 4];
+    assert_eq!(consumer.consume_channels(&mut output, 2, 2), 4);
+
+    assert_eq!(control.position_frames(), 2);
+    control.set_position_frames(48_000);
+    assert_eq!(control.position_frames(), 48_000);
 }
 
 #[test]
@@ -636,6 +651,7 @@ fn loop_current_replays_multiple_cycles_without_stale_frames() {
         }
         std::thread::yield_now();
     }
+    output.truncate(12);
 
     assert_eq!(output, vec![0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0]);
     assert!(worker.poll_event().is_none());
@@ -653,7 +669,7 @@ fn short_loop_replays_from_prebuffer_without_decoder_seek() {
 
     let mut produced = 0;
     for _ in 0..100_000 {
-        let count = consumer.consume(&mut output[produced..]);
+        let count = consumer.consume_channels(&mut output[produced..], 1, 1);
         produced += count;
         assert!(worker.poll_event().is_none(), "short loop terminated early");
         if produced == output.len() {
@@ -679,7 +695,7 @@ fn short_loop_keeps_four_sample_cycle_contiguous() {
     let mut produced = 0;
 
     for _ in 0..100_000 {
-        let count = consumer.consume(&mut output[produced..]);
+        let count = consumer.consume_channels(&mut output[produced..], 1, 1);
         produced += count;
         assert!(worker.poll_event().is_none(), "short loop terminated early");
         if produced == output.len() {
@@ -689,6 +705,7 @@ fn short_loop_keeps_four_sample_cycle_contiguous() {
     }
 
     assert_eq!(produced, output.len());
+    assert_eq!(consumer.control().position_frames(), 4);
     assert_eq!(
         output,
         [0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0]
@@ -705,11 +722,20 @@ fn loop_longer_than_buffer_keeps_seek_fallback() {
     );
     let mut output = [0.0f32; 16];
     let mut produced = 0;
+    let control = consumer.control();
+    let mut observed_restart = false;
 
     for _ in 0..100_000 {
-        let count = consumer.consume(&mut output[produced..]);
+        let count = consumer.consume_channels(&mut output[produced..], 1, 1);
         produced += count;
         assert!(worker.poll_event().is_none(), "long loop terminated early");
+        if produced == 8 && !observed_restart {
+            while consumer.available() == 0 {
+                std::thread::yield_now();
+            }
+            assert_eq!(control.position_frames(), 0);
+            observed_restart = true;
+        }
         if produced == output.len() {
             break;
         }
@@ -717,6 +743,7 @@ fn loop_longer_than_buffer_keeps_seek_fallback() {
     }
 
     assert_eq!(produced, output.len());
+    assert!(observed_restart);
     assert_eq!(
         output,
         [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]

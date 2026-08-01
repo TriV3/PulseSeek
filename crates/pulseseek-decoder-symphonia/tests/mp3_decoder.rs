@@ -48,6 +48,28 @@ fn valid_mp3_read_frames() {
 }
 
 #[test]
+fn small_reads_do_not_drop_the_rest_of_decoded_packets() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_fixture(&dir, "test.mp3", FIXTURE_SILENT_STEREO_44100);
+    let mut small_reads = Mp3Decoder::open(&path).unwrap();
+    let mut large_reads = Mp3Decoder::open(&path).unwrap();
+    let mut chunk = [0.0f32; 512];
+    let mut small_total = 0;
+
+    loop {
+        let read = small_reads.read(&mut chunk).unwrap();
+        if read == 0 {
+            break;
+        }
+        small_total += read;
+    }
+
+    let mut large_chunk = vec![0.0f32; 100_000];
+    let large_total = large_reads.read(&mut large_chunk).unwrap();
+    assert_eq!(small_total, large_total);
+}
+
+#[test]
 fn mono_mp3_decodes_correctly() {
     let dir = tempfile::tempdir().unwrap();
     let path = write_fixture(&dir, "test.mp3", FIXTURE_SILENT_MONO_22050);
