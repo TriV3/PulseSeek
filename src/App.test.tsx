@@ -83,4 +83,22 @@ describe("application shell", () => {
       expect(document.documentElement.dataset.theme).toBe("dark"),
     );
   });
+
+  it("applies the persisted midnight theme without restart", async () => {
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "load_player_preferences") {
+        return {
+          version: 1,
+          preferences: { ...DEFAULT_PLAYER_PREFERENCES, theme: "midnight" },
+        };
+      }
+      return undefined;
+    });
+
+    render(<App />);
+
+    await waitFor(() =>
+      expect(document.documentElement.dataset.theme).toBe("midnight"),
+    );
+  });
 });

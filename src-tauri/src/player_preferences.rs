@@ -57,7 +57,7 @@ impl PlayerPreferences {
         ) {
             self.playback_mode = "one-shot".to_string();
         }
-        if !matches!(self.theme.as_str(), "system" | "light" | "dark") {
+        if !matches!(self.theme.as_str(), "system" | "light" | "dark" | "midnight") {
             self.theme = default_theme();
         }
         if !self.volume.is_finite() {
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn validated_theme_accepts_supported_values() {
-        for theme in ["system", "light", "dark"] {
+        for theme in ["system", "light", "dark", "midnight"] {
             let preferences =
                 PlayerPreferences { theme: theme.to_string(), ..PlayerPreferences::default() }
                     .validated();
@@ -227,6 +227,17 @@ mod tests {
         }
         .validated();
         assert_eq!(preferences.theme, "system");
+    }
+
+    #[test]
+    fn midnight_theme_round_trips_through_repository() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("player-preferences.json");
+        let mut repository = JsonPlayerPreferencesRepository::new(path.clone());
+        let preferences =
+            PlayerPreferences { theme: "midnight".to_string(), ..PlayerPreferences::default() };
+        repository.save(preferences.clone()).unwrap();
+        assert_eq!(repository.load().unwrap().theme, "midnight");
     }
 
     #[test]

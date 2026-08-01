@@ -10,6 +10,7 @@ const THEMES: Array<{ value: ThemePreference; label: string }> = [
   { value: "system", label: "System" },
   { value: "light", label: "PulseSeek Light" },
   { value: "dark", label: "PulseSeek Dark" },
+  { value: "midnight", label: "Midnight Blue" },
 ];
 
 export function ThemeSelector({
