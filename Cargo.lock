@@ -2643,6 +2643,7 @@ dependencies = [
 name = "pulseseek-cache"
 version = "0.1.0"
 dependencies = [
+ "pulseseek-domain",
  "rusqlite",
  "tempfile",
 ]

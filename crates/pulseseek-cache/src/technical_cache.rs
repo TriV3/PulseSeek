@@ -3,25 +3,42 @@ use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::thread;
 
+use pulseseek_domain::waveform::levels::MultiresolutionWaveform;
 use rusqlite::params;
 
 use crate::sqlite::{now_ms, open_or_recover, Migration, OpenedDatabase, SqliteError};
+use crate::waveform_cache::{
+    encode, load_waveform_db, store_waveform_db, WaveformCacheError, WaveformCachePort,
+    WaveformIdentity,
+};
 
 /// Schema version of the technical cache database.
-pub const CACHE_SCHEMA_VERSION: u32 = 1;
+pub const CACHE_SCHEMA_VERSION: u32 = 2;
 
 /// Migrations for `app-cache.sqlite`.
 ///
 /// The first version only carries cache metadata. Record tables (waveform,
 /// recent folders, preferences, ...) are added by the feature PRs that own
-/// them.
-pub const CACHE_MIGRATIONS: [Migration; 1] = [Migration {
-    version: 1,
-    sql: "CREATE TABLE cache_meta (\
-          key TEXT PRIMARY KEY, \
-          value BLOB NOT NULL, \
-          updated_at_ms INTEGER NOT NULL);",
-}];
+/// them. Version 2 adds the waveform cache owned by PR-063.
+pub const CACHE_MIGRATIONS: [Migration; 2] = [
+    Migration {
+        version: 1,
+        sql: "CREATE TABLE cache_meta (\
+              key TEXT PRIMARY KEY, \
+              value BLOB NOT NULL, \
+              updated_at_ms INTEGER NOT NULL);",
+    },
+    Migration {
+        version: 2,
+        sql: "CREATE TABLE waveform_cache (\
+              cache_key TEXT PRIMARY KEY, \
+              source_size INTEGER NOT NULL, \
+              source_modified_ms INTEGER NOT NULL, \
+              algorithm_version INTEGER NOT NULL, \
+              data BLOB NOT NULL, \
+              created_at_ms INTEGER NOT NULL);",
+    },
+];
 
 /// Health of the technical cache database.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -87,9 +104,30 @@ pub trait TechnicalCachePort: Send + Sync {
 }
 
 enum WorkerCommand {
-    Get { key: String, reply: SyncSender<Result<Option<Vec<u8>>, CacheError>> },
-    Set { key: String, value: Vec<u8>, reply: SyncSender<Result<(), CacheError>> },
-    Remove { key: String, reply: SyncSender<Result<(), CacheError>> },
+    Get {
+        key: String,
+        reply: SyncSender<Result<Option<Vec<u8>>, CacheError>>,
+    },
+    Set {
+        key: String,
+        value: Vec<u8>,
+        reply: SyncSender<Result<(), CacheError>>,
+    },
+    Remove {
+        key: String,
+        reply: SyncSender<Result<(), CacheError>>,
+    },
+    StoreWaveform {
+        key: String,
+        identity: WaveformIdentity,
+        waveform: MultiresolutionWaveform,
+        reply: SyncSender<Result<(), WaveformCacheError>>,
+    },
+    LoadWaveform {
+        key: String,
+        identity: WaveformIdentity,
+        reply: SyncSender<Result<Option<MultiresolutionWaveform>, WaveformCacheError>>,
+    },
 }
 
 /// Client handle to the dedicated technical cache worker.
@@ -162,6 +200,42 @@ impl TechnicalCachePort for TechnicalCache {
     }
 }
 
+impl WaveformCachePort for TechnicalCache {
+    fn store_waveform(
+        &self,
+        key: &str,
+        identity: &WaveformIdentity,
+        waveform: &MultiresolutionWaveform,
+    ) -> Result<(), WaveformCacheError> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::StoreWaveform {
+                key: key.to_string(),
+                identity: identity.clone(),
+                waveform: waveform.clone(),
+                reply: reply_tx,
+            })
+            .map_err(|_| WaveformCacheError::WorkerStopped)?;
+        reply_rx.recv().map_err(|_| WaveformCacheError::WorkerStopped)?
+    }
+
+    fn load_waveform(
+        &self,
+        key: &str,
+        identity: &WaveformIdentity,
+    ) -> Result<Option<MultiresolutionWaveform>, WaveformCacheError> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::LoadWaveform {
+                key: key.to_string(),
+                identity: identity.clone(),
+                reply: reply_tx,
+            })
+            .map_err(|_| WaveformCacheError::WorkerStopped)?;
+        reply_rx.recv().map_err(|_| WaveformCacheError::WorkerStopped)?
+    }
+}
+
 fn worker_loop(receiver: Receiver<WorkerCommand>, mut database: OpenedDatabase) {
     while let Ok(command) = receiver.recv() {
         match command {
@@ -173,6 +247,14 @@ fn worker_loop(receiver: Receiver<WorkerCommand>, mut database: OpenedDatabase) 
             },
             WorkerCommand::Remove { key, reply } => {
                 let _ = reply.send(remove_meta(&mut database, &key));
+            },
+            WorkerCommand::StoreWaveform { key, identity, waveform, reply } => {
+                let result = encode(&waveform)
+                    .and_then(|data| store_waveform_db(&mut database, &key, &identity, &data));
+                let _ = reply.send(result);
+            },
+            WorkerCommand::LoadWaveform { key, identity, reply } => {
+                let _ = reply.send(load_waveform_db(&mut database, &key, &identity));
             },
         }
     }
