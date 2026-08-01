@@ -46,6 +46,11 @@ describe("useTheme", () => {
     expect(document.documentElement.dataset.theme).toBe("midnight");
   });
 
+  it("applies high-contrast for the high-contrast preference", () => {
+    renderHook(() => useTheme("high-contrast"));
+    expect(document.documentElement.dataset.theme).toBe("high-contrast");
+  });
+
   it("resolves the system preference from the OS color scheme", () => {
     installMatchMedia(true);
     renderHook(() => useTheme("system"));

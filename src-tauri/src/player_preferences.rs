@@ -57,7 +57,10 @@ impl PlayerPreferences {
         ) {
             self.playback_mode = "one-shot".to_string();
         }
-        if !matches!(self.theme.as_str(), "system" | "light" | "dark" | "midnight") {
+        if !matches!(
+            self.theme.as_str(),
+            "system" | "light" | "dark" | "midnight" | "high-contrast"
+        ) {
             self.theme = default_theme();
         }
         if !self.volume.is_finite() {
@@ -211,7 +214,7 @@ mod tests {
 
     #[test]
     fn validated_theme_accepts_supported_values() {
-        for theme in ["system", "light", "dark", "midnight"] {
+        for theme in ["system", "light", "dark", "midnight", "high-contrast"] {
             let preferences =
                 PlayerPreferences { theme: theme.to_string(), ..PlayerPreferences::default() }
                     .validated();
@@ -238,6 +241,19 @@ mod tests {
             PlayerPreferences { theme: "midnight".to_string(), ..PlayerPreferences::default() };
         repository.save(preferences.clone()).unwrap();
         assert_eq!(repository.load().unwrap().theme, "midnight");
+    }
+
+    #[test]
+    fn high_contrast_theme_round_trips_through_repository() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("player-preferences.json");
+        let mut repository = JsonPlayerPreferencesRepository::new(path.clone());
+        let preferences = PlayerPreferences {
+            theme: "high-contrast".to_string(),
+            ..PlayerPreferences::default()
+        };
+        repository.save(preferences.clone()).unwrap();
+        assert_eq!(repository.load().unwrap().theme, "high-contrast");
     }
 
     #[test]

@@ -118,9 +118,14 @@ describe("semantic design tokens", () => {
     }
   });
 
-  it("discovers at least the light, dark, and midnight themes", () => {
+  it("discovers at least the light, dark, midnight, and high-contrast themes", () => {
     expect(themeFiles.map((theme) => theme.name)).toEqual(
-      expect.arrayContaining(["dark.css", "light.css", "midnight.css"]),
+      expect.arrayContaining([
+        "dark.css",
+        "light.css",
+        "midnight.css",
+        "high-contrast.css",
+      ]),
     );
   });
 
@@ -147,5 +152,109 @@ describe("semantic design tokens", () => {
       const matches = css.match(rawColorPattern);
       expect(matches, "raw color found in feature stylesheet").toBeNull();
     }
+  });
+});
+
+// ── WCAG contrast helpers ──────────────────────────────────────────────
+
+interface Rgb {
+  r: number;
+  g: number;
+  b: number;
+}
+
+function channelToLinear(channel: number): number {
+  const value = channel / 255;
+  return value <= 0.03928
+    ? value / 12.92
+    : Math.pow((value + 0.055) / 1.055, 2.4);
+}
+
+function relativeLuminance({ r, g, b }: Rgb): number {
+  return (
+    0.2126 * channelToLinear(r) +
+    0.7152 * channelToLinear(g) +
+    0.0722 * channelToLinear(b)
+  );
+}
+
+/** WCAG 2.x contrast ratio between two solid colors. */
+function contrastRatio(a: Rgb, b: Rgb): number {
+  const [lighter, darker] = [relativeLuminance(a), relativeLuminance(b)].sort(
+    (x, y) => y - x,
+  );
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function hexToRgb(hex: string): Rgb | null {
+  const match = hex.match(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+  if (!match) return null;
+  let value = match[1];
+  if (value.length === 3) {
+    value = value
+      .split("")
+      .map((channel) => channel + channel)
+      .join("");
+  }
+  const number = parseInt(value, 16);
+  return { r: (number >> 16) & 255, g: (number >> 8) & 255, b: number & 255 };
+}
+
+function tokenValue(css: string, token: string): string | null {
+  const block = css.match(/\{([^}]*)\}/)?.[1] ?? "";
+  const pattern = new RegExp(`--${token}\\s*:\\s*([^;]+);`);
+  return block.match(pattern)?.[1]?.trim() ?? null;
+}
+
+function assertContrast(
+  theme: { name: string; css: string },
+  foreground: string,
+  background: string,
+  minimum: number,
+): void {
+  const foregroundColor = tokenValue(theme.css, foreground);
+  const backgroundColor = tokenValue(theme.css, background);
+  const foregroundRgb = foregroundColor ? hexToRgb(foregroundColor) : null;
+  const backgroundRgb = backgroundColor ? hexToRgb(backgroundColor) : null;
+  expect(
+    foregroundRgb,
+    `${theme.name}: ${foreground} must be a solid hex color`,
+  ).not.toBeNull();
+  expect(
+    backgroundRgb,
+    `${theme.name}: ${background} must be a solid hex color`,
+  ).not.toBeNull();
+  const ratio = contrastRatio(foregroundRgb!, backgroundRgb!);
+  expect(
+    ratio,
+    `${theme.name}: ${foreground} vs ${background}`,
+  ).toBeGreaterThanOrEqual(minimum);
+}
+
+describe("theme accessibility", () => {
+  const highContrast = themeFiles.find(
+    (theme) => theme.name === "high-contrast.css",
+  );
+
+  it("keeps primary text at AA contrast on every theme", () => {
+    for (const theme of themeFiles) {
+      assertContrast(theme, "text", "bg-canvas", 4.5);
+    }
+  });
+
+  it("keeps High Contrast primary text at AAA contrast", () => {
+    const theme = highContrast;
+    expect(theme, "high-contrast.css is missing").toBeDefined();
+    assertContrast(theme!, "text", "bg-canvas", 7);
+    assertContrast(theme!, "text-strong", "bg-canvas", 7);
+    assertContrast(theme!, "text-muted", "bg-canvas", 7);
+  });
+
+  it("keeps High Contrast controls and focus visible", () => {
+    const theme = highContrast;
+    expect(theme, "high-contrast.css is missing").toBeDefined();
+    assertContrast(theme!, "text-on-accent", "accent", 4.5);
+    assertContrast(theme!, "focus-ring", "bg-canvas", 3);
+    assertContrast(theme!, "accent", "bg-surface", 3);
   });
 });

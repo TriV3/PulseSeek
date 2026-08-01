@@ -11,6 +11,7 @@ const THEMES: Array<{ value: ThemePreference; label: string }> = [
   { value: "light", label: "PulseSeek Light" },
   { value: "dark", label: "PulseSeek Dark" },
   { value: "midnight", label: "Midnight Blue" },
+  { value: "high-contrast", label: "High Contrast" },
 ];
 
 export function ThemeSelector({
