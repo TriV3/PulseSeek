@@ -5,7 +5,7 @@
  *   themes/light.css  → :root, [data-theme="light"]
  *   themes/dark.css   → [data-theme="dark"]
  *   themes/midnight.css → [data-theme="midnight"]
- * Future themes (High Contrast) add their own file.
+ *   themes/high-contrast.css → [data-theme="high-contrast"]
  * Feature components must consume colors through tokens only.
  */
 

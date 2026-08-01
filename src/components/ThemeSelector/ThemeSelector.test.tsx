@@ -18,6 +18,9 @@ describe("ThemeSelector", () => {
     expect(
       screen.getByRole("option", { name: "Midnight Blue" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "High Contrast" }),
+    ).toBeInTheDocument();
   });
 
   it("reports theme changes", () => {
@@ -40,5 +43,16 @@ describe("ThemeSelector", () => {
     });
 
     expect(onChange).toHaveBeenCalledWith("midnight");
+  });
+
+  it("reports the high-contrast theme change", () => {
+    const onChange = vi.fn();
+    render(<ThemeSelector theme="system" onChange={onChange} />);
+
+    fireEvent.change(screen.getByLabelText("Theme"), {
+      target: { value: "high-contrast" },
+    });
+
+    expect(onChange).toHaveBeenCalledWith("high-contrast");
   });
 });

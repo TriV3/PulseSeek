@@ -101,4 +101,25 @@ describe("application shell", () => {
       expect(document.documentElement.dataset.theme).toBe("midnight"),
     );
   });
+
+  it("applies the persisted high-contrast theme without restart", async () => {
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "load_player_preferences") {
+        return {
+          version: 1,
+          preferences: {
+            ...DEFAULT_PLAYER_PREFERENCES,
+            theme: "high-contrast",
+          },
+        };
+      }
+      return undefined;
+    });
+
+    render(<App />);
+
+    await waitFor(() =>
+      expect(document.documentElement.dataset.theme).toBe("high-contrast"),
+    );
+  });
 });

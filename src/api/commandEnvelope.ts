@@ -68,7 +68,8 @@ export type VolumeResponse = Record<string, never>;
 export type PlaybackMode =
   "one-shot" | "loop-current" | "sequential" | "random";
 
-export type ThemePreference = "system" | "light" | "dark" | "midnight";
+export type ThemePreference =
+  "system" | "light" | "dark" | "midnight" | "high-contrast";
 
 export interface SetPlaybackModeRequest {
   mode: PlaybackMode;
@@ -140,7 +141,9 @@ function isPlayerPreferences(value: unknown): value is PlayerPreferences {
     candidate.expanded_folder_paths.every((path) => typeof path === "string") &&
     (candidate.last_played_file_path === null ||
       typeof candidate.last_played_file_path === "string") &&
-    ["system", "light", "dark", "midnight"].includes(String(candidate.theme))
+    ["system", "light", "dark", "midnight", "high-contrast"].includes(
+      String(candidate.theme),
+    )
   );
 }
 

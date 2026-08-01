@@ -17,6 +17,7 @@ import "./styles/tokens.css";
 import "./styles/themes/light.css";
 import "./styles/themes/dark.css";
 import "./styles/themes/midnight.css";
+import "./styles/themes/high-contrast.css";
 import "./App.css";
 
 const clamp = (value: number, minimum: number, maximum: number) =>
