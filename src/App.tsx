@@ -11,6 +11,7 @@ import { useAudioDevices } from "./hooks/useAudioDevices";
 import { AudioDeviceSelector } from "./components/AudioDeviceSelector/AudioDeviceSelector";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { usePlayerPreferences } from "./hooks/usePlayerPreferences";
+import "./styles/tokens.css";
 import "./App.css";
 
 const clamp = (value: number, minimum: number, maximum: number) =>
