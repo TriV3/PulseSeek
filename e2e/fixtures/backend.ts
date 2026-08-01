@@ -6,7 +6,11 @@ const SCRIPT = `
 (function() {
   if (window.__TAURI_BACKEND__) return;
   var state = {
-    commandHandlers: {},
+    commandHandlers: {
+      list_browser_roots: function() { return { roots: [{ path: "/music", name: "Music" }] }; },
+      list_devices: function() { return { devices: [] }; },
+      current_device: function() { return { device: null }; }
+    },
     listeners: {},
     calls: []
   };
