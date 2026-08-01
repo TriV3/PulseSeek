@@ -85,6 +85,26 @@ pub fn run() {
             )));
             app.manage(preferences);
 
+            // Technical cache on its own worker. A cache failure must never
+            // prevent Audio Player startup, so startup logs and continues.
+            if let Ok(config_dir) = app.path().app_config_dir() {
+                let cache_path = config_dir.join("app-cache.sqlite");
+                match pulseseek_cache::technical_cache::TechnicalCache::start(&cache_path) {
+                    Ok(cache) => {
+                        let port: Arc<dyn pulseseek_cache::technical_cache::TechnicalCachePort> =
+                            Arc::new(cache);
+                        tracing::info!(status = ?port.status(), "technical cache ready");
+                        app.manage(port);
+                    },
+                    Err(error) => {
+                        tracing::warn!(
+                            error = %error,
+                            "technical cache unavailable; continuing without cache"
+                        );
+                    },
+                }
+            }
+
             // Real event emitter using Tauri's AppHandle.
             let event_emitter: Arc<dyn playback_events::PlaybackEventEmitter> =
                 Arc::new(playback_events::TauriEventEmitter::new(app.handle().clone()));
