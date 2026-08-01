@@ -285,3 +285,4 @@ impl Decoder for Mp3Decoder {
 }
 
 pub mod registry;
+pub mod waveform;

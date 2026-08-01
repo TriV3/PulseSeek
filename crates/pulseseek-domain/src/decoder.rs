@@ -71,10 +71,11 @@ pub trait Decoder: Send {
     /// Read stream metadata.
     fn metadata(&mut self) -> Result<StreamMetadata, DecodeError>;
 
-    /// Read up to `buf.len()` frames of decoded PCM data into `buf`.
+    /// Read up to `buf.len()` interleaved PCM samples into `buf`.
     ///
-    /// Returns the number of frames actually written, which may be less
-    /// than `buf.len()` when the end of stream is reached.
+    /// Returns the number of samples actually written, which may be less than
+    /// `buf.len()` when the end of stream is reached. The buffer is shared
+    /// across channels, so `samples / channels` is the number of frames.
     fn read(&mut self, buf: &mut [f32]) -> Result<usize, DecodeError>;
 
     /// Seek to a validated target position.
