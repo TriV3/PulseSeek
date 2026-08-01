@@ -118,9 +118,9 @@ describe("semantic design tokens", () => {
     }
   });
 
-  it("discovers at least the light and dark themes", () => {
+  it("discovers at least the light, dark, and midnight themes", () => {
     expect(themeFiles.map((theme) => theme.name)).toEqual(
-      expect.arrayContaining(["dark.css", "light.css"]),
+      expect.arrayContaining(["dark.css", "light.css", "midnight.css"]),
     );
   });
 

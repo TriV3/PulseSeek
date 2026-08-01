@@ -41,6 +41,11 @@ describe("useTheme", () => {
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
+  it("applies midnight for the midnight preference", () => {
+    renderHook(() => useTheme("midnight"));
+    expect(document.documentElement.dataset.theme).toBe("midnight");
+  });
+
   it("resolves the system preference from the OS color scheme", () => {
     installMatchMedia(true);
     renderHook(() => useTheme("system"));

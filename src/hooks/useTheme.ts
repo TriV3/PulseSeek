@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ThemePreference } from "../api/commandEnvelope";
 
-export type ResolvedTheme = "light" | "dark";
+export type ResolvedTheme = "light" | "dark" | "midnight";
 
 const SYSTEM_QUERY = "(prefers-color-scheme: dark)";
 

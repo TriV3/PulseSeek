@@ -16,6 +16,7 @@ import { ThemeSelector } from "./components/ThemeSelector/ThemeSelector";
 import "./styles/tokens.css";
 import "./styles/themes/light.css";
 import "./styles/themes/dark.css";
+import "./styles/themes/midnight.css";
 import "./App.css";
 
 const clamp = (value: number, minimum: number, maximum: number) =>

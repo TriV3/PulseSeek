@@ -15,6 +15,9 @@ describe("ThemeSelector", () => {
     expect(
       screen.getByRole("option", { name: "PulseSeek Dark" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Midnight Blue" }),
+    ).toBeInTheDocument();
   });
 
   it("reports theme changes", () => {
@@ -26,5 +29,16 @@ describe("ThemeSelector", () => {
     });
 
     expect(onChange).toHaveBeenCalledWith("dark");
+  });
+
+  it("reports the midnight theme change", () => {
+    const onChange = vi.fn();
+    render(<ThemeSelector theme="system" onChange={onChange} />);
+
+    fireEvent.change(screen.getByLabelText("Theme"), {
+      target: { value: "midnight" },
+    });
+
+    expect(onChange).toHaveBeenCalledWith("midnight");
   });
 });

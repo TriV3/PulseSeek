@@ -2,9 +2,10 @@
  * PulseSeek design foundation.
  *
  * Semantic tokens live in one file per theme under `themes/`:
- *   themes/light.css → :root, [data-theme="light"]
- *   themes/dark.css  → [data-theme="dark"]
- * Future themes (Midnight Blue, High Contrast) add their own file.
+ *   themes/light.css  → :root, [data-theme="light"]
+ *   themes/dark.css   → [data-theme="dark"]
+ *   themes/midnight.css → [data-theme="midnight"]
+ * Future themes (High Contrast) add their own file.
  * Feature components must consume colors through tokens only.
  */
 

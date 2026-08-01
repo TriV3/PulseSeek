@@ -1,0 +1,73 @@
+/*
+ * PulseSeek Midnight Blue — a deep blue-tinted dark theme applied when the
+ * active theme resolves to "midnight".
+ * Components must consume colors through tokens only; never a named palette.
+ */
+
+[data-theme="midnight"] {
+  /* Base document */
+  color: #a9b7d6;
+  background: #0b1020;
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg-canvas: #0b1020;
+  --bg-surface: #151b30;
+  --bg-subtle: #10162a;
+  --bg-panel: #0d1325;
+  --bg-chrome: #121830;
+  --bg-chrome-strong: #1c2440;
+  --bg-hover: #232e4e;
+  --bg-selected: #2c3c6e;
+  --bg-header: #10162a;
+  --bg-header-strong: #0a0f1e;
+  --bg-button: #1c2440;
+  --bg-button-strong: #121830;
+  --bg-browser-tabs: #0f1526;
+
+  /* Text */
+  --text: #a9b7d6;
+  --text-strong: #dbe4f5;
+  --text-muted: #7c8cb2;
+  --text-subtle: #66779c;
+  --text-brand: #8fb4f5;
+  --text-danger: #ff8f9e;
+  --text-on-accent: #0e1424;
+
+  /* Borders */
+  --line: #2c3a5e;
+  --line-strong: #3a4a78;
+  --line-soft: #1d2742;
+
+  /* Accent */
+  --accent: #6aa6f5;
+  --accent-strong: #4a86e0;
+  --accent-play: #8fc0ff;
+  --accent-play-soft: #1c2c52;
+  --accent-play-ink: #dcecff;
+  --accent-play-border: #4a6ea8;
+  --accent-range: #8fb4f5;
+
+  /* Danger */
+  --bg-danger: #c24545;
+  --bg-danger-strong: #a03030;
+  --bg-danger-subtle: #3a1f2a;
+  --line-danger: #7a4256;
+  --line-danger-strong: #b0304a;
+
+  /* Waveform */
+  --wave: #8fa8d8;
+  --wave-grid: #2c3a5e;
+  --wave-selection: #e8d75a;
+  --wave-selection-border: #9aa32d;
+  --wave-playhead: #f29c38;
+
+  /* Focus and overlay */
+  --focus-ring: #6ab0ff;
+  --overlay-backdrop: rgba(0, 0, 0, 0.6);
+  --shadow-overlay: 0 4px 16px rgba(0, 0, 0, 0.55);
+
+  /* Spinner */
+  --spinner-track: #2c3a5e;
+  --spinner-head: #a9b7d6;
+}
