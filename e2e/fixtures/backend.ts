@@ -13,7 +13,18 @@ const SCRIPT = `
       set_playback_mode: function(args) { return { mode: args.mode }; },
       volume: function() { return {}; },
       load_player_preferences: function() { return { version: 1, preferences: { schema_version: 1, revision: 0, playback_mode: "one-shot", output_device_id: null, volume: 1, muted: false, waveform_size: 38, browser_size: 24, selected_folder_path: null, expanded_folder_paths: [], last_played_file_path: null, theme: "system" } }; },
-      save_player_preferences: function(args) { return { version: 1, preferences: args.preferences }; }
+      save_player_preferences: function(args) { return { version: 1, preferences: args.preferences }; },
+      get_waveform: function() {
+        var n = 96;
+        var min = [];
+        var max = [];
+        for (var i = 0; i < n; i++) {
+          var v = Math.sin(i / 6) * 0.6;
+          min.push(v - 0.2);
+          max.push(v + 0.2);
+        }
+        return { format_version: 1, channels: 1, samples_per_peak: 64, min: min, max: max };
+      }
     },
     listeners: {},
     calls: []

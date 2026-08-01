@@ -3,6 +3,7 @@
 pub(crate) mod browsing;
 pub(crate) mod device;
 pub(crate) mod playback;
+pub(crate) mod waveform;
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;

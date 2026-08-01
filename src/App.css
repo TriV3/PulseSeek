@@ -99,36 +99,18 @@ input {
   overflow: hidden;
 }
 
-.waveform-canvas svg {
+.waveform-canvas-surface {
   display: block;
   width: 100%;
   height: 100%;
 }
 
-.wave-grid line {
-  stroke: var(--wave-grid);
-  stroke-width: 0.75;
-}
-
-.wave-line {
-  fill: none;
-  stroke: var(--wave);
-  stroke-width: 9;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  opacity: 0.88;
-}
-
-.wave-selection {
-  fill: var(--wave-selection);
-  opacity: 0.3;
-  stroke: var(--wave-selection-border);
-  stroke-width: 1;
-}
-
-.wave-playhead {
-  stroke: var(--wave-playhead);
-  stroke-width: 2;
+.waveform-error {
+  margin: 0;
+  padding: 10px 9px;
+  color: var(--text-danger);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .lower-workspace {

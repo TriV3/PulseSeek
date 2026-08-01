@@ -11,17 +11,21 @@ pub mod playback_events;
 pub mod playback_service;
 pub mod player_preferences;
 pub mod trash_service;
+pub mod waveform_service;
 
 use std::sync::{Arc, Mutex};
 
 use diagnostics::DiagnosticsConfig;
 use pulseseek_audio_cpal::CpalAudioOutput;
+use pulseseek_cache::technical_cache::TechnicalCachePort;
+use pulseseek_cache::waveform_cache::WaveformCachePort;
 use tauri::Manager;
 
 use crate::player_preferences::{
     JsonPlayerPreferencesRepository, SharedPlayerPreferencesRepository,
 };
 use crate::trash_service::{NativeTrashService, TrashService};
+use crate::waveform_service::{NativeWaveformService, WaveformService};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -72,7 +76,8 @@ pub fn run() {
             command_envelope::invoke_command,
             command_envelope::pick_folder_dialog,
             player_preferences::load_player_preferences,
-            player_preferences::save_player_preferences
+            player_preferences::save_player_preferences,
+            command_handlers::waveform::get_waveform
         ])
         .setup(|app| {
             let preferences_path = app
@@ -87,23 +92,39 @@ pub fn run() {
 
             // Technical cache on its own worker. A cache failure must never
             // prevent Audio Player startup, so startup logs and continues.
+            // The same worker backs the waveform service through its own port;
+            // without a cache the service degrades to extract-without-store.
+            let mut waveform_service: Option<Arc<dyn WaveformService>> = None;
             if let Ok(config_dir) = app.path().app_config_dir() {
                 let cache_path = config_dir.join("app-cache.sqlite");
                 match pulseseek_cache::technical_cache::TechnicalCache::start(&cache_path) {
                     Ok(cache) => {
-                        let port: Arc<dyn pulseseek_cache::technical_cache::TechnicalCachePort> =
-                            Arc::new(cache);
-                        tracing::info!(status = ?port.status(), "technical cache ready");
-                        app.manage(port);
+                        let status = cache.status();
+                        let meta_port: Arc<
+                            dyn pulseseek_cache::technical_cache::TechnicalCachePort,
+                        > = Arc::new(cache.clone());
+                        let waveform_port: Arc<dyn WaveformCachePort> = Arc::new(cache);
+                        tracing::info!(status = ?status, "technical cache ready");
+                        app.manage(meta_port);
+                        waveform_service =
+                            Some(Arc::new(NativeWaveformService::new(Some(waveform_port))));
                     },
                     Err(error) => {
                         tracing::warn!(
                             error = %error,
                             "technical cache unavailable; continuing without cache"
                         );
+                        waveform_service = Some(Arc::new(NativeWaveformService::new(None)));
                     },
                 }
             }
+
+            // Waveform service always exists: with a cache port when the
+            // cache opened, without one when it did not. It is only reachable
+            // through the async `get_waveform` command.
+            app.manage(
+                waveform_service.unwrap_or_else(|| Arc::new(NativeWaveformService::new(None))),
+            );
 
             // Real event emitter using Tauri's AppHandle.
             let event_emitter: Arc<dyn playback_events::PlaybackEventEmitter> =
