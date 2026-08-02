@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { FileList } from "./FileList";
 import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
 import { sortFileEntries, type FileSort } from "./fileSort";
+import { filterFileEntries } from "./fileSearch";
 
 const mockMoveToTrash = vi.hoisted(() => vi.fn());
 
@@ -680,14 +681,6 @@ describe("FileList — file sorting", () => {
     );
   }
 
-  it("shows an accessible sort control for type and path", () => {
-    render(<SortHarness />);
-
-    expect(
-      screen.getByRole("combobox", { name: /sort by type or path/i }),
-    ).toBeInTheDocument();
-  });
-
   it("clicking a column header requests ascending sort for that field", () => {
     const onSortChange = vi.fn();
     render(
@@ -775,21 +768,6 @@ describe("FileList — file sorting", () => {
     expect(rows[3]).toHaveTextContent("zulu.flac");
   });
 
-  it("changing the type/path sort emits a sort request", () => {
-    const onSortChange = vi.fn();
-    render(<SortHarness onSortChange={onSortChange} />);
-
-    fireEvent.change(
-      screen.getByRole("combobox", { name: /sort by type or path/i }),
-      { target: { value: "path:desc" } },
-    );
-
-    expect(onSortChange).toHaveBeenCalledWith({
-      field: "path",
-      direction: "desc",
-    });
-  });
-
   it("keeps the selection when the sort changes", () => {
     render(<SortHarness />);
 
@@ -815,5 +793,281 @@ describe("FileList — file sorting", () => {
     expect(screen.getByRole("columnheader", { name: "Duration" }).tagName).toBe(
       "BUTTON",
     );
+  });
+});
+
+describe("FileList — folder search", () => {
+  const searchEntries: BrowserEntry[] = [
+    {
+      id: "/music/kicks/fat-kick.wav",
+      name: "fat-kick.wav",
+      kind: "playable",
+      metadata: null,
+    },
+    {
+      id: "/music/snares/acoustic.wav",
+      name: "acoustic.wav",
+      kind: "playable",
+      metadata: null,
+    },
+    {
+      id: "/music/loops/drum-loop.mp3",
+      name: "drum-loop.mp3",
+      kind: "playable",
+      metadata: null,
+    },
+  ];
+
+  it("shows an accessible search box in the file list", () => {
+    render(
+      <FileList
+        entries={searchEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        searchQuery=""
+        onSearchQueryChange={() => undefined}
+      />,
+    );
+
+    expect(
+      screen.getByRole("searchbox", { name: /search files/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("emits the typed query through onSearchQueryChange", () => {
+    const onSearchQueryChange = vi.fn();
+    render(
+      <FileList
+        entries={searchEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        searchQuery=""
+        onSearchQueryChange={onSearchQueryChange}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("searchbox", { name: /search files/i }), {
+      target: { value: "kick" },
+    });
+
+    expect(onSearchQueryChange).toHaveBeenCalledWith("kick");
+  });
+
+  it("keeps the typed query visible in the input", () => {
+    render(
+      <FileList
+        entries={searchEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        searchQuery="kick"
+        onSearchQueryChange={() => undefined}
+      />,
+    );
+
+    expect(
+      screen.getByRole("searchbox", { name: /search files/i }),
+    ).toHaveValue("kick");
+  });
+
+  it("shows a distinct message when the search matches nothing", () => {
+    // App filters entries before FileList; an empty filtered list plus a
+    // non-empty query renders the no-match message.
+    render(
+      <FileList
+        entries={[]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        searchQuery="zzz"
+        onSearchQueryChange={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText(/no files match/)).toBeInTheDocument();
+  });
+
+  it("keeps the search box visible when the search matches nothing", () => {
+    render(
+      <FileList
+        entries={[]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        searchQuery="zzz"
+        onSearchQueryChange={() => undefined}
+      />,
+    );
+
+    expect(
+      screen.getByRole("searchbox", { name: /search files/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/no files match/)).toBeInTheDocument();
+  });
+
+  it("renders matched folders as navigable rows", () => {
+    const entries: BrowserEntry[] = [
+      {
+        id: "/music/drum-kits",
+        name: "drum-kits",
+        kind: "folder",
+        metadata: null,
+      },
+      ...searchEntries,
+    ];
+    const onSelectFolder = vi.fn();
+
+    render(
+      <FileList
+        entries={entries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        searchQuery="drum"
+        onSearchQueryChange={() => undefined}
+        onSelectFolder={onSelectFolder}
+      />,
+    );
+
+    const folderRow = screen.getByRole("row", { name: /drum-kits/ });
+    expect(folderRow).toBeInTheDocument();
+
+    fireEvent.click(folderRow);
+    expect(onSelectFolder).toHaveBeenCalledWith("/music/drum-kits");
+  });
+
+  it("navigates into a folder with the keyboard", () => {
+    const entries: BrowserEntry[] = [
+      {
+        id: "/music/drum-kits",
+        name: "drum-kits",
+        kind: "folder",
+        metadata: null,
+      },
+      ...searchEntries,
+    ];
+    const onSelectFolder = vi.fn();
+
+    render(
+      <FileList
+        entries={entries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        searchQuery="drum"
+        onSearchQueryChange={() => undefined}
+        onSelectFolder={onSelectFolder}
+      />,
+    );
+
+    const folderRow = screen.getByRole("row", { name: /drum-kits/ });
+    fireEvent.keyDown(folderRow, { key: "Enter" });
+
+    expect(onSelectFolder).toHaveBeenCalledWith("/music/drum-kits");
+  });
+
+  it("does not treat a folder row as a playable selection", () => {
+    const onFileSelect = vi.fn();
+    const entries: BrowserEntry[] = [
+      {
+        id: "/music/drum-kits",
+        name: "drum-kits",
+        kind: "folder",
+        metadata: null,
+      },
+      ...searchEntries,
+    ];
+
+    render(
+      <FileList
+        entries={entries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        searchQuery="drum"
+        onSearchQueryChange={() => undefined}
+        onFileSelect={onFileSelect}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("row", { name: /drum-kits/ }));
+
+    expect(onFileSelect).not.toHaveBeenCalled();
+  });
+
+  it("keeps the selection when the search query changes", () => {
+    function SearchHarness() {
+      const [query, setQuery] = useState("");
+      const entries = useMemo(
+        () => filterFileEntries(searchEntries, query),
+        [query],
+      );
+      return (
+        <FileList
+          entries={entries}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+          searchQuery={query}
+          onSearchQueryChange={setQuery}
+        />
+      );
+    }
+
+    render(<SearchHarness />);
+
+    fireEvent.click(screen.getByText("acoustic.wav"));
+    expect(screen.getByRole("row", { name: /acoustic\.wav/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    fireEvent.change(screen.getByRole("searchbox", { name: /search files/i }), {
+      target: { value: "acoustic" },
+    });
+    expect(screen.getByRole("row", { name: /acoustic\.wav/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    fireEvent.change(screen.getByRole("searchbox", { name: /search files/i }), {
+      target: { value: "" },
+    });
+    expect(screen.getByRole("row", { name: /acoustic\.wav/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("handles rapid successive query changes", () => {
+    function RapidHarness() {
+      const [query, setQuery] = useState("");
+      const entries = useMemo(
+        () => filterFileEntries(searchEntries, query),
+        [query],
+      );
+      return (
+        <FileList
+          entries={entries}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+          searchQuery={query}
+          onSearchQueryChange={setQuery}
+        />
+      );
+    }
+
+    render(<RapidHarness />);
+    const input = screen.getByRole("searchbox", { name: /search files/i });
+
+    fireEvent.change(input, { target: { value: "d" } });
+    fireEvent.change(input, { target: { value: "dr" } });
+    fireEvent.change(input, { target: { value: "drum" } });
+
+    expect(screen.getByText("drum-loop.mp3")).toBeInTheDocument();
+    expect(screen.queryByText("fat-kick.wav")).not.toBeInTheDocument();
   });
 });

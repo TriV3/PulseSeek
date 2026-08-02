@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { INITIAL_FOLDER_TREE_STATE } from "../components/FolderTree/folderTreeTypes";
+import {
+  collectFolderEntries,
+  INITIAL_FOLDER_TREE_STATE,
+} from "../components/FolderTree/folderTreeTypes";
 import { folderTreeReducer, getRestorationPaths } from "./useFolderTree";
 
 const path = "/test/music";
@@ -218,5 +221,73 @@ describe("folderTreeReducer playable entries", () => {
     expect(next.playableEntries["/other"]).toEqual([
       { id: "other", name: "other.wav", kind: "playable" },
     ]);
+  });
+});
+
+describe("collectFolderEntries", () => {
+  it("collects folders from every explored folder, not only the current one", () => {
+    const folders = {
+      "/music": {
+        expanded: true,
+        children: [
+          { id: "/music/a", name: "a", kind: "folder" as const },
+          {
+            id: "/music/song.wav",
+            name: "song.wav",
+            kind: "playable" as const,
+          },
+        ],
+        isLoading: false,
+        error: null,
+      },
+      "/music/a": {
+        expanded: true,
+        children: [
+          {
+            id: "/music/a/Downloads",
+            name: "Downloads",
+            kind: "folder" as const,
+          },
+        ],
+        isLoading: false,
+        error: null,
+      },
+    };
+
+    const collected = collectFolderEntries(folders);
+
+    expect(collected.map((entry) => entry.id)).toEqual([
+      "/music/a",
+      "/music/a/Downloads",
+    ]);
+  });
+
+  it("deduplicates folders that appear in more than one explored folder", () => {
+    const folders = {
+      "/music": {
+        expanded: true,
+        children: [
+          { id: "/music/loop", name: "loop", kind: "folder" as const },
+        ],
+        isLoading: false,
+        error: null,
+      },
+      "/sounds": {
+        expanded: true,
+        children: [
+          { id: "/music/loop", name: "loop", kind: "folder" as const },
+        ],
+        isLoading: false,
+        error: null,
+      },
+    };
+
+    expect(collectFolderEntries(folders)).toEqual([
+      { id: "/music/loop", name: "loop", kind: "folder" },
+    ]);
+  });
+
+  it("returns an empty array when nothing is explored", () => {
+    expect(collectFolderEntries({})).toEqual([]);
   });
 });

@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFolderTree } from "./hooks/useFolderTree";
 import { FolderTree } from "./components/FolderTree/FolderTree";
+import { collectFolderEntries } from "./components/FolderTree/folderTreeTypes";
 import { FileList } from "./components/FileList/FileList";
 import {
   DEFAULT_FILE_SORT,
   sortFileEntries,
   type FileSort,
 } from "./components/FileList/fileSort";
+import { filterFileEntries } from "./components/FileList/fileSearch";
 import { usePlaybackSelection } from "./hooks/usePlaybackSelection";
 import { usePlaybackTransport } from "./hooks/usePlaybackTransport";
 import { PlayerTransport } from "./components/PlayerTransport/PlayerTransport";
@@ -35,6 +37,7 @@ function App() {
   const [browserSize, setBrowserSize] = useState(24);
   const [waveformResetRevision, setWaveformResetRevision] = useState(0);
   const [fileSort, setFileSort] = useState<FileSort>(DEFAULT_FILE_SORT);
+  const [searchQuery, setSearchQuery] = useState("");
   const folderTree = useFolderTree();
   const { state } = folderTree;
   const playback = usePlaybackSelection();
@@ -56,9 +59,27 @@ function App() {
     () => state.playableEntries[state.selectedPath ?? ""] ?? [],
     [state.playableEntries, state.selectedPath],
   );
+  // When a search is active, matched folders from the whole explored tree are
+  // shown alongside the current folder's playable files so the user can find
+  // any folder (e.g. Downloads) and navigate into it (FR-LS-004).
+  const folderEntries = useMemo(
+    () => collectFolderEntries(state.folders),
+    [state.folders],
+  );
+  const searchBaseEntries = useMemo(
+    () =>
+      searchQuery.trim() === ""
+        ? fileListEntries
+        : [...folderEntries, ...fileListEntries],
+    [searchQuery, folderEntries, fileListEntries],
+  );
+  const filteredFileListEntries = useMemo(
+    () => filterFileEntries(searchBaseEntries, searchQuery),
+    [searchBaseEntries, searchQuery],
+  );
   const sortedFileListEntries = useMemo(
-    () => sortFileEntries(fileListEntries, fileSort),
-    [fileListEntries, fileSort],
+    () => sortFileEntries(filteredFileListEntries, fileSort),
+    [filteredFileListEntries, fileSort],
   );
   const selectAndRemember = useCallback(
     async (
@@ -526,6 +547,12 @@ function App() {
                 playbackError={playback.playback.error}
                 sort={fileSort}
                 onSortChange={setFileSort}
+                searchQuery={searchQuery}
+                onSearchQueryChange={setSearchQuery}
+                onSelectFolder={(path) => {
+                  folderTree.selectFolder(path);
+                  folderTree.toggleExpand(path);
+                }}
                 onEntriesTrashed={(entryIds) => {
                   if (state.selectedPath) {
                     folderTree.removeEntries(state.selectedPath, entryIds);

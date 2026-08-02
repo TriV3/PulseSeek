@@ -236,6 +236,31 @@ describe("usePlaybackTransport", () => {
     expect(result.current.canNext).toBe(false);
   });
 
+  it("skips folder entries when advancing to the next file", async () => {
+    const mixedEntries: BrowserEntry[] = [
+      { id: "folder1", name: "folder1", kind: "folder" },
+      { id: "a.wav", name: "a.wav", kind: "playable" },
+      { id: "folder2", name: "folder2", kind: "folder" },
+      { id: "b.wav", name: "b.wav", kind: "playable" },
+    ];
+    const onSelectEntry = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries: mixedEntries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        onSelectEntry,
+      }),
+    );
+
+    expect(result.current.canNext).toBe(true);
+    await act(async () => result.current.handleNext());
+
+    expect(onSelectEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "b.wav" }),
+    );
+  });
+
   it("keeps command errors visible", async () => {
     stopMock.mockRejectedValue(new Error("stop failed"));
     const { result } = renderHook(() =>

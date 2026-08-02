@@ -26,6 +26,16 @@
   min-height: 200px;
 }
 
+/* State content below the always-visible actions bar when a folder is
+   selected (loading, error, empty folder, empty search result). */
+.file-list-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
 .file-list-placeholder {
   color: var(--text-muted);
   font-size: 14px;
@@ -59,25 +69,23 @@
   opacity: 0.5;
 }
 
-.file-list-actions .file-list-sort-menu {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-.file-list-sort-menu-label {
-  white-space: nowrap;
-}
-
-.file-list-actions select {
+.file-list-actions .file-list-search {
+  min-width: 140px;
   padding: 2px 6px;
   border: 1px solid var(--line-strong);
   border-radius: 2px;
   background: var(--bg-surface);
   color: var(--text);
   font-size: 11px;
+}
+
+.file-list-actions .file-list-search::placeholder {
+  color: var(--text-muted);
+}
+
+.file-list-actions .file-list-search:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 .file-list-trash-error {
@@ -163,6 +171,18 @@
 
 .file-list-row:hover {
   background: var(--bg-hover);
+}
+
+.file-list-row--folder .file-list-row-name {
+  font-weight: 600;
+}
+
+.file-list-row--folder > span:last-child {
+  color: var(--text-muted);
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 9px;
 }
 
 .file-list-row.selected {
