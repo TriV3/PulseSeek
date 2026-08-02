@@ -28,17 +28,22 @@ const clamp = (value: number, minimum: number, maximum: number) =>
 function App() {
   const [waveformSize, setWaveformSize] = useState(38);
   const [browserSize, setBrowserSize] = useState(24);
+  const [waveformResetRevision, setWaveformResetRevision] = useState(0);
   const folderTree = useFolderTree();
   const { state } = folderTree;
   const playback = usePlaybackSelection();
   const playbackMode = usePlaybackMode();
   const audioDevices = useAudioDevices();
   const playerPreferences = usePlayerPreferences();
+  const updatePreferences = playerPreferences.update;
   useTheme(playerPreferences.preferences.theme);
   const restoredOptions = useRef(false);
   const restoredBrowser = useRef(false);
   const restoredDevice = useRef(false);
   const restoredFile = useRef(false);
+  const restoredResume = useRef<{ entryId: string; positionMs: number } | null>(
+    null,
+  );
 
   const fileListEntries = state.playableEntries[state.selectedPath ?? ""] ?? [];
   const fileListFolder = state.folders[state.selectedPath ?? ""] ?? undefined;
@@ -46,15 +51,21 @@ function App() {
     async (
       entry: import("./components/FolderTree/folderTreeTypes").BrowserEntry,
     ) => {
-      if (await playback.select(entry)) {
-        playerPreferences.update({
+      const savedResume = restoredResume.current;
+      const startPositionMs =
+        savedResume?.entryId === entry.id ? savedResume.positionMs : 0;
+      if (await playback.select(entry, startPositionMs)) {
+        if (savedResume?.entryId === entry.id) restoredResume.current = null;
+        updatePreferences({
           last_played_file_path: entry.id,
+          last_played_position_ms: startPositionMs,
+          last_played_duration_ms: entry.metadata?.duration_ms ?? null,
           selected_folder_path:
             entry.id.substring(0, entry.id.lastIndexOf("/")) || null,
         });
       }
     },
-    [playback, playerPreferences],
+    [playback, updatePreferences],
   );
   const transport = usePlaybackTransport({
     entries: fileListEntries,
@@ -105,6 +116,8 @@ function App() {
                       restoredPath.startsWith(path),
                     ),
               last_played_file_path: null,
+              last_played_position_ms: 0,
+              last_played_duration_ms: null,
             });
           }
         });
@@ -151,18 +164,81 @@ function App() {
       .find((entry) => entry.id === lastPath);
     if (restoredEntry) {
       restoredFile.current = true;
+      const savedPosition =
+        playerPreferences.preferences.last_played_position_ms;
+      restoredResume.current = {
+        entryId: restoredEntry.id,
+        positionMs: savedPosition,
+      };
       playback.restore(restoredEntry.id);
+      transport.restorePosition(
+        restoredEntry.id,
+        savedPosition,
+        restoredEntry.metadata?.duration_ms ??
+          playerPreferences.preferences.last_played_duration_ms,
+      );
     }
   }, [
     playback,
     playerPreferences.isLoaded,
     playerPreferences.preferences.last_played_file_path,
+    playerPreferences.preferences.last_played_position_ms,
+    playerPreferences.preferences.last_played_duration_ms,
     state.playableEntries,
+    transport,
   ]);
 
   const selectedEntry = fileListEntries.find(
     (entry) => entry.id === playback.playback.entryId,
   );
+
+  const seekAndRemember = useCallback(
+    async (positionMs: number) => {
+      const confirmed = await transport.handleSeek(positionMs);
+      if (confirmed !== null && playback.playback.entryId) {
+        restoredResume.current = null;
+        updatePreferences({
+          last_played_file_path: playback.playback.entryId,
+          last_played_position_ms: confirmed,
+          last_played_duration_ms: transport.durationMs,
+        });
+      }
+    },
+    [playback.playback.entryId, transport, updatePreferences],
+  );
+
+  const playbackSnapshot = useRef({
+    entryId: playback.playback.entryId,
+    positionMs: transport.positionMs,
+    status: transport.status,
+  });
+  useEffect(() => {
+    playbackSnapshot.current = {
+      entryId: playback.playback.entryId,
+      positionMs: transport.positionMs,
+      status: transport.status,
+    };
+  }, [playback.playback.entryId, transport.positionMs, transport.status]);
+  const lastPeriodicPosition = useRef(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const snapshot = playbackSnapshot.current;
+      if (
+        snapshot.status !== "playing" ||
+        !snapshot.entryId ||
+        Math.abs(snapshot.positionMs - lastPeriodicPosition.current) < 1_000
+      ) {
+        return;
+      }
+      lastPeriodicPosition.current = snapshot.positionMs;
+      updatePreferences({
+        last_played_file_path: snapshot.entryId,
+        last_played_position_ms: snapshot.positionMs,
+        last_played_duration_ms: transport.durationMs,
+      });
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [transport.durationMs, updatePreferences]);
 
   const startResize = useCallback(
     (
@@ -207,9 +283,9 @@ function App() {
     onPreviousTrack: transport.handlePrevious,
     onNextTrack: transport.handleNext,
     onSeekBackward: () =>
-      transport.handleSeek(Math.max(0, transport.positionMs - 5_000)),
+      seekAndRemember(Math.max(0, transport.positionMs - 5_000)),
     onSeekForward: () =>
-      transport.handleSeek(
+      seekAndRemember(
         transport.durationMs === null
           ? transport.positionMs + 5_000
           : Math.min(transport.durationMs, transport.positionMs + 5_000),
@@ -233,8 +309,17 @@ function App() {
         <WaveformPanel
           entryPath={selectedEntry?.id ?? null}
           entryName={selectedEntry?.name ?? "No file selected"}
-          durationMs={transport.durationMs}
-          onSeek={transport.handleSeek}
+          durationMs={
+            transport.durationMs ??
+            selectedEntry?.metadata?.duration_ms ??
+            (selectedEntry?.id ===
+            playerPreferences.preferences.last_played_file_path
+              ? playerPreferences.preferences.last_played_duration_ms
+              : null)
+          }
+          restoredPositionMs={transport.positionMs}
+          resetRevision={waveformResetRevision}
+          onSeek={seekAndRemember}
           style={playerPreferences.preferences.waveform_style}
         />
         <div
@@ -279,10 +364,22 @@ function App() {
               canNext={transport.canNext}
               error={transport.error ?? playback.playback.error}
               onTogglePlayPause={transport.togglePlayPause}
-              onStop={transport.handleStop}
+              onStop={async () => {
+                await transport.handleStop();
+                setWaveformResetRevision((revision) => revision + 1);
+                restoredResume.current = null;
+                if (playback.playback.entryId) {
+                  playerPreferences.update({
+                    last_played_file_path: playback.playback.entryId,
+                    last_played_position_ms: 0,
+                    last_played_duration_ms:
+                      selectedEntry?.metadata?.duration_ms ??
+                      transport.durationMs,
+                  });
+                }
+              }}
               onPrevious={transport.handlePrevious}
               onNext={transport.handleNext}
-              onSeek={transport.handleSeek}
               onVolume={async (volume) => {
                 if (await transport.handleVolume(volume)) {
                   playerPreferences.update({ volume });

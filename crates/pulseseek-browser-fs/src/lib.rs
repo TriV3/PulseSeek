@@ -55,6 +55,60 @@ impl NativeFolderReader {
         Ok(entries)
     }
 
+    /// Streams a lightweight folder preview in small batches. Unlike
+    /// [`Self::read_folder_preview`], this does not wait for the complete
+    /// directory listing before making the first entries available.
+    pub fn stream_folder_preview(
+        &self,
+        path: &Path,
+        show_unsupported: bool,
+        batch_size: usize,
+        is_cancelled: impl Fn() -> bool,
+        mut on_chunk: impl FnMut(&[BrowserEntry]),
+    ) -> Result<(), FolderReadError> {
+        let dir_reader =
+            std::fs::read_dir(path).map_err(|e| FolderReadError::from_io_error(e, path))?;
+        let mut entries = Vec::with_capacity(batch_size);
+        let mut emitted_entries = false;
+
+        for entry in dir_reader {
+            if is_cancelled() {
+                return Ok(());
+            }
+            let entry = entry.map_err(|e| FolderReadError::from_io_error(e, path))?;
+            let file_type =
+                entry.file_type().map_err(|e| FolderReadError::from_io_error(e, &entry.path()))?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            let path_string = entry.path().to_string_lossy().to_string();
+            let id = EntryId::new(&path_string);
+            let browser_entry = if file_type.is_dir() {
+                Some(BrowserEntry::Folder(FolderEntry { id, name }))
+            } else if likely_supported_audio(&entry.path()) {
+                Some(BrowserEntry::PlayableFile(PlayableFileEntry { id, name, metadata: None }))
+            } else if show_unsupported {
+                Some(BrowserEntry::UnsupportedFile(UnsupportedFileEntry { id, name }))
+            } else {
+                None
+            };
+
+            if let Some(browser_entry) = browser_entry {
+                entries.push(browser_entry);
+            }
+            if entries.len() == batch_size {
+                entries.sort();
+                on_chunk(&entries);
+                entries.clear();
+                emitted_entries = true;
+            }
+        }
+
+        if !is_cancelled() && (!entries.is_empty() || !emitted_entries) {
+            entries.sort();
+            on_chunk(&entries);
+        }
+        Ok(())
+    }
+
     pub fn read_folder_with_options(
         &self,
         path: &Path,

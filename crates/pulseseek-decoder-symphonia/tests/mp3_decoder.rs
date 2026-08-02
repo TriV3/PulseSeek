@@ -111,7 +111,9 @@ fn seek_then_read_returns_different_data() {
     decoder.seek(seek_target).unwrap();
 
     // Read after seek and verify we get non-silence.
-    let mut buf_seek = vec![0.0f32; 441];
+    // Resetting the codec after seek can expose a short silent MP3 pre-roll;
+    // read far enough to include the first audible decoded frame.
+    let mut buf_seek = vec![0.0f32; 4096];
     let frames = decoder.read(&mut buf_seek).unwrap();
     assert!(frames > 0, "should read frames after seek");
     let rms = (buf_seek[..frames].iter().map(|s| s * s).sum::<f32>() / frames as f32).sqrt();

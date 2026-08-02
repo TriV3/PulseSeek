@@ -61,7 +61,10 @@
   --wave-soft: #3c6f70;
   --wave-selection: #e8d75a;
   --wave-selection-border: #9aa32d;
-  --wave-playhead: #e8a33c;
+  --wave-seek-current: #ffb454;
+  --wave-seek-hover: #ff6bb5;
+  --wave-time-current: #ffe0ad;
+  --wave-time-hover: #ffc1df;
 
   /* Focus and overlay */
   --focus-ring: #6ab0ff;

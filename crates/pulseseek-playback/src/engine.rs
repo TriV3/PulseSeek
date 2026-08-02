@@ -8,7 +8,9 @@ use pulseseek_domain::playback::position::Position;
 use ringbuf::traits::{Observer, Producer, Split};
 use ringbuf::{HeapProd, HeapRb};
 
-use crate::control::{PlaybackConsumer, PlaybackControl, TERMINAL_ACTIVE};
+use crate::control::{
+    PlaybackConsumer, PlaybackControl, MAX_CALLBACK_CHANNELS, SEEK_RAMP_FRAMES, TERMINAL_ACTIVE,
+};
 use crate::error::*;
 use crate::resampling::SampleRateConverter;
 
@@ -66,6 +68,10 @@ impl PlaybackEngine {
             stopped: Arc::new(AtomicBool::new(false)),
             seeking: Arc::new(AtomicBool::new(false)),
             generation: Arc::new(AtomicU64::new(0)),
+            seek_generation: Arc::new(AtomicU64::new(0)),
+            seek_fade_requested: Arc::new(AtomicBool::new(false)),
+            seek_fade_complete: Arc::new(AtomicBool::new(true)),
+            output_active: Arc::new(AtomicBool::new(false)),
             terminal: Arc::new(AtomicU8::new(TERMINAL_ACTIVE)),
             position_frames: Arc::new(AtomicU64::new(0)),
         };
@@ -85,7 +91,17 @@ impl PlaybackEngine {
                 loop_cache_offset: 0,
                 frames_written: 0,
             },
-            PlaybackConsumer { consumer, control },
+            PlaybackConsumer {
+                consumer,
+                control,
+                observed_seek_generation: 0,
+                seek_ramp_frame: SEEK_RAMP_FRAMES,
+                last_output: [0.0; MAX_CALLBACK_CHANNELS],
+                seek_ramp_origin: [0.0; MAX_CALLBACK_CHANNELS],
+                seek_fade_out_frame: SEEK_RAMP_FRAMES,
+                seek_fade_out_origin: [0.0; MAX_CALLBACK_CHANNELS],
+                buffer_cleared_for_seek: false,
+            },
         )
     }
 

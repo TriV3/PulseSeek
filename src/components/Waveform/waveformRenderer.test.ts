@@ -194,7 +194,9 @@ describe("drawEnvelope", () => {
     expect(
       calls.filter((call) => call === "stroke").length,
     ).toBeGreaterThanOrEqual(4);
-    expect(calls.some((call) => call.startsWith("setLineDash:4,3"))).toBe(true);
+    expect(calls.some((call) => call.startsWith("setLineDash:4,3"))).toBe(
+      false,
+    );
   });
 
   it("consumes semantic theme tokens for every color", () => {
@@ -313,7 +315,7 @@ describe("resolveTokens", () => {
       if (name === "--wave") return "#0a0a0a";
       if (name === "--wave-grid") return "#1b1b1b";
       if (name === "--wave-soft") return "#2c2c2c";
-      if (name === "--wave-playhead") return "#3d3d3d";
+      if (name === "--wave-seek-current") return "#3d3d3d";
       return "";
     });
     vi.spyOn(window, "getComputedStyle").mockReturnValue({
@@ -368,6 +370,11 @@ describe("positionMsForX", () => {
 
   it("maps the center proportionally", () => {
     expect(positionMsForX(50, 100, 2000)).toBe(1000);
+  });
+
+  it("returns an integer millisecond accepted by the Rust seek command", () => {
+    expect(positionMsForX(1, 3, 2000)).toBe(667);
+    expect(Number.isInteger(positionMsForX(1, 3, 2000))).toBe(true);
   });
 
   it("clamps coordinates outside the canvas", () => {

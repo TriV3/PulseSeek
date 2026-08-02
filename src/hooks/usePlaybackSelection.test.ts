@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { usePlaybackSelection } from "./usePlaybackSelection";
 
 const playMock = vi.hoisted(() => vi.fn());
-vi.mock("../api/commandEnvelope", () => ({ play: playMock }));
+const seekMock = vi.hoisted(() => vi.fn());
+vi.mock("../api/commandEnvelope", () => ({ play: playMock, seek: seekMock }));
 
 beforeEach(() => vi.resetAllMocks());
 
@@ -40,6 +41,28 @@ describe("usePlaybackSelection", () => {
       error: null,
     });
     expect(played).toBe(true);
+  });
+
+  it("seeks to the restored position only when playback is started", async () => {
+    playMock.mockResolvedValueOnce(undefined);
+    seekMock.mockResolvedValueOnce(42_500);
+    const { result } = renderHook(() => usePlaybackSelection());
+
+    act(() => result.current.restore("/music/last.wav"));
+    expect(seekMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.select(
+        { id: "/music/last.wav", name: "last.wav", kind: "playable" },
+        42_500,
+      );
+    });
+
+    expect(playMock).toHaveBeenCalledWith("/music/last.wav");
+    expect(seekMock).toHaveBeenCalledWith(42_500);
+    expect(playMock.mock.invocationCallOrder[0]).toBeLessThan(
+      seekMock.mock.invocationCallOrder[0],
+    );
   });
 
   it("ignores a stale play failure after a newer selection succeeds", async () => {

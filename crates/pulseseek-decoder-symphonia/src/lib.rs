@@ -25,6 +25,7 @@ struct SymphoniaDecoder {
     codec_name: &'static str,
     sample_buf: SampleBuffer<f32>,
     pending_samples: VecDeque<f32>,
+    discard_until_ts: Option<u64>,
 }
 
 impl SymphoniaDecoder {
@@ -107,6 +108,7 @@ impl SymphoniaDecoder {
             codec_name,
             sample_buf,
             pending_samples: VecDeque::new(),
+            discard_until_ts: None,
         })
     }
 }
@@ -179,12 +181,23 @@ impl Decoder for SymphoniaDecoder {
             self.sample_buf.copy_interleaved_ref(decoded);
 
             let samples = self.sample_buf.samples();
-            let to_copy = samples.len().min(buf.len() - total_written);
-            buf[total_written..total_written + to_copy].copy_from_slice(&samples[..to_copy]);
+            let sample_offset = self
+                .discard_until_ts
+                .map(|required_ts| required_ts.saturating_sub(packet.ts()) as usize)
+                .unwrap_or(0)
+                .saturating_mul(self.channels as usize)
+                .min(samples.len());
+            if sample_offset < samples.len() {
+                self.discard_until_ts = None;
+            }
+            let audible_samples = &samples[sample_offset..];
+            let to_copy = audible_samples.len().min(buf.len() - total_written);
+            buf[total_written..total_written + to_copy]
+                .copy_from_slice(&audible_samples[..to_copy]);
             total_written += to_copy;
 
-            if to_copy < samples.len() {
-                self.pending_samples.extend(samples[to_copy..].iter().copied());
+            if to_copy < audible_samples.len() {
+                self.pending_samples.extend(audible_samples[to_copy..].iter().copied());
                 break;
             }
         }
@@ -197,7 +210,8 @@ impl Decoder for SymphoniaDecoder {
         let seconds = total_ms / 1000;
         let frac = (total_ms % 1000) as f64 / 1000.0;
 
-        self.format
+        let seeked_to = self
+            .format
             .seek(
                 SeekMode::Accurate,
                 SeekTo::Time { time: Time { seconds, frac }, track_id: Some(self.track_id) },
@@ -207,6 +221,8 @@ impl Decoder for SymphoniaDecoder {
             })?;
 
         self.pending_samples.clear();
+        self.decoder.reset();
+        self.discard_until_ts = Some(seeked_to.required_ts);
 
         Ok(target.position())
     }

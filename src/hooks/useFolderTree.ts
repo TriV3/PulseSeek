@@ -157,14 +157,22 @@ export function folderTreeReducer(
           ...discoveredFolderStates,
           [action.path]: {
             ...current,
-            children: [...childrenById.values()],
+            children: [...childrenById.values()].sort((left, right) =>
+              left.name.localeCompare(right.name, undefined, {
+                sensitivity: "base",
+              }),
+            ),
             isLoading: !(action.foldersDone ?? action.done),
             expanded: true,
           },
         },
         playableEntries: {
           ...state.playableEntries,
-          [action.path]: [...playableById.values()],
+          [action.path]: [...playableById.values()].sort((left, right) =>
+            left.name.localeCompare(right.name, undefined, {
+              sensitivity: "base",
+            }),
+          ),
         },
         status: action.done
           ? state.status === "error"
@@ -491,44 +499,44 @@ export function useFolderTree(): UseFolderTreeReturn {
       expandedPaths: ["computer://", ...paths],
     });
     return (async () => {
-      const restoredPaths: string[] = [];
-      for (const path of paths) {
-        try {
-          const sessionId = await startEnumeration(path);
-          const completed = new Promise<void>((resolve) => {
-            SESSION_COMPLETIONS[sessionId] = resolve;
-          });
-          SESSION_PATHS[sessionId] = path;
-          dispatch({ type: "START_ENUMERATING", path, sessionId });
-          const buffered = PENDING_CHUNKS[sessionId];
-          delete PENDING_CHUNKS[sessionId];
-          for (const payload of buffered ?? []) {
-            dispatch({
-              type: "ENUMERATION_CHUNK",
-              path,
-              entries: payload.entries,
-              foldersDone: payload.folders_done ?? payload.done,
-              done: payload.done,
-            });
-            if (payload.done) {
-              delete SESSION_PATHS[sessionId];
-              SESSION_COMPLETIONS[sessionId]?.();
-              delete SESSION_COMPLETIONS[sessionId];
+      // The saved path is already authoritative. Starting every known level
+      // immediately avoids waiting for a full metadata scan of each ancestor
+      // before the final folder (and its last-played file) can appear.
+      const results = await Promise.all(
+        paths.map(async (path) => {
+          try {
+            const sessionId = await startEnumeration(path);
+            SESSION_PATHS[sessionId] = path;
+            dispatch({ type: "START_ENUMERATING", path, sessionId });
+            const buffered = PENDING_CHUNKS[sessionId];
+            delete PENDING_CHUNKS[sessionId];
+            for (const payload of buffered ?? []) {
+              dispatch({
+                type: "ENUMERATION_CHUNK",
+                path,
+                entries: payload.entries,
+                foldersDone: payload.folders_done ?? payload.done,
+                done: payload.done,
+              });
+              if (payload.done) delete SESSION_PATHS[sessionId];
             }
+            return true;
+          } catch {
+            return false;
           }
-          await completed;
-          restoredPaths.push(path);
-        } catch {
-          const fallback = restoredPaths.at(-1) ?? "computer://";
-          dispatch({
-            type: "RESTORE_CONTEXT",
-            selectedPath: fallback,
-            expandedPaths: ["computer://", ...restoredPaths],
-          });
-          return fallback;
-        }
-      }
-      return selectedPath;
+        }),
+      );
+      const firstFailure = results.findIndex((result) => !result);
+      if (firstFailure === -1) return selectedPath;
+
+      const restoredPaths = paths.slice(0, firstFailure);
+      const fallback = restoredPaths.at(-1) ?? "computer://";
+      dispatch({
+        type: "RESTORE_CONTEXT",
+        selectedPath: fallback,
+        expandedPaths: ["computer://", ...restoredPaths],
+      });
+      return fallback;
     })();
   }, []);
 

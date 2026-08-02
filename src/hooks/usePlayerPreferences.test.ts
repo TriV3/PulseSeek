@@ -22,13 +22,15 @@ beforeEach(() => {
 });
 
 describe("usePlayerPreferences", () => {
-  it("loads saved options without transport or seek state", async () => {
+  it("loads the saved track position without restoring transport state", async () => {
     api.load.mockResolvedValueOnce({
       ...DEFAULT_PLAYER_PREFERENCES,
       playback_mode: "sequential",
       volume: 0.42,
       selected_folder_path: "/music/album",
       last_played_file_path: "/music/album/track.wav",
+      last_played_position_ms: 42_500,
+      last_played_duration_ms: 180_000,
     });
     const { result } = renderHook(() => usePlayerPreferences());
 
@@ -38,8 +40,9 @@ describe("usePlayerPreferences", () => {
       playback_mode: "sequential",
       volume: 0.42,
       last_played_file_path: "/music/album/track.wav",
+      last_played_position_ms: 42_500,
+      last_played_duration_ms: 180_000,
     });
-    expect(result.current.preferences).not.toHaveProperty("position_ms");
     expect(result.current.preferences).not.toHaveProperty("transport_state");
   });
 

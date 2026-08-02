@@ -226,10 +226,13 @@ export function usePlaybackTransport({
       return Promise.resolve();
     },
     handleSeek: async (nextPositionMs: number) => {
-      await runCommand(async () => {
+      let confirmedPosition: number | null = null;
+      const succeeded = await runCommand(async () => {
         const actual = await seek(nextPositionMs);
         setPositionMs(actual);
+        confirmedPosition = actual;
       });
+      return succeeded ? confirmedPosition : null;
     },
     handleVolume: async (nextVolume: number) => {
       const bounded = Math.max(0, Math.min(1, nextVolume));
@@ -262,6 +265,15 @@ export function usePlaybackTransport({
       setVolumeState(bounded);
       setMuted(nextMuted);
       await runCommand(() => setVolume(bounded, nextMuted));
+    },
+    restorePosition: (
+      entryId: string,
+      nextPositionMs: number,
+      nextDurationMs: number | null,
+    ) => {
+      setPositionEntryId(entryId);
+      setPositionMs(nextPositionMs);
+      setDurationMs(nextDurationMs);
     },
   };
 }

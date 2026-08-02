@@ -114,6 +114,8 @@ export interface PlayerPreferences {
   selected_folder_path: string | null;
   expanded_folder_paths: string[];
   last_played_file_path: string | null;
+  last_played_position_ms: number;
+  last_played_duration_ms: number | null;
   theme: ThemePreference;
   waveform_style: WaveformStyle;
 }
@@ -144,6 +146,13 @@ function isPlayerPreferences(value: unknown): value is PlayerPreferences {
     candidate.expanded_folder_paths.every((path) => typeof path === "string") &&
     (candidate.last_played_file_path === null ||
       typeof candidate.last_played_file_path === "string") &&
+    typeof candidate.last_played_position_ms === "number" &&
+    Number.isSafeInteger(candidate.last_played_position_ms) &&
+    candidate.last_played_position_ms >= 0 &&
+    (candidate.last_played_duration_ms === null ||
+      (typeof candidate.last_played_duration_ms === "number" &&
+        Number.isSafeInteger(candidate.last_played_duration_ms) &&
+        candidate.last_played_duration_ms >= 0)) &&
     ["system", "light", "dark", "midnight", "high-contrast"].includes(
       String(candidate.theme),
     ) &&

@@ -213,3 +213,34 @@ fn preview_returns_audio_names_without_decoding_content() {
     assert!(entries.iter().any(|entry| entry.name() == "Samples"));
     assert!(entries.iter().any(|entry| entry.name() == "large.wav"));
 }
+
+#[test]
+fn streamed_preview_emits_small_batches_without_waiting_for_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("Samples")).unwrap();
+    std::fs::write(dir.path().join("first.mp3"), b"not decoded").unwrap();
+    std::fs::write(dir.path().join("second.wav"), b"not decoded").unwrap();
+
+    let mut chunks = Vec::new();
+    NativeFolderReader
+        .stream_folder_preview(
+            dir.path(),
+            false,
+            2,
+            || false,
+            |entries| {
+                chunks.push(entries.to_vec());
+            },
+        )
+        .unwrap();
+
+    assert_eq!(chunks.len(), 2);
+    assert!(chunks.iter().all(|chunk| chunk.len() <= 2));
+    let names: Vec<&str> = chunks.iter().flatten().map(|entry| entry.name()).collect();
+    assert!(names.contains(&"Samples"));
+    assert!(names.contains(&"first.mp3"));
+    assert!(names.contains(&"second.wav"));
+    assert!(chunks.iter().flatten().all(
+        |entry| !matches!(entry, BrowserEntry::PlayableFile(file) if file.metadata.is_some())
+    ));
+}

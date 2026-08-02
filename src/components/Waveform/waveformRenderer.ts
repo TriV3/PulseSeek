@@ -205,7 +205,7 @@ export function drawEnvelope(
   if (geometry.playheadX !== null) {
     ctx.strokeStyle = tokens.playhead;
     ctx.lineWidth = 1;
-    ctx.setLineDash([4, 3]);
+    ctx.setLineDash([]);
     ctx.beginPath();
     ctx.moveTo(geometry.playheadX, 0);
     ctx.lineTo(geometry.playheadX, heightPx);
@@ -290,7 +290,7 @@ export function resolveTokens(
     wave: read("--wave", DEFAULT_TOKENS.wave),
     waveGrid: read("--wave-grid", DEFAULT_TOKENS.waveGrid),
     waveSoft: read("--wave-soft", DEFAULT_TOKENS.waveSoft),
-    playhead: read("--wave-playhead", DEFAULT_TOKENS.playhead),
+    playhead: read("--wave-seek-current", DEFAULT_TOKENS.playhead),
   };
 }
 
@@ -314,5 +314,5 @@ export function positionMsForX(
   if (!Number.isFinite(xPx) || !Number.isFinite(widthPx) || widthPx <= 0) {
     return null;
   }
-  return clamp((xPx / widthPx) * durationMs, 0, durationMs);
+  return Math.round(clamp((xPx / widthPx) * durationMs, 0, durationMs));
 }

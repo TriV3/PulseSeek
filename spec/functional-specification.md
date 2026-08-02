@@ -180,8 +180,10 @@ Priorities:
   selected browser folder, expanded folders, and the last played file.
 - **FR-AU-016 (P0):** Restoring the last played file shall reveal and select it
   in the browser without starting playback.
-- **FR-AU-017 (P0):** Playback state and seek position shall remain ephemeral;
-  PulseSeek shall always start stopped at position zero.
+- **FR-AU-017 (P0):** Playback state shall remain ephemeral, while the last
+  confirmed position shall be persisted. PulseSeek shall start stopped with
+  the last file selected and its playhead restored, then resume from that
+  position only when the user starts playback.
 - **FR-AU-018 (P0):** Missing files, folders, volumes, or output devices in
   saved preferences shall fall back safely without blocking startup.
 

@@ -15,7 +15,6 @@ interface PlayerTransportProps {
   onStop: () => void | Promise<void>;
   onPrevious: () => void | Promise<void>;
   onNext: () => void | Promise<void>;
-  onSeek: (positionMs: number) => void | Promise<void>;
   onVolume: (volume: number) => void | Promise<void>;
   onToggleMute: () => void | Promise<void>;
 }
@@ -41,12 +40,10 @@ export function PlayerTransport({
   onStop,
   onPrevious,
   onNext,
-  onSeek,
   onVolume,
   onToggleMute,
 }: PlayerTransportProps) {
   const playLabel = status === "playing" ? "Pause" : "Play";
-  const seekMaximum = durationMs ?? 0;
   return (
     <section className="player-transport" aria-label="Player transport">
       <div className="player-transport-buttons">
@@ -88,17 +85,7 @@ export function PlayerTransport({
         </button>
       </div>
       <div className="player-transport-position">
-        <label htmlFor="playback-position">Playback position</label>
-        <input
-          id="playback-position"
-          type="range"
-          min={0}
-          max={seekMaximum}
-          value={Math.min(positionMs, seekMaximum)}
-          disabled={durationMs === null}
-          onChange={(event) => void onSeek(Number(event.target.value))}
-        />
-        <output>
+        <output aria-label="Playback position">
           {formatTime(positionMs)} / {formatTime(durationMs)}
         </output>
       </div>

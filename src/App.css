@@ -103,6 +103,67 @@ input {
   display: block;
   width: 100%;
   height: 100%;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.waveform-interaction {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.waveform-hover-marker {
+  position: absolute;
+  inset-block: 0;
+  width: 0;
+  pointer-events: none;
+  border-inline-start: 1px dashed var(--wave-seek-hover);
+}
+
+.waveform-current-marker {
+  position: absolute;
+  inset-block: 0;
+  width: 1px;
+  pointer-events: none;
+  background: var(--wave-seek-current);
+  transition: left 50ms linear;
+}
+
+.waveform-time {
+  position: absolute;
+  z-index: 1;
+  top: 5px;
+  transform: translateX(-50%);
+  padding: 1px 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+  pointer-events: none;
+  color: var(--text-strong);
+  background: var(--bg-surface);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+  white-space: nowrap;
+  transition: left 50ms linear;
+}
+
+.waveform-time--hover {
+  top: 20px;
+  color: var(--wave-time-hover);
+  border-color: var(--wave-time-hover);
+}
+
+.waveform-time--current {
+  color: var(--wave-time-current);
+  border-color: var(--wave-time-current);
+}
+
+.waveform-time[hidden],
+.waveform-hover-marker[hidden],
+.waveform-current-marker[hidden] {
+  display: none;
 }
 
 .waveform-error {

@@ -13,6 +13,9 @@ export interface WaveformPanelProps {
   entryName: string;
   /** Duration of the selected file, or null when unknown. */
   durationMs: number | null;
+  /** Saved position shown before playback starts, without autoplay. */
+  restoredPositionMs?: number;
+  resetRevision?: number;
   /** Seeks playback to a millisecond position (confirmed by the backend). */
   onSeek?: (positionMs: number) => void | Promise<void>;
   /** Renderer style for the envelope. */
@@ -37,6 +40,8 @@ export function WaveformPanel({
   entryPath,
   entryName,
   durationMs,
+  restoredPositionMs = 0,
+  resetRevision = 0,
   onSeek,
   style = "outline",
 }: WaveformPanelProps) {
@@ -67,6 +72,8 @@ export function WaveformPanel({
           <WaveformCanvas
             waveform={waveform}
             durationMs={durationMs}
+            restoredPositionMs={restoredPositionMs}
+            resetRevision={resetRevision}
             onRequestRefetch={setTargetPeaks}
             onSeek={onSeek}
             style={style}
