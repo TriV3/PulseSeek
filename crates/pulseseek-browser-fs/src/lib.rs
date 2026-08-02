@@ -55,13 +55,14 @@ impl NativeFolderReader {
         Ok(entries)
     }
 
-    /// Streams a lightweight folder preview in small batches. Unlike
-    /// [`Self::read_folder_preview`], this does not wait for the complete
-    /// directory listing before making the first entries available.
+    /// Streams folder names in small batches without opening files. Files are
+    /// intentionally omitted: only the decoder verification pass may expose
+    /// a playable file, so a non-audio file with an audio-looking extension
+    /// can never flash in the File List.
     pub fn stream_folder_preview(
         &self,
         path: &Path,
-        show_unsupported: bool,
+        _show_unsupported: bool,
         batch_size: usize,
         is_cancelled: impl Fn() -> bool,
         mut on_chunk: impl FnMut(&[BrowserEntry]),
@@ -78,21 +79,13 @@ impl NativeFolderReader {
             let entry = entry.map_err(|e| FolderReadError::from_io_error(e, path))?;
             let file_type =
                 entry.file_type().map_err(|e| FolderReadError::from_io_error(e, &entry.path()))?;
-            let name = entry.file_name().to_string_lossy().to_string();
-            let path_string = entry.path().to_string_lossy().to_string();
-            let id = EntryId::new(&path_string);
-            let browser_entry = if file_type.is_dir() {
-                Some(BrowserEntry::Folder(FolderEntry { id, name }))
-            } else if likely_supported_audio(&entry.path()) {
-                Some(BrowserEntry::PlayableFile(PlayableFileEntry { id, name, metadata: None }))
-            } else if show_unsupported {
-                Some(BrowserEntry::UnsupportedFile(UnsupportedFileEntry { id, name }))
-            } else {
-                None
-            };
-
-            if let Some(browser_entry) = browser_entry {
-                entries.push(browser_entry);
+            if file_type.is_dir() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let path_string = entry.path().to_string_lossy().to_string();
+                entries.push(BrowserEntry::Folder(FolderEntry {
+                    id: EntryId::new(&path_string),
+                    name,
+                }));
             }
             if entries.len() == batch_size {
                 entries.sort();
@@ -142,7 +135,13 @@ impl NativeFolderReader {
                 BrowserEntry::Folder(FolderEntry { id: EntryId::new(&path_str), name: name_str })
             } else {
                 let id = EntryId::new(&path_str);
-                if let Ok(mut decoder) = DecoderRegistry::open(entry.path()) {
+                if !likely_supported_audio(&entry.path()) {
+                    if show_unsupported {
+                        BrowserEntry::UnsupportedFile(UnsupportedFileEntry { id, name: name_str })
+                    } else {
+                        continue;
+                    }
+                } else if let Ok(mut decoder) = DecoderRegistry::open(entry.path()) {
                     let stream_metadata = decoder.metadata().ok();
                     let file_metadata = entry.metadata().ok();
                     let metadata = playable_file_metadata(stream_metadata, file_metadata.as_ref());

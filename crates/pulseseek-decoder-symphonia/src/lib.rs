@@ -29,15 +29,17 @@ struct SymphoniaDecoder {
 }
 
 impl SymphoniaDecoder {
-    fn open(path: impl AsRef<Path>, extension: &str) -> Result<Self, DecodeError> {
+    fn open(path: impl AsRef<Path>, _extension: &str) -> Result<Self, DecodeError> {
         let file = std::fs::File::open(path.as_ref()).map_err(|e| {
             DecodeError::new(DiagnosticContext::new(DiagnosticCode::BrowserRead), e)
         })?;
 
         let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
-        let mut hint = Hint::new();
-        hint.with_extension(extension);
+        // Do not force a format from the filename extension. The browser
+        // relies on this probe to distinguish actual audio from installers or
+        // disk images that happen to use a misleading name.
+        let hint = Hint::new();
 
         let probed = symphonia::default::get_probe()
             .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())

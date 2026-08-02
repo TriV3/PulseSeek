@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { moveToTrash } from "../../api/commandEnvelope";
 import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
@@ -10,6 +10,7 @@ import {
   type FileSort,
   type FileSortField,
 } from "./fileSort";
+import { FORMAT_OPTIONS, type AudioFileFormat } from "./fileFilter";
 import "./FileList.css";
 import "../ConfirmDialog/ConfirmDialog.css";
 
@@ -90,6 +91,10 @@ interface FileListProps {
   searchQuery?: string;
   /** Called whenever the user changes the search query. */
   onSearchQueryChange?: (query: string) => void;
+  /** Active decoded-format filters; empty when every format is shown. */
+  formatFilter?: AudioFileFormat[];
+  /** Called whenever the user changes the format filter selection. */
+  onFormatFilterChange?: (formats: AudioFileFormat[]) => void;
   /** Called when a matched folder row is activated for navigation. */
   onSelectFolder?: (path: string) => void;
 }
@@ -119,6 +124,8 @@ export function FileList({
   onSortChange,
   searchQuery = "",
   onSearchQueryChange,
+  formatFilter = [],
+  onFormatFilterChange,
   onSelectFolder,
 }: FileListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -130,6 +137,30 @@ export function FileList({
   );
   const [trashError, setTrashError] = useState<string | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
+
+  // Only folders and confirmed playable files may be listed. Unsupported or
+  // inaccessible entries must never render, even if a stale backend still
+  // streams them (FR-BR-004).
+  const visibleEntries = useMemo(
+    () =>
+      entries.filter(
+        (entry) => entry.kind === "folder" || entry.kind === "playable",
+      ),
+    [entries],
+  );
+
+  const toggleFormat = (format: AudioFileFormat) => {
+    if (!onFormatFilterChange) return;
+    const next = formatFilter.includes(format)
+      ? formatFilter.filter((active) => active !== format)
+      : [...formatFilter, format];
+    onFormatFilterChange(next);
+  };
+
+  const resetFormats = () => {
+    if (!onFormatFilterChange) return;
+    onFormatFilterChange([]);
+  };
 
   const requestSort = (field: FileSortField) => {
     if (!onSortChange) return;
@@ -150,12 +181,12 @@ export function FileList({
   useEffect(() => {
     if (
       playbackEntryId &&
-      entries.some((entry) => entry.id === playbackEntryId)
+      visibleEntries.some((entry) => entry.id === playbackEntryId)
     ) {
       setSelectedEntryId(playbackEntryId);
       setActiveEntryId(playbackEntryId);
     }
-  }, [entries, playbackEntryId]);
+  }, [playbackEntryId, visibleEntries]);
 
   const selectEntry = (entry: BrowserEntry) => {
     setSelectedEntryId(entry.id);
@@ -195,36 +226,36 @@ export function FileList({
 
   useKeyboardShortcuts({
     onMoveToTrash: () => {
-      const selected = entries.find(
+      const selected = visibleEntries.find(
         (entry) => entry.id === selectedEntryIdForFolder,
       );
       if (selected) requestTrash(selected);
     },
   });
 
-  const selectedEntryIdForFolder = entries.some(
+  const selectedEntryIdForFolder = visibleEntries.some(
     (entry) => entry.id === selectedEntryId,
   )
     ? selectedEntryId
     : null;
-  const activeEntryIdForFolder = entries.some(
+  const activeEntryIdForFolder = visibleEntries.some(
     (entry) => entry.id === activeEntryId,
   )
     ? activeEntryId
-    : (entries[0]?.id ?? null);
+    : (visibleEntries[0]?.id ?? null);
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
-    count: entries.length,
+    count: visibleEntries.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 32,
     overscan: 10,
   });
 
   const focusEntry = (index: number) => {
-    if (entries.length === 0) return;
-    const nextIndex = Math.max(0, Math.min(index, entries.length - 1));
-    const nextEntry = entries[nextIndex];
+    if (visibleEntries.length === 0) return;
+    const nextIndex = Math.max(0, Math.min(index, visibleEntries.length - 1));
+    const nextEntry = visibleEntries[nextIndex];
     setActiveEntryId(nextEntry.id);
     virtualizer.scrollToIndex(nextIndex, { align: "auto" });
     window.setTimeout(() => rowRefs.current.get(nextEntry.id)?.focus(), 0);
@@ -255,7 +286,7 @@ export function FileList({
         <button
           type="button"
           onClick={() => {
-            const selected = entries.find(
+            const selected = visibleEntries.find(
               (entry) => entry.id === selectedEntryIdForFolder,
             );
             if (selected) requestTrash(selected);
@@ -272,6 +303,27 @@ export function FileList({
           value={searchQuery}
           onChange={(event) => onSearchQueryChange?.(event.target.value)}
         />
+        <fieldset className="file-list-format-filter">
+          <legend className="visually-hidden">Filter by format</legend>
+          {FORMAT_OPTIONS.map((option) => (
+            <label key={option.value} className="file-list-format-option">
+              <input
+                type="checkbox"
+                checked={formatFilter.includes(option.value)}
+                onChange={() => toggleFormat(option.value)}
+              />
+              <span>{option.label}</span>
+            </label>
+          ))}
+          <button
+            type="button"
+            aria-label="Reset format filter"
+            onClick={resetFormats}
+            disabled={formatFilter.length === 0}
+          >
+            Reset
+          </button>
+        </fieldset>
         {trashStatus === "moving" ? (
           <span role="status" aria-live="polite">
             Moving to Trash…
@@ -290,16 +342,20 @@ export function FileList({
             {error}
           </p>
         </div>
-      ) : isLoading && entries.length === 0 ? (
+      ) : isLoading && visibleEntries.length === 0 ? (
         <div className="file-list-state file-list-state--loading">
           <p className="file-list-placeholder">Loading&#8230;</p>
         </div>
-      ) : entries.length === 0 ? (
+      ) : visibleEntries.length === 0 ? (
         <div className="file-list-state file-list-state--empty">
           <p className="file-list-placeholder">
-            {searchQuery.trim() === ""
+            {searchQuery.trim() === "" && formatFilter.length === 0
               ? "(no playable files)"
-              : `(no files match “${searchQuery.trim()}”)`}
+              : searchQuery.trim() !== "" && formatFilter.length > 0
+                ? `(no files match “${searchQuery.trim()}” or the format filter)`
+                : searchQuery.trim() !== ""
+                  ? `(no files match “${searchQuery.trim()}”)`
+                  : "(no files match the format filter)"}
           </p>
         </div>
       ) : (
@@ -309,7 +365,7 @@ export function FileList({
           role="grid"
           aria-label="Playable files"
           aria-colcount={9}
-          aria-rowcount={entries.length + 1}
+          aria-rowcount={visibleEntries.length + 1}
         >
           <div className="file-list-header" role="row">
             {SORTABLE_HEADERS.map((header) => {
@@ -350,7 +406,7 @@ export function FileList({
             style={{ height: `${virtualizer.getTotalSize()}px` }}
           >
             {virtualizer.getVirtualItems().map((virtualRow) => {
-              const entry = entries[virtualRow.index];
+              const entry = visibleEntries[virtualRow.index];
 
               if (entry.kind === "folder") {
                 return (
@@ -385,7 +441,7 @@ export function FileList({
                       }
                       if (event.key === "End") {
                         event.preventDefault();
-                        focusEntry(entries.length - 1);
+                        focusEntry(visibleEntries.length - 1);
                         return;
                       }
                       if (event.key === "Enter" || event.key === " ") {
@@ -540,7 +596,7 @@ export function FileList({
       )}
       {playbackError &&
       playbackEntryId &&
-      entries.some((entry) => entry.id === playbackEntryId) ? (
+      visibleEntries.some((entry) => entry.id === playbackEntryId) ? (
         <p
           className="file-list-playback-error"
           id="file-list-playback-error"

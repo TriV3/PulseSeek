@@ -5,6 +5,11 @@ import { FileList } from "./FileList";
 import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
 import { sortFileEntries, type FileSort } from "./fileSort";
 import { filterFileEntries } from "./fileSearch";
+import {
+  FORMAT_OPTIONS,
+  filterByFormat,
+  type AudioFileFormat,
+} from "./fileFilter";
 
 const mockMoveToTrash = vi.hoisted(() => vi.fn());
 
@@ -1069,5 +1074,318 @@ describe("FileList — folder search", () => {
 
     expect(screen.getByText("drum-loop.mp3")).toBeInTheDocument();
     expect(screen.queryByText("fat-kick.wav")).not.toBeInTheDocument();
+  });
+});
+
+describe("FileList — format filter", () => {
+  const formatEntries: BrowserEntry[] = [
+    {
+      id: "loop.mp3",
+      name: "loop.mp3",
+      kind: "playable",
+      metadata: {
+        duration_ms: null,
+        size_bytes: null,
+        modified_at_ms: null,
+        channels: null,
+        sample_rate: null,
+        bit_depth: null,
+        codec: "MP3",
+      },
+    },
+    {
+      id: "kick.wav",
+      name: "kick.wav",
+      kind: "playable",
+      metadata: {
+        duration_ms: null,
+        size_bytes: null,
+        modified_at_ms: null,
+        channels: null,
+        sample_rate: null,
+        bit_depth: null,
+        codec: "PCM",
+      },
+    },
+    {
+      id: "kit.flac",
+      name: "kit.flac",
+      kind: "playable",
+      metadata: {
+        duration_ms: null,
+        size_bytes: null,
+        modified_at_ms: null,
+        channels: null,
+        sample_rate: null,
+        bit_depth: null,
+        codec: "FLAC",
+      },
+    },
+  ];
+
+  it("renders an accessible format filter with every format option", () => {
+    render(
+      <FileList
+        entries={formatEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        formatFilter={[]}
+        onFormatFilterChange={() => undefined}
+      />,
+    );
+
+    for (const option of FORMAT_OPTIONS) {
+      expect(
+        screen.getByRole("checkbox", { name: option.label }),
+      ).toBeInTheDocument();
+    }
+    expect(
+      screen.getByRole("button", { name: "Reset format filter" }),
+    ).toBeInTheDocument();
+  });
+
+  it("emits a format selection through onFormatFilterChange", () => {
+    const onFormatFilterChange = vi.fn();
+    render(
+      <FileList
+        entries={formatEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        formatFilter={[]}
+        onFormatFilterChange={onFormatFilterChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "MP3" }));
+
+    expect(onFormatFilterChange).toHaveBeenCalledWith(["mp3"]);
+  });
+
+  it("unselecting a checked format removes it from the selection", () => {
+    const onFormatFilterChange = vi.fn();
+    render(
+      <FileList
+        entries={formatEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        formatFilter={["mp3", "flac"]}
+        onFormatFilterChange={onFormatFilterChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "MP3" }));
+
+    expect(onFormatFilterChange).toHaveBeenCalledWith(["flac"]);
+  });
+
+  it("reset emits an empty format list", () => {
+    const onFormatFilterChange = vi.fn();
+    render(
+      <FileList
+        entries={formatEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        formatFilter={["mp3", "flac"]}
+        onFormatFilterChange={onFormatFilterChange}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Reset format filter" }),
+    );
+
+    expect(onFormatFilterChange).toHaveBeenCalledWith([]);
+  });
+
+  it("reset is disabled while no format filter is active", () => {
+    render(
+      <FileList
+        entries={formatEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        formatFilter={[]}
+        onFormatFilterChange={() => undefined}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Reset format filter" }),
+    ).toBeDisabled();
+  });
+
+  it("shows a distinct message when the format filter matches nothing", () => {
+    render(
+      <FileList
+        entries={[]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        formatFilter={["mp3"]}
+        onFormatFilterChange={() => undefined}
+      />,
+    );
+
+    expect(
+      screen.getByText("(no files match the format filter)"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the filter controls visible when the format filter matches nothing", () => {
+    render(
+      <FileList
+        entries={[]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        formatFilter={["mp3"]}
+        onFormatFilterChange={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole("checkbox", { name: "MP3" })).toBeInTheDocument();
+    expect(
+      screen.getByText("(no files match the format filter)"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the selection when the format filter changes", () => {
+    function FormatHarness() {
+      const [formats, setFormats] = useState<AudioFileFormat[]>([]);
+      const entries = useMemo(
+        () => filterByFormat(formatEntries, formats),
+        [formats],
+      );
+      return (
+        <FileList
+          entries={entries}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+          formatFilter={formats}
+          onFormatFilterChange={setFormats}
+        />
+      );
+    }
+
+    render(<FormatHarness />);
+
+    fireEvent.click(screen.getByText("kick.wav"));
+    expect(screen.getByRole("row", { name: /kick\.wav/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    // Filter to PCM only: the selected WAV row stays visible and selected.
+    fireEvent.click(screen.getByRole("checkbox", { name: "WAV/PCM" }));
+    expect(screen.getByRole("row", { name: /kick\.wav/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.queryByText("loop.mp3")).not.toBeInTheDocument();
+
+    // Clear the filter again: selection is retained.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Reset format filter" }),
+    );
+    expect(screen.getByRole("row", { name: /kick\.wav/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("keeps folder rows visible while the format filter is active", () => {
+    const entries: BrowserEntry[] = [
+      {
+        id: "/music/drum-kits",
+        name: "drum-kits",
+        kind: "folder",
+        metadata: null,
+      },
+      ...formatEntries,
+    ];
+
+    render(
+      <FileList
+        entries={filterByFormat(entries, ["mp3"])}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        formatFilter={["mp3"]}
+        onFormatFilterChange={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole("row", { name: /drum-kits/ })).toBeInTheDocument();
+    expect(screen.getByText("loop.mp3")).toBeInTheDocument();
+    expect(screen.queryByText("kick.wav")).not.toBeInTheDocument();
+  });
+});
+
+describe("FileList — hides non-playable entries", () => {
+  it("never renders unsupported or inaccessible entries", () => {
+    const entries: BrowserEntry[] = [
+      { id: "song.wav", name: "song.wav", kind: "playable" },
+      {
+        id: "/music/kits",
+        name: "kits",
+        kind: "folder",
+        metadata: null,
+      },
+      {
+        id: "setup.msi",
+        name: "setup.msi",
+        kind: "unsupported",
+        metadata: null,
+      },
+      {
+        id: "broken.log",
+        name: "broken.log",
+        kind: "inaccessible",
+        metadata: null,
+      },
+    ];
+
+    render(
+      <FileList
+        entries={entries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    expect(screen.getByText("song.wav")).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /kits/ })).toBeInTheDocument();
+    expect(screen.queryByText("setup.msi")).not.toBeInTheDocument();
+    expect(screen.queryByText("broken.log")).not.toBeInTheDocument();
+  });
+
+  it("excludes hidden entries from the accessible row count", () => {
+    const entries: BrowserEntry[] = [
+      { id: "song.wav", name: "song.wav", kind: "playable" },
+      {
+        id: "setup.msi",
+        name: "setup.msi",
+        kind: "unsupported",
+        metadata: null,
+      },
+    ];
+
+    render(
+      <FileList
+        entries={entries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    const grid = screen.getByRole("grid", { name: "Playable files" });
+    expect(grid).toHaveAttribute("aria-rowcount", "2");
   });
 });

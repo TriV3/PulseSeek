@@ -1,7 +1,10 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use super::*;
-use crate::playback_events::{FakeEventEmitter, FolderChunkPayload, EVENT_FOLDER_CHUNK};
+use crate::playback_events::{
+    BrowserEntryData, FakeEventEmitter, FolderChunkPayload, EVENT_FOLDER_CHUNK,
+};
 use pulseseek_domain::error::ErrorContract;
 
 #[test]
@@ -86,6 +89,134 @@ fn native_service_rejects_a_missing_saved_folder_before_starting_a_worker() {
         .expect_err("missing saved folder must fail synchronously");
 
     assert_eq!(error.user_descriptor().category(), ErrorCategory::InvalidInput);
+}
+
+fn folder_chunk_entries(events: &Arc<FakeEventEmitter>) -> Vec<BrowserEntryData> {
+    let mut entries = Vec::new();
+    for envelope in events.recorded_events() {
+        if envelope.event != EVENT_FOLDER_CHUNK {
+            continue;
+        }
+        let payload: FolderChunkPayload =
+            serde_json::from_value(envelope.payload.clone()).expect("folder chunk payload");
+        entries.extend(payload.entries);
+    }
+    entries
+}
+
+fn wait_for_enumeration_done(events: &Arc<FakeEventEmitter>) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        let done = events.recorded_events().iter().any(|envelope| {
+            if envelope.event != EVENT_FOLDER_CHUNK {
+                return false;
+            }
+            let payload: FolderChunkPayload =
+                serde_json::from_value(envelope.payload.clone()).expect("folder chunk payload");
+            payload.done
+        });
+        if done {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("folder enumeration did not finish within the timeout");
+}
+
+fn create_mixed_folder() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    std::fs::write(
+        dir.path().join("real.wav"),
+        include_bytes!(
+            "../../../crates/pulseseek-decoder-symphonia/tests/fixtures/silent-stereo-44100.wav"
+        ),
+    )
+    .expect("write WAV fixture");
+    std::fs::write(
+        dir.path().join("setup.msi"),
+        vec![0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, 0, 0, 0, 0],
+    )
+    .expect("write MSI file");
+    std::fs::write(dir.path().join("disk.dmg"), b"not-an-audio-file").expect("write DMG file");
+    std::fs::write(dir.path().join("notes.txt"), b"notes").expect("write text file");
+    std::fs::write(dir.path().join("misleading.wav"), b"not-a-wave-file")
+        .expect("write misleading WAV file");
+    dir
+}
+
+#[test]
+fn native_enumeration_omits_non_audio_files_by_default() {
+    let dir = create_mixed_folder();
+    let events = Arc::new(FakeEventEmitter::new());
+    let active = ActiveEnumerations::new();
+    let mut service = NativeFolderEnumerationService::new();
+
+    service
+        .start_enumeration(
+            &dir.path().to_string_lossy(),
+            50,
+            false,
+            &active,
+            events.clone() as Arc<dyn PlaybackEventEmitter>,
+        )
+        .expect("start enumeration");
+    wait_for_enumeration_done(&events);
+
+    let entries = folder_chunk_entries(&events);
+    assert!(
+        entries.iter().any(|entry| entry.kind == "playable"),
+        "audio files should still be emitted",
+    );
+    assert!(
+        entries.iter().all(|entry| entry.kind != "unsupported"),
+        "non-audio files must not be emitted without an explicit reveal request: {:?}",
+        entries.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|entry| entry.kind == "playable")
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["real.wav"],
+        "only decoder-validated audio files may be marked playable",
+    );
+    assert!(
+        entries.iter().all(|entry| entry.name != "misleading.wav"),
+        "a file that merely has an audio extension must not be listed before decoder validation",
+    );
+}
+
+#[test]
+fn native_enumeration_emits_unsupported_files_when_requested() {
+    let dir = create_mixed_folder();
+    let events = Arc::new(FakeEventEmitter::new());
+    let active = ActiveEnumerations::new();
+    let mut service = NativeFolderEnumerationService::new();
+
+    service
+        .start_enumeration(
+            &dir.path().to_string_lossy(),
+            50,
+            true,
+            &active,
+            events.clone() as Arc<dyn PlaybackEventEmitter>,
+        )
+        .expect("start enumeration");
+    wait_for_enumeration_done(&events);
+
+    let entries = folder_chunk_entries(&events);
+    assert!(
+        entries.iter().any(|entry| entry.kind == "unsupported"),
+        "unsupported files should be emitted when explicitly requested",
+    );
+    assert!(
+        entries
+            .iter()
+            .filter(|entry| matches!(entry.name.as_str(), "setup.msi" | "disk.dmg"))
+            .all(|entry| entry.kind == "unsupported"),
+        "disk images and installers must never be classified as playable",
+    );
 }
 
 #[test]
