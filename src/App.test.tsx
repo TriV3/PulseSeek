@@ -47,6 +47,14 @@ describe("application shell", () => {
     expect(screen.getByRole("tab", { name: "File list" })).toBeInTheDocument();
   });
 
+  it("exposes the waveform as a seek slider that is disabled without a file", () => {
+    render(<App />);
+
+    const slider = screen.getByRole("slider", { name: "Waveform seek" });
+    expect(slider).toHaveAttribute("aria-disabled", "true");
+    expect(slider).toHaveAttribute("tabindex", "-1");
+  });
+
   it("lets keyboard users resize both workspace splits", () => {
     render(<App />);
 

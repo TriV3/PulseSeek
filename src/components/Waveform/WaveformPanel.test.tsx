@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { WaveformPanel } from "./WaveformPanel";
 import { getWaveform } from "../../api/waveform";
 import { onPosition } from "../../api/playbackEvents";
@@ -130,5 +130,37 @@ describe("WaveformPanel", () => {
       () => expect(getWaveform).toHaveBeenCalledWith("/music/a.wav", 600),
       { timeout: 2000 },
     );
+  });
+
+  it("forwards canvas seeks to the panel seek handler", async () => {
+    vi.mocked(getWaveform).mockResolvedValue(LEVEL);
+    const onSeek = vi.fn();
+    const { container } = render(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+        onSeek={onSeek}
+      />,
+    );
+    await waitFor(() => expect(getWaveform).toHaveBeenCalled());
+
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 100,
+      bottom: 40,
+      width: 100,
+      height: 40,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.pointerDown(canvas, { clientX: 50, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { pointerId: 1 });
+
+    expect(onSeek).toHaveBeenCalledWith(1000);
   });
 });

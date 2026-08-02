@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   buildEnvelope,
   drawEnvelope,
+  positionMsForX,
   resolveTokens,
   defaultTargetPeaksForWidth,
   type Canvas2D,
@@ -258,5 +259,26 @@ describe("defaultTargetPeaksForWidth", () => {
     expect(defaultTargetPeaksForWidth(Number.NaN)).toBe(1);
     expect(defaultTargetPeaksForWidth(Number.POSITIVE_INFINITY)).toBe(1);
     expect(defaultTargetPeaksForWidth(-5)).toBe(1);
+  });
+});
+
+describe("positionMsForX", () => {
+  it("maps the left edge to zero and the right edge to the duration", () => {
+    expect(positionMsForX(0, 100, 2000)).toBe(0);
+    expect(positionMsForX(100, 100, 2000)).toBe(2000);
+  });
+
+  it("maps the center proportionally", () => {
+    expect(positionMsForX(50, 100, 2000)).toBe(1000);
+  });
+
+  it("clamps coordinates outside the canvas", () => {
+    expect(positionMsForX(-20, 100, 2000)).toBe(0);
+    expect(positionMsForX(500, 100, 2000)).toBe(2000);
+  });
+
+  it("returns null without a known duration or width", () => {
+    expect(positionMsForX(50, 100, null)).toBeNull();
+    expect(positionMsForX(50, 0, 2000)).toBeNull();
   });
 });

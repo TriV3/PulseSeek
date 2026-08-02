@@ -224,3 +224,20 @@ export function defaultTargetPeaksForWidth(widthPx: number): number {
   if (!Number.isFinite(widthPx) || widthPx <= 0) return 1;
   return Math.max(1, Math.ceil(widthPx * 2));
 }
+
+/**
+ * Inverse of `playheadX`: maps a pointer x coordinate to a seek position in
+ * milliseconds. Clamps into `[0, durationMs]` and returns `null` when the
+ * duration or canvas width is unavailable.
+ */
+export function positionMsForX(
+  xPx: number,
+  widthPx: number,
+  durationMs: number | null,
+): number | null {
+  if (durationMs === null || durationMs <= 0) return null;
+  if (!Number.isFinite(xPx) || !Number.isFinite(widthPx) || widthPx <= 0) {
+    return null;
+  }
+  return clamp((xPx / widthPx) * durationMs, 0, durationMs);
+}

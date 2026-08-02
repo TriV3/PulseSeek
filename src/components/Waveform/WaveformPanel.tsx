@@ -10,6 +10,8 @@ export interface WaveformPanelProps {
   entryName: string;
   /** Duration of the selected file, or null when unknown. */
   durationMs: number | null;
+  /** Seeks playback to a millisecond position (confirmed by the backend). */
+  onSeek?: (positionMs: number) => void | Promise<void>;
 }
 
 /**
@@ -30,6 +32,7 @@ export function WaveformPanel({
   entryPath,
   entryName,
   durationMs,
+  onSeek,
 }: WaveformPanelProps) {
   const [targetPeaks, setTargetPeaks] = useState(INITIAL_TARGET_PEAKS);
   const { status, waveform, error } = useWaveform(entryPath, targetPeaks);
@@ -59,6 +62,7 @@ export function WaveformPanel({
             waveform={waveform}
             durationMs={durationMs}
             onRequestRefetch={setTargetPeaks}
+            onSeek={onSeek}
           />
         )}
       </div>
