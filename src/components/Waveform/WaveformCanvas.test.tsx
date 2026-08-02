@@ -38,11 +38,17 @@ function createMockContext() {
     stroke: vi.fn(() => {
       state.strokes += 1;
     }),
+    fill: vi.fn(),
+    closePath: vi.fn(),
     setTransform: vi.fn(),
     setLineDash: vi.fn((segments: number[]) => {
       state.dashes.push(segments.join(","));
     }),
+    createLinearGradient: vi.fn(() => ({
+      addColorStop: vi.fn(),
+    })),
     strokeStyle: "#000",
+    fillStyle: "#000",
     lineWidth: 1,
     lineCap: "butt",
     lineJoin: "miter",
@@ -378,6 +384,35 @@ describe("WaveformCanvas", () => {
     expect(onSeek).toHaveBeenNthCalledWith(2, 0);
     expect(onSeek).toHaveBeenNthCalledWith(3, 0);
     expect(onSeek).toHaveBeenNthCalledWith(4, 2000);
+  });
+
+  it("redraws with the selected style without refetching data", () => {
+    const onRequestRefetch = vi.fn();
+    const { rerender } = render(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={2000}
+        onRequestRefetch={onRequestRefetch}
+        style="outline"
+      />,
+    );
+    flushRaf();
+    const outlineStrokes = mockContext.state.strokes;
+
+    rerender(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={2000}
+        onRequestRefetch={onRequestRefetch}
+        style="solid"
+      />,
+    );
+    flushRaf();
+
+    // The solid style fills instead of stroking the envelope.
+    expect(mockContext.ctx.fill).toHaveBeenCalled();
+    expect(onRequestRefetch).not.toHaveBeenCalled();
+    expect(outlineStrokes).toBeGreaterThan(0);
   });
 });
 

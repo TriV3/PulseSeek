@@ -13,6 +13,10 @@ fn default_theme() -> String {
     "system".to_string()
 }
 
+fn default_waveform_style() -> String {
+    "outline".to_string()
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PlayerPreferences {
     pub schema_version: u32,
@@ -28,6 +32,8 @@ pub struct PlayerPreferences {
     pub last_played_file_path: Option<String>,
     #[serde(default = "default_theme")]
     pub theme: String,
+    #[serde(default = "default_waveform_style")]
+    pub waveform_style: String,
 }
 
 impl Default for PlayerPreferences {
@@ -45,6 +51,7 @@ impl Default for PlayerPreferences {
             expanded_folder_paths: Vec::new(),
             last_played_file_path: None,
             theme: default_theme(),
+            waveform_style: default_waveform_style(),
         }
     }
 }
@@ -62,6 +69,9 @@ impl PlayerPreferences {
             "system" | "light" | "dark" | "midnight" | "high-contrast"
         ) {
             self.theme = default_theme();
+        }
+        if !matches!(self.waveform_style.as_str(), "solid" | "gradient" | "outline") {
+            self.waveform_style = default_waveform_style();
         }
         if !self.volume.is_finite() {
             self.volume = 1.0;
@@ -213,6 +223,46 @@ mod tests {
     }
 
     #[test]
+    fn waveform_style_defaults_to_outline() {
+        assert_eq!(PlayerPreferences::default().waveform_style, "outline");
+    }
+
+    #[test]
+    fn validated_waveform_style_accepts_supported_values() {
+        for style in ["solid", "gradient", "outline"] {
+            let preferences = PlayerPreferences {
+                waveform_style: style.to_string(),
+                ..PlayerPreferences::default()
+            }
+            .validated();
+            assert_eq!(preferences.waveform_style, style);
+        }
+    }
+
+    #[test]
+    fn validated_waveform_style_falls_back_to_outline_for_unknown_values() {
+        let preferences = PlayerPreferences {
+            waveform_style: "neon".to_string(),
+            ..PlayerPreferences::default()
+        }
+        .validated();
+        assert_eq!(preferences.waveform_style, "outline");
+    }
+
+    #[test]
+    fn waveform_style_round_trips_through_repository() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("player-preferences.json");
+        let mut repository = JsonPlayerPreferencesRepository::new(path.clone());
+        let preferences = PlayerPreferences {
+            waveform_style: "gradient".to_string(),
+            ..PlayerPreferences::default()
+        };
+        repository.save(preferences.clone()).unwrap();
+        assert_eq!(repository.load().unwrap().waveform_style, "gradient");
+    }
+
+    #[test]
     fn validated_theme_accepts_supported_values() {
         for theme in ["system", "light", "dark", "midnight", "high-contrast"] {
             let preferences =
@@ -273,6 +323,7 @@ mod tests {
         }"#;
         let preferences: PlayerPreferences = serde_json::from_str(serialized).unwrap();
         assert_eq!(preferences.theme, "system");
+        assert_eq!(preferences.waveform_style, "outline");
         assert_eq!(preferences.revision, 3);
         assert_eq!(preferences.volume, 0.5);
     }

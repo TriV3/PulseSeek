@@ -92,6 +92,58 @@ describe("player preferences boundary", () => {
       "Invalid player preferences response.",
     );
   });
+
+  it("accepts a waveform style in the valid set", async () => {
+    for (const waveform_style of ["solid", "gradient", "outline"]) {
+      mockInvoke.mockResolvedValueOnce({
+        version: 1,
+        preferences: {
+          schema_version: 1,
+          revision: 0,
+          playback_mode: "one-shot",
+          output_device_id: null,
+          volume: 1,
+          muted: false,
+          waveform_size: 38,
+          browser_size: 24,
+          selected_folder_path: null,
+          expanded_folder_paths: [],
+          last_played_file_path: null,
+          theme: "system",
+          waveform_style,
+        },
+      });
+
+      await expect(loadPlayerPreferences()).resolves.toMatchObject({
+        waveform_style,
+      });
+    }
+  });
+
+  it("rejects an unknown waveform style", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      preferences: {
+        schema_version: 1,
+        revision: 0,
+        playback_mode: "one-shot",
+        output_device_id: null,
+        volume: 1,
+        muted: false,
+        waveform_size: 38,
+        browser_size: 24,
+        selected_folder_path: null,
+        expanded_folder_paths: [],
+        last_played_file_path: null,
+        theme: "system",
+        waveform_style: "neon",
+      },
+    });
+
+    await expect(loadPlayerPreferences()).rejects.toThrow(
+      "Invalid player preferences response.",
+    );
+  });
 });
 
 describe("healthCheck", () => {

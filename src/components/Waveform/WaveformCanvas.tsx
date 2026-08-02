@@ -8,6 +8,7 @@ import {
   positionMsForX,
   resolveTokens,
   type Canvas2D,
+  type WaveformStyle,
   type WaveformTokens,
 } from "./waveformRenderer";
 
@@ -19,6 +20,7 @@ export interface WaveformCanvasProps {
   seekStepMs?: number;
   targetPeaksForWidth?: (widthPx: number) => number;
   getTokens?: (scope: Element | null | undefined) => WaveformTokens;
+  style?: WaveformStyle;
 }
 
 const REFETCH_DEBOUNCE_MS = 200;
@@ -40,6 +42,7 @@ export function WaveformCanvas({
   seekStepMs = DEFAULT_SEEK_STEP_MS,
   targetPeaksForWidth = defaultTargetPeaksForWidth,
   getTokens = resolveTokens,
+  style = "outline",
 }: WaveformCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const positionRef = useRef<number | null>(null);
@@ -57,6 +60,7 @@ export function WaveformCanvas({
     seekStepMs,
     targetPeaksForWidth,
     getTokens,
+    style,
   });
   useEffect(() => {
     propsRef.current = {
@@ -67,6 +71,7 @@ export function WaveformCanvas({
       seekStepMs,
       targetPeaksForWidth,
       getTokens,
+      style,
     };
   }, [
     waveform,
@@ -76,6 +81,7 @@ export function WaveformCanvas({
     seekStepMs,
     targetPeaksForWidth,
     getTokens,
+    style,
   ]);
 
   const draw = useCallback(() => {
@@ -87,12 +93,12 @@ export function WaveformCanvas({
     const height = heightRef.current;
     if (width <= 0 || height <= 0) return;
 
-    const { waveform, durationMs, getTokens } = propsRef.current;
+    const { waveform, durationMs, getTokens, style } = propsRef.current;
     const tokens = getTokens(canvas);
     const geometry = waveform
       ? buildEnvelope(waveform, width, height, positionRef.current, durationMs)
       : { channels: [], playheadX: null };
-    drawEnvelope(ctx, geometry, tokens, width, height);
+    drawEnvelope(ctx, geometry, tokens, width, height, style);
 
     // The slider value tracks position imperatively so React never re-renders
     // on high-frequency playback updates.
@@ -203,7 +209,9 @@ export function WaveformCanvas({
       positionRef.current = null;
     }
     scheduleDraw();
-  }, [waveform, durationMs, scheduleDraw]);
+    // style is intentionally not part of the refetch path: a style change only
+    // repaints the canvas and never re-requests waveform data (FR-VS-004).
+  }, [waveform, durationMs, style, scheduleDraw]);
 
   // Position events drive the playhead imperatively, never via React state.
   useEffect(() => {

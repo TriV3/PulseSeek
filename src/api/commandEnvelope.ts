@@ -71,6 +71,8 @@ export type PlaybackMode =
 export type ThemePreference =
   "system" | "light" | "dark" | "midnight" | "high-contrast";
 
+export type WaveformStyle = "solid" | "gradient" | "outline";
+
 export interface SetPlaybackModeRequest {
   mode: PlaybackMode;
 }
@@ -113,6 +115,7 @@ export interface PlayerPreferences {
   expanded_folder_paths: string[];
   last_played_file_path: string | null;
   theme: ThemePreference;
+  waveform_style: WaveformStyle;
 }
 
 interface PlayerPreferencesResponse {
@@ -143,7 +146,8 @@ function isPlayerPreferences(value: unknown): value is PlayerPreferences {
       typeof candidate.last_played_file_path === "string") &&
     ["system", "light", "dark", "midnight", "high-contrast"].includes(
       String(candidate.theme),
-    )
+    ) &&
+    ["solid", "gradient", "outline"].includes(String(candidate.waveform_style))
   );
 }
 

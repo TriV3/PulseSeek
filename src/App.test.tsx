@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import App from "./App";
 import { DEFAULT_PLAYER_PREFERENCES } from "./hooks/usePlayerPreferences";
+import type { PlayerPreferences } from "./api/commandEnvelope";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -129,5 +130,47 @@ describe("application shell", () => {
     await waitFor(() =>
       expect(document.documentElement.dataset.theme).toBe("high-contrast"),
     );
+  });
+
+  it("selects and persists a waveform style", async () => {
+    vi.mocked(invoke).mockImplementation(async (command: string, args) => {
+      if (command === "load_player_preferences") {
+        return { version: 1, preferences: DEFAULT_PLAYER_PREFERENCES };
+      }
+      if (command === "save_player_preferences") {
+        const preferences = (
+          args as {
+            preferences: PlayerPreferences;
+          }
+        ).preferences;
+        return { version: 1, preferences };
+      }
+      return undefined;
+    });
+
+    render(<App />);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Waveform style")).toHaveValue("outline"),
+    );
+
+    fireEvent.change(screen.getByLabelText("Waveform style"), {
+      target: { value: "gradient" },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Waveform style")).toHaveValue("gradient"),
+    );
+
+    expect(
+      vi
+        .mocked(invoke)
+        .mock.calls.some(
+          ([command, args]) =>
+            command === "save_player_preferences" &&
+            (args as { preferences: { waveform_style?: string } }).preferences
+              ?.waveform_style === "gradient",
+        ),
+    ).toBe(true);
   });
 });

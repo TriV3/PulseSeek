@@ -8,7 +8,6 @@ import {
   type Canvas2D,
   type EnvelopeGeometry,
 } from "./waveformRenderer";
-
 function geometryFor(
   channels: number,
   min: number[],
@@ -23,18 +22,35 @@ function createMockContext(): {
   ctx: Canvas2D;
   calls: string[];
   strokeStyles: unknown[];
+  fillStyles: unknown[];
+  gradients: Array<{ stops: Array<[number, string]> }>;
 } {
   const calls: string[] = [];
   const strokeStyles: unknown[] = [];
+  const fillStyles: unknown[] = [];
+  const gradients: Array<{
+    stops: Array<[number, string]>;
+  }> = [];
   const ctx: Canvas2D = {
     clearRect: () => calls.push("clearRect"),
     beginPath: () => calls.push("beginPath"),
     moveTo: () => calls.push("moveTo"),
     lineTo: () => calls.push("lineTo"),
     stroke: () => calls.push("stroke"),
+    fill: () => calls.push("fill"),
+    closePath: () => calls.push("closePath"),
     setTransform: () => calls.push("setTransform"),
     setLineDash: (segments) => calls.push(`setLineDash:${segments.join(",")}`),
+    createLinearGradient: () => {
+      const gradient = {
+        addColorStop: (offset: number, color: string) => {
+          gradients.push({ stops: [[offset, color]] });
+        },
+      };
+      return gradient;
+    },
     strokeStyle: "#000",
+    fillStyle: "#000",
     lineWidth: 1,
     lineCap: "butt",
     lineJoin: "miter",
@@ -44,7 +60,12 @@ function createMockContext(): {
       strokeStyles.push(value);
     },
   });
-  return { ctx, calls, strokeStyles };
+  Object.defineProperty(ctx, "fillStyle", {
+    set(value: unknown) {
+      fillStyles.push(value);
+    },
+  });
+  return { ctx, calls, strokeStyles, fillStyles, gradients };
 }
 
 afterEach(() => {
@@ -162,6 +183,7 @@ describe("drawEnvelope", () => {
       {
         wave: "#abc",
         waveGrid: "#def",
+        waveSoft: "#123",
         playhead: "#f00",
       },
       100,
@@ -183,6 +205,7 @@ describe("drawEnvelope", () => {
       {
         wave: "#111111",
         waveGrid: "#222222",
+        waveSoft: "#444444",
         playhead: "#333333",
       },
       100,
@@ -202,6 +225,7 @@ describe("drawEnvelope", () => {
       {
         wave: "#111111",
         waveGrid: "#222222",
+        waveSoft: "#444444",
         playhead: "#333333",
       },
       100,
@@ -210,6 +234,77 @@ describe("drawEnvelope", () => {
 
     expect(strokeStyles).toContain("#333333");
   });
+
+  it("gives the outline style a soft body fill so the center reads against the background", () => {
+    const { ctx, calls, strokeStyles, fillStyles } = createMockContext();
+    drawEnvelope(
+      ctx,
+      geometry,
+      {
+        wave: "#111111",
+        waveGrid: "#222222",
+        waveSoft: "#444444",
+        playhead: "#333333",
+      },
+      100,
+      40,
+      "outline",
+    );
+
+    // The envelope body is filled with the soft token (distinct from the
+    // exterior), and the min/max edges are still stroked with the wave token.
+    expect(calls).toContain("fill");
+    expect(fillStyles).toContain("#444444");
+    expect(strokeStyles).toContain("#111111");
+  });
+
+  it("fills the envelope for the solid style instead of stroking it", () => {
+    const { ctx, calls, strokeStyles, fillStyles } = createMockContext();
+    drawEnvelope(
+      ctx,
+      geometry,
+      {
+        wave: "#111111",
+        waveGrid: "#222222",
+        waveSoft: "#444444",
+        playhead: "#333333",
+      },
+      100,
+      40,
+      "solid",
+    );
+
+    expect(calls).toContain("fill");
+    expect(calls).toContain("closePath");
+    expect(fillStyles).toContain("#111111");
+    // The envelope is filled; the two envelope polylines are not stroked.
+    expect(strokeStyles.filter((style) => style === "#111111")).toHaveLength(0);
+  });
+
+  it("fills the envelope with a token gradient for the gradient style", () => {
+    const { ctx, calls, gradients } = createMockContext();
+    drawEnvelope(
+      ctx,
+      geometry,
+      {
+        wave: "#111111",
+        waveGrid: "#222222",
+        waveSoft: "#444444",
+        playhead: "#333333",
+      },
+      100,
+      40,
+      "gradient",
+    );
+
+    expect(calls).toContain("fill");
+    expect(gradients.length).toBeGreaterThan(0);
+    const stopColors = gradients.flatMap((gradient) =>
+      gradient.stops.map(([, color]) => color),
+    );
+    expect(stopColors).toContain("#111111");
+    expect(stopColors).toContain("#444444");
+  });
 });
 
 describe("resolveTokens", () => {
@@ -217,7 +312,8 @@ describe("resolveTokens", () => {
     const getPropertyValue = vi.fn((name: string) => {
       if (name === "--wave") return "#0a0a0a";
       if (name === "--wave-grid") return "#1b1b1b";
-      if (name === "--wave-playhead") return "#2c2c2c";
+      if (name === "--wave-soft") return "#2c2c2c";
+      if (name === "--wave-playhead") return "#3d3d3d";
       return "";
     });
     vi.spyOn(window, "getComputedStyle").mockReturnValue({
@@ -227,7 +323,8 @@ describe("resolveTokens", () => {
     expect(resolveTokens(document.createElement("canvas"))).toEqual({
       wave: "#0a0a0a",
       waveGrid: "#1b1b1b",
-      playhead: "#2c2c2c",
+      waveSoft: "#2c2c2c",
+      playhead: "#3d3d3d",
     });
   });
 
@@ -244,6 +341,7 @@ describe("resolveTokens", () => {
     expect(resolveTokens(null)).toEqual({
       wave: "#7f91a2",
       waveGrid: "#cbd3db",
+      waveSoft: "#a7b6c4",
       playhead: "#f29c38",
     });
   });

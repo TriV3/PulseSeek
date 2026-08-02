@@ -13,6 +13,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { usePlayerPreferences } from "./hooks/usePlayerPreferences";
 import { useTheme } from "./hooks/useTheme";
 import { ThemeSelector } from "./components/ThemeSelector/ThemeSelector";
+import { WaveformStyleSelector } from "./components/WaveformStyleSelector/WaveformStyleSelector";
 import { WaveformPanel } from "./components/Waveform/WaveformPanel";
 import "./styles/tokens.css";
 import "./styles/themes/light.css";
@@ -234,6 +235,7 @@ function App() {
           entryName={selectedEntry?.name ?? "No file selected"}
           durationMs={transport.durationMs}
           onSeek={transport.handleSeek}
+          style={playerPreferences.preferences.waveform_style}
         />
         <div
           className="splitter splitter--horizontal"
@@ -318,6 +320,12 @@ function App() {
                 theme={playerPreferences.preferences.theme}
                 onChange={(theme) => {
                   playerPreferences.update({ theme });
+                }}
+              />
+              <WaveformStyleSelector
+                style={playerPreferences.preferences.waveform_style}
+                onChange={(waveform_style) => {
+                  playerPreferences.update({ waveform_style });
                 }}
               />
             </div>

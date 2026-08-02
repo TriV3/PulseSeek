@@ -1,14 +1,19 @@
 /** Pure geometry and Canvas 2D drawing for the waveform envelope. */
 
+/** Renderer style for the waveform envelope. */
+export type WaveformStyle = "solid" | "gradient" | "outline";
+
 export interface WaveformTokens {
   wave: string;
   waveGrid: string;
+  waveSoft: string;
   playhead: string;
 }
 
 export const DEFAULT_TOKENS: WaveformTokens = {
   wave: "#7f91a2",
   waveGrid: "#cbd3db",
+  waveSoft: "#a7b6c4",
   playhead: "#f29c38",
 };
 
@@ -126,6 +131,8 @@ export interface Canvas2D {
   moveTo(x: number, y: number): void;
   lineTo(x: number, y: number): void;
   stroke(): void;
+  fill(): void;
+  closePath(): void;
   setTransform(
     a: number,
     b: number,
@@ -135,10 +142,22 @@ export interface Canvas2D {
     f: number,
   ): void;
   setLineDash(segments: number[]): void;
+  createLinearGradient(
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+  ): CanvasGradient2D;
   strokeStyle: unknown;
+  fillStyle: unknown;
   lineWidth: number;
   lineCap: string;
   lineJoin: string;
+}
+
+/** Minimal gradient object used by the renderer. */
+export interface CanvasGradient2D {
+  addColorStop(offset: number, color: string): void;
 }
 
 /**
@@ -146,6 +165,13 @@ export interface Canvas2D {
  *
  * All colors come from `tokens`, which the caller resolves from semantic
  * design tokens; the renderer never hard-codes a theme color.
+ *
+ * `style` selects how each channel's envelope is painted:
+ * - `outline` fills the envelope body with a soft token and strokes the
+ *   min/max edges, so the waveform reads against the panel background;
+ * - `solid` fills the closed area between the min and max edges;
+ * - `gradient` fills the same area with a vertical token gradient that is
+ *   strongest at the channel center and fades toward the row edges.
  */
 export function drawEnvelope(
   ctx: Canvas2D,
@@ -153,6 +179,7 @@ export function drawEnvelope(
   tokens: WaveformTokens,
   widthPx: number,
   heightPx: number,
+  style: WaveformStyle = "outline",
 ): void {
   ctx.clearRect(0, 0, widthPx, heightPx);
   ctx.setLineDash([]);
@@ -167,16 +194,12 @@ export function drawEnvelope(
   }
 
   for (const channel of geometry.channels) {
-    ctx.strokeStyle = tokens.wave;
-    ctx.lineWidth = 1.5;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    tracePolyline(ctx, channel.minPoints);
-    ctx.stroke();
-    ctx.beginPath();
-    tracePolyline(ctx, channel.maxPoints);
-    ctx.stroke();
+    if (style === "outline") {
+      fillEnvelopeArea(ctx, channel, tokens, "outline");
+      strokeEnvelopeEdges(ctx, channel, tokens.wave);
+    } else {
+      fillEnvelopeArea(ctx, channel, tokens, style);
+    }
   }
 
   if (geometry.playheadX !== null) {
@@ -189,6 +212,57 @@ export function drawEnvelope(
     ctx.stroke();
     ctx.setLineDash([]);
   }
+}
+
+/** Strokes the min and max envelope polylines of one channel. */
+function strokeEnvelopeEdges(
+  ctx: Canvas2D,
+  channel: EnvelopeChannel,
+  color: string,
+): void {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  tracePolyline(ctx, channel.minPoints);
+  ctx.stroke();
+  ctx.beginPath();
+  tracePolyline(ctx, channel.maxPoints);
+  ctx.stroke();
+}
+
+/** Fills the closed area between the min and max edges of one channel. */
+function fillEnvelopeArea(
+  ctx: Canvas2D,
+  channel: EnvelopeChannel,
+  tokens: WaveformTokens,
+  style: "solid" | "gradient" | "outline",
+): void {
+  if (channel.minPoints.length === 0 || channel.maxPoints.length === 0) return;
+
+  if (style === "gradient") {
+    const gradient = ctx.createLinearGradient(
+      0,
+      channel.rowCenter - channel.rowHeight / 2,
+      0,
+      channel.rowCenter + channel.rowHeight / 2,
+    );
+    gradient.addColorStop(0, tokens.waveSoft);
+    gradient.addColorStop(0.5, tokens.wave);
+    gradient.addColorStop(1, tokens.waveSoft);
+    ctx.fillStyle = gradient;
+  } else {
+    ctx.fillStyle = style === "outline" ? tokens.waveSoft : tokens.wave;
+  }
+
+  ctx.beginPath();
+  tracePolyline(ctx, channel.maxPoints);
+  for (let i = channel.minPoints.length - 1; i >= 0; i -= 1) {
+    ctx.lineTo(channel.minPoints[i].x, channel.minPoints[i].y);
+  }
+  ctx.closePath();
+  ctx.fill();
 }
 
 function tracePolyline(ctx: Canvas2D, points: Point[]): void {
@@ -215,6 +289,7 @@ export function resolveTokens(
   return {
     wave: read("--wave", DEFAULT_TOKENS.wave),
     waveGrid: read("--wave-grid", DEFAULT_TOKENS.waveGrid),
+    waveSoft: read("--wave-soft", DEFAULT_TOKENS.waveSoft),
     playhead: read("--wave-playhead", DEFAULT_TOKENS.playhead),
   };
 }

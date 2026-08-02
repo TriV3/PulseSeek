@@ -67,6 +67,7 @@ const requiredTokens = [
   "line-danger-strong",
   "wave",
   "wave-grid",
+  "wave-soft",
   "wave-selection",
   "wave-selection-border",
   "wave-playhead",
