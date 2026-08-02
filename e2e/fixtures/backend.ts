@@ -13,7 +13,7 @@ const SCRIPT = `
       set_playback_mode: function(args) { return { mode: args.mode }; },
       seek: function(args) { return { position_ms: args.position_ms }; },
       volume: function() { return {}; },
-      load_player_preferences: function() { return { version: 1, preferences: { schema_version: 1, revision: 0, playback_mode: "one-shot", output_device_id: null, volume: 1, muted: false, waveform_size: 38, browser_size: 24, selected_folder_path: null, expanded_folder_paths: [], last_played_file_path: null, theme: "system" } }; },
+      load_player_preferences: function() { return { version: 1, preferences: { schema_version: 1, revision: 0, playback_mode: "one-shot", output_device_id: null, volume: 1, muted: false, waveform_size: 38, browser_size: 24, selected_folder_path: null, expanded_folder_paths: [], last_played_file_path: null, theme: "system", waveform_style: "outline" } }; },
       save_player_preferences: function(args) { return { version: 1, preferences: args.preferences }; },
       get_waveform: function() {
         var n = 96;

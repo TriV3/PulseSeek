@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { useWaveform } from "../../hooks/useWaveform";
-import { defaultTargetPeaksForWidth } from "./waveformRenderer";
+import {
+  defaultTargetPeaksForWidth,
+  type WaveformStyle,
+} from "./waveformRenderer";
 import { WaveformCanvas } from "./WaveformCanvas";
 
 export interface WaveformPanelProps {
@@ -12,6 +15,8 @@ export interface WaveformPanelProps {
   durationMs: number | null;
   /** Seeks playback to a millisecond position (confirmed by the backend). */
   onSeek?: (positionMs: number) => void | Promise<void>;
+  /** Renderer style for the envelope. */
+  style?: WaveformStyle;
 }
 
 /**
@@ -33,6 +38,7 @@ export function WaveformPanel({
   entryName,
   durationMs,
   onSeek,
+  style = "outline",
 }: WaveformPanelProps) {
   const [targetPeaks, setTargetPeaks] = useState(INITIAL_TARGET_PEAKS);
   const { status, waveform, error } = useWaveform(entryPath, targetPeaks);
@@ -63,6 +69,7 @@ export function WaveformPanel({
             durationMs={durationMs}
             onRequestRefetch={setTargetPeaks}
             onSeek={onSeek}
+            style={style}
           />
         )}
       </div>

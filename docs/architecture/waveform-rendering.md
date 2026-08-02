@@ -19,7 +19,27 @@ render path and off the audio callback.
    technical cache, and extracts and stores on miss. Extraction runs on a
    blocking worker off the UI thread.
 4. `WaveformCanvas` draws the envelope with `drawEnvelope` using semantic
-   color tokens (`--wave`, `--wave-grid`, `--wave-playhead`).
+   color tokens (`--wave`, `--wave-grid`, `--wave-soft`, `--wave-playhead`).
+5. The active renderer style (`solid`, `gradient`, or `outline`) is persisted
+   in player preferences and applied through `WaveformStyleSelector` in the
+   transport options strip. A style change repaints the canvas only; it never
+   re-requests waveform data or regenerates peaks.
+
+## Renderer styles
+
+`drawEnvelope` supports three styles (FR-VS-004):
+
+- **outline** (default): fills the envelope body with the `--wave-soft` token
+  and strokes the min/max edges with `--wave`, so the waveform center reads
+  clearly against the panel background.
+- **solid**: fills the closed area between the min and max edges with the
+  `--wave` token.
+- **gradient**: fills the same area with a vertical token gradient, strongest
+  at the channel center (`--wave`) and fading toward the row edges
+  (`--wave-soft`).
+
+Grid lines and the playhead are drawn in every style. All colors come from
+semantic tokens; the renderer never hard-codes a theme color.
 
 ## Playhead never re-renders React
 
@@ -62,9 +82,13 @@ re-render the component. Late frames are dropped rather than delaying audio.
 
 ## Testing
 
-Renderer geometry and drawing are pure functions covered by unit tests.
-`WaveformCanvas` behavior (drawing, playhead, debounced resize refetch) is
-covered with a mocked Canvas 2D context and a triggerable `ResizeObserver`.
-`WaveformPanel` tests cover selection, empty state, error state, and resolution
-refetch. The e2e mock backend returns a minimal valid waveform so selecting a
-file keeps the overview clean.
+Renderer geometry and drawing are pure functions covered by unit tests,
+including per-style rendering (outline strokes, solid fill, gradient fill) and
+token consumption. `WaveformCanvas` behavior (drawing, playhead, debounced
+resize refetch, style change without refetch) is covered with a mocked Canvas
+2D context and a triggerable `ResizeObserver`. `WaveformPanel` tests cover
+selection, empty state, error state, resolution refetch, and the guarantee that
+a style change never refetches waveform data. The e2e mock backend returns a
+minimal valid waveform so selecting a file keeps the overview clean;
+`waveform-styles.spec.ts` asserts style repaints without new `get_waveform`
+calls and compares committed screenshot baselines per platform.

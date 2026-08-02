@@ -55,11 +55,12 @@
   --line-danger-strong: #b03a2e;
 
   /* Waveform */
-  --wave: #8ea2b4;
+  --wave: #8e8fd8;
   --wave-grid: #3a434d;
+  --wave-soft: #575a9c;
   --wave-selection: #f5ec58;
   --wave-selection-border: #9aa32d;
-  --wave-playhead: #f29c38;
+  --wave-playhead: #e89a4a;
 
   /* Focus and overlay */
   --focus-ring: #6ab0ff;

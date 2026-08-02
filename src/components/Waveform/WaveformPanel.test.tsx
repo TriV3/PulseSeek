@@ -163,4 +163,28 @@ describe("WaveformPanel", () => {
 
     expect(onSeek).toHaveBeenCalledWith(1000);
   });
+
+  it("does not refetch waveform data when only the style changes", async () => {
+    vi.mocked(getWaveform).mockResolvedValue(LEVEL);
+    const { rerender } = render(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+        style="outline"
+      />,
+    );
+    await waitFor(() => expect(getWaveform).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+        style="solid"
+      />,
+    );
+
+    expect(getWaveform).toHaveBeenCalledTimes(1);
+  });
 });

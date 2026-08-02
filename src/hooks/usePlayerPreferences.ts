@@ -18,6 +18,7 @@ export const DEFAULT_PLAYER_PREFERENCES: PlayerPreferences = {
   expanded_folder_paths: [],
   last_played_file_path: null,
   theme: "system",
+  waveform_style: "outline",
 };
 
 export function usePlayerPreferences() {
