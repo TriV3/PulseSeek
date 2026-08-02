@@ -30,6 +30,10 @@ pub struct PlayerPreferences {
     pub selected_folder_path: Option<String>,
     pub expanded_folder_paths: Vec<String>,
     pub last_played_file_path: Option<String>,
+    #[serde(default)]
+    pub last_played_position_ms: u64,
+    #[serde(default)]
+    pub last_played_duration_ms: Option<u64>,
     #[serde(default = "default_theme")]
     pub theme: String,
     #[serde(default = "default_waveform_style")]
@@ -50,6 +54,8 @@ impl Default for PlayerPreferences {
             selected_folder_path: None,
             expanded_folder_paths: Vec::new(),
             last_played_file_path: None,
+            last_played_position_ms: 0,
+            last_played_duration_ms: None,
             theme: default_theme(),
             waveform_style: default_waveform_style(),
         }
@@ -81,6 +87,10 @@ impl PlayerPreferences {
         self.browser_size = self.browser_size.clamp(16, 46);
         self.expanded_folder_paths.sort();
         self.expanded_folder_paths.dedup();
+        if self.last_played_file_path.is_none() {
+            self.last_played_position_ms = 0;
+            self.last_played_duration_ms = None;
+        }
         self.schema_version = PREFERENCES_SCHEMA_VERSION;
         self
     }
@@ -340,9 +350,12 @@ mod tests {
     }
 
     #[test]
-    fn validation_excludes_transport_and_seek_state_by_schema() {
+    fn validation_persists_position_but_excludes_transport_state() {
         let serialized = serde_json::to_value(PlayerPreferences::default()).unwrap();
-        assert!(serialized.get("position_ms").is_none());
+        assert_eq!(
+            serialized.get("last_played_position_ms").and_then(|value| value.as_u64()),
+            Some(0)
+        );
         assert!(serialized.get("transport_state").is_none());
         assert!(serialized.get("playing").is_none());
     }

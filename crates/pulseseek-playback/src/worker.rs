@@ -32,6 +32,7 @@ fn execute_worker_command(engine: &mut PlaybackEngine, command: WorkerCommand) -
     match command {
         WorkerCommand::Seek { target, response } => {
             engine.control.begin_seek();
+            engine.control.wait_for_seek_fade();
             let result = engine.decoder.seek(target);
             let succeeded = result.is_ok();
             let result = match result {
@@ -44,7 +45,7 @@ fn execute_worker_command(engine: &mut PlaybackEngine, command: WorkerCommand) -
                     if let Some(resampler) = &mut engine.resampler {
                         resampler.reset();
                     }
-                    engine.control.complete_seek();
+                    engine.control.complete_user_seek();
                     Ok(position)
                 },
                 Err(error) => {

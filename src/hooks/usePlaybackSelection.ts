@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { play } from "../api/commandEnvelope";
+import { play, seek } from "../api/commandEnvelope";
 import type { BrowserEntry } from "../components/FolderTree/folderTreeTypes";
 
 export type PlaybackSelectionStatus = "idle" | "loading" | "playing" | "failed";
@@ -22,38 +22,43 @@ export function usePlaybackSelection() {
   const [playback, setPlayback] = useState<PlaybackSelection>(INITIAL_PLAYBACK);
   const generation = useRef(0);
 
-  const select = useCallback(async (entry: BrowserEntry): Promise<boolean> => {
-    const requestGeneration = ++generation.current;
-    setPlayback({
-      entryId: entry.id,
-      status: "loading",
-      error: null,
-      generation: requestGeneration,
-    });
-
-    try {
-      await play(entry.id);
-      if (requestGeneration === generation.current) {
-        setPlayback({
-          entryId: entry.id,
-          status: "playing",
-          error: null,
-          generation: requestGeneration,
-        });
-        return true;
-      }
-      return false;
-    } catch (error: unknown) {
-      if (requestGeneration !== generation.current) return false;
+  const select = useCallback(
+    async (entry: BrowserEntry, startPositionMs = 0): Promise<boolean> => {
+      const requestGeneration = ++generation.current;
       setPlayback({
         entryId: entry.id,
-        status: "failed",
-        error: error instanceof Error ? error.message : "Unable to play file.",
+        status: "loading",
+        error: null,
         generation: requestGeneration,
       });
-      return false;
-    }
-  }, []);
+
+      try {
+        await play(entry.id);
+        if (startPositionMs > 0) await seek(startPositionMs);
+        if (requestGeneration === generation.current) {
+          setPlayback({
+            entryId: entry.id,
+            status: "playing",
+            error: null,
+            generation: requestGeneration,
+          });
+          return true;
+        }
+        return false;
+      } catch (error: unknown) {
+        if (requestGeneration !== generation.current) return false;
+        setPlayback({
+          entryId: entry.id,
+          status: "failed",
+          error:
+            error instanceof Error ? error.message : "Unable to play file.",
+          generation: requestGeneration,
+        });
+        return false;
+      }
+    },
+    [],
+  );
 
   const restore = useCallback((entryId: string) => {
     const requestGeneration = ++generation.current;

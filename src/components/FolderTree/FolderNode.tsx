@@ -66,6 +66,7 @@ export function FolderNode({
       tabIndex={isSelected ? 0 : -1}
       className={`folder-node${isSelected ? " selected" : ""}`}
       data-depth={depth}
+      data-folder-path={path}
       onKeyDown={handleKeyDown}
     >
       <div className="folder-node-row" onClick={handleSelect}>

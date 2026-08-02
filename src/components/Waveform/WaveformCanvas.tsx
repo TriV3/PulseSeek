@@ -15,6 +15,9 @@ import {
 export interface WaveformCanvasProps {
   waveform: WaveformLevel | null;
   durationMs: number | null;
+  restoredPositionMs?: number;
+  /** Increments when Stop must reset the visible playhead immediately. */
+  resetRevision?: number;
   onRequestRefetch?: (targetPeaks: number) => void;
   onSeek?: (positionMs: number) => void | Promise<void>;
   seekStepMs?: number;
@@ -25,6 +28,15 @@ export interface WaveformCanvasProps {
 
 const REFETCH_DEBOUNCE_MS = 200;
 const DEFAULT_SEEK_STEP_MS = 5_000;
+const TIME_LABEL_HALF_WIDTH_PX = 24;
+
+function timeLabelX(markerX: number, width: number): number {
+  if (width <= TIME_LABEL_HALF_WIDTH_PX * 2) return width / 2;
+  return Math.max(
+    TIME_LABEL_HALF_WIDTH_PX,
+    Math.min(width - TIME_LABEL_HALF_WIDTH_PX, markerX),
+  );
+}
 
 /**
  * Canvas 2D waveform renderer with an imperative playhead.
@@ -37,6 +49,8 @@ const DEFAULT_SEEK_STEP_MS = 5_000;
 export function WaveformCanvas({
   waveform,
   durationMs,
+  restoredPositionMs,
+  resetRevision = 0,
   onRequestRefetch,
   onSeek,
   seekStepMs = DEFAULT_SEEK_STEP_MS,
@@ -45,16 +59,24 @@ export function WaveformCanvas({
   style = "outline",
 }: WaveformCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const currentTimeRef = useRef<HTMLSpanElement | null>(null);
+  const currentMarkerRef = useRef<HTMLSpanElement | null>(null);
+  const hoverMarkerRef = useRef<HTMLSpanElement | null>(null);
+  const hoverTimeRef = useRef<HTMLSpanElement | null>(null);
   const positionRef = useRef<number | null>(null);
+  const durationRef = useRef<number | null>(durationMs);
   const widthRef = useRef(0);
   const heightRef = useRef(0);
   const rafRef = useRef<number | null>(null);
   const refetchTimer = useRef<number | null>(null);
   const draggingRef = useRef(false);
+  const dragTargetRef = useRef<number | null>(null);
 
   const propsRef = useRef({
     waveform,
     durationMs,
+    restoredPositionMs,
+    resetRevision,
     onRequestRefetch,
     onSeek,
     seekStepMs,
@@ -66,6 +88,8 @@ export function WaveformCanvas({
     propsRef.current = {
       waveform,
       durationMs,
+      restoredPositionMs,
+      resetRevision,
       onRequestRefetch,
       onSeek,
       seekStepMs,
@@ -76,6 +100,8 @@ export function WaveformCanvas({
   }, [
     waveform,
     durationMs,
+    restoredPositionMs,
+    resetRevision,
     onRequestRefetch,
     onSeek,
     seekStepMs,
@@ -83,6 +109,42 @@ export function WaveformCanvas({
     getTokens,
     style,
   ]);
+
+  const renderPlayhead = useCallback(() => {
+    const width = widthRef.current;
+    const effectiveDurationMs = durationRef.current;
+    const positionMs = positionRef.current;
+    const canvas = canvasRef.current;
+    if (!canvas || width <= 0) return;
+
+    canvas.setAttribute("aria-valuenow", String(positionMs ?? 0));
+    canvas.setAttribute("aria-valuemax", String(effectiveDurationMs ?? 0));
+    canvas.setAttribute("aria-disabled", String(effectiveDurationMs === null));
+    canvas.tabIndex = effectiveDurationMs === null ? -1 : 0;
+
+    const playheadX =
+      effectiveDurationMs === null || positionMs === null
+        ? null
+        : Math.min(
+            width,
+            Math.max(0, (positionMs / effectiveDurationMs) * width),
+          );
+    const currentTime = currentTimeRef.current;
+    const currentMarker = currentMarkerRef.current;
+    if (!currentTime) return;
+    if (playheadX === null || positionMs === null) {
+      currentTime.hidden = true;
+      if (currentMarker) currentMarker.hidden = true;
+      return;
+    }
+    currentTime.hidden = false;
+    currentTime.textContent = formatWaveformTime(positionMs);
+    currentTime.style.left = `${timeLabelX(playheadX, width)}px`;
+    if (currentMarker) {
+      currentMarker.hidden = false;
+      currentMarker.style.left = `${playheadX}px`;
+    }
+  }, []);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -93,17 +155,26 @@ export function WaveformCanvas({
     const height = heightRef.current;
     if (width <= 0 || height <= 0) return;
 
-    const { waveform, durationMs, getTokens, style } = propsRef.current;
+    const { waveform, getTokens, style } = propsRef.current;
+    const effectiveDurationMs = durationRef.current;
     const tokens = getTokens(canvas);
     const geometry = waveform
-      ? buildEnvelope(waveform, width, height, positionRef.current, durationMs)
+      ? buildEnvelope(waveform, width, height, null, effectiveDurationMs)
       : { channels: [], playheadX: null };
-    drawEnvelope(ctx, geometry, tokens, width, height, style);
+    // The waveform itself is static between data updates. The progress marker
+    // is a composited DOM layer so its movement remains smooth without
+    // repainting the full envelope on every position event.
+    drawEnvelope(
+      ctx,
+      { ...geometry, playheadX: null },
+      tokens,
+      width,
+      height,
+      style,
+    );
 
-    // The slider value tracks position imperatively so React never re-renders
-    // on high-frequency playback updates.
-    canvas.setAttribute("aria-valuenow", String(positionRef.current ?? 0));
-  }, []);
+    renderPlayhead();
+  }, [renderPlayhead]);
 
   const scheduleDraw = useCallback(() => {
     if (rafRef.current !== null) return;
@@ -113,62 +184,113 @@ export function WaveformCanvas({
     });
   }, [draw]);
 
+  const schedulePlayhead = useCallback(() => {
+    if (rafRef.current !== null) return;
+    rafRef.current = window.requestAnimationFrame(() => {
+      rafRef.current = null;
+      renderPlayhead();
+    });
+  }, [renderPlayhead]);
+
   const commitSeek = useCallback(
     (targetMs: number) => {
       positionRef.current = targetMs;
-      scheduleDraw();
+      schedulePlayhead();
       propsRef.current.onSeek?.(targetMs);
     },
-    [scheduleDraw],
+    [schedulePlayhead],
+  );
+
+  const previewSeek = useCallback(
+    (targetMs: number) => {
+      positionRef.current = targetMs;
+      schedulePlayhead();
+    },
+    [schedulePlayhead],
   );
 
   const targetFromPointer = useCallback((clientX: number): number | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
-    const { durationMs } = propsRef.current;
     const rect = canvas.getBoundingClientRect();
-    return positionMsForX(clientX - rect.left, rect.width, durationMs);
+    return positionMsForX(clientX - rect.left, rect.width, durationRef.current);
+  }, []);
+
+  const updateHover = useCallback((clientX: number) => {
+    const canvas = canvasRef.current;
+    const marker = hoverMarkerRef.current;
+    const label = hoverTimeRef.current;
+    if (!canvas || !marker || !label) return;
+    const rect = canvas.getBoundingClientRect();
+    const target = positionMsForX(
+      clientX - rect.left,
+      rect.width,
+      durationRef.current,
+    );
+    if (target === null) {
+      marker.hidden = true;
+      label.hidden = true;
+      return;
+    }
+    const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+    marker.hidden = false;
+    label.hidden = false;
+    marker.style.left = `${x}px`;
+    label.style.left = `${timeLabelX(x, rect.width)}px`;
+    label.textContent = formatWaveformTime(target);
   }, []);
 
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
-      const { durationMs } = propsRef.current;
-      if (durationMs === null) return;
+      if (durationRef.current === null) return;
       const target = targetFromPointer(event.clientX);
       if (target === null) return;
+      event.preventDefault();
       draggingRef.current = true;
+      dragTargetRef.current = target;
       try {
         event.currentTarget.setPointerCapture(event.pointerId);
       } catch {
         // Pointer capture can be unavailable in non-browser environments;
         // dragging still works without it.
       }
-      commitSeek(target);
+      previewSeek(target);
     },
-    [commitSeek, targetFromPointer],
+    [previewSeek, targetFromPointer],
   );
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
+      updateHover(event.clientX);
       if (!draggingRef.current) return;
       const target = targetFromPointer(event.clientX);
       if (target === null) return;
-      commitSeek(target);
+      dragTargetRef.current = target;
+      previewSeek(target);
     },
-    [commitSeek, targetFromPointer],
+    [previewSeek, targetFromPointer, updateHover],
   );
 
-  const handlePointerEnd = useCallback(
-    (event: React.PointerEvent<HTMLCanvasElement>) => {
+  const handlePointerLeave = useCallback(() => {
+    if (draggingRef.current) return;
+    if (hoverMarkerRef.current) hoverMarkerRef.current.hidden = true;
+    if (hoverTimeRef.current) hoverTimeRef.current.hidden = true;
+  }, []);
+
+  const finishPointerInteraction = useCallback(
+    (event: React.PointerEvent<HTMLCanvasElement>, shouldCommit: boolean) => {
       if (!draggingRef.current) return;
       draggingRef.current = false;
+      const target = dragTargetRef.current;
+      dragTargetRef.current = null;
       try {
         event.currentTarget.releasePointerCapture(event.pointerId);
       } catch {
         // Pointer capture is best-effort.
       }
+      if (shouldCommit && target !== null) commitSeek(target);
     },
-    [],
+    [commitSeek],
   );
 
   const handleKeyDown = useCallback(
@@ -203,15 +325,33 @@ export function WaveformCanvas({
   // playhead is reset only when the file's waveform changes, so the same
   // file's first duration update never wipes a freshly confirmed position.
   const lastWaveformRef = useRef<WaveformLevel | null>(waveform);
+  const receivedPositionEventRef = useRef(false);
+  const lastResetRevisionRef = useRef(resetRevision);
   useEffect(() => {
+    durationRef.current = durationMs;
     if (lastWaveformRef.current !== waveform) {
       lastWaveformRef.current = waveform;
-      positionRef.current = null;
+      receivedPositionEventRef.current = false;
+      positionRef.current = restoredPositionMs ?? null;
+    } else if (
+      restoredPositionMs !== undefined &&
+      !receivedPositionEventRef.current &&
+      !draggingRef.current
+    ) {
+      positionRef.current = restoredPositionMs;
     }
     scheduleDraw();
     // style is intentionally not part of the refetch path: a style change only
     // repaints the canvas and never re-requests waveform data (FR-VS-004).
-  }, [waveform, durationMs, style, scheduleDraw]);
+  }, [waveform, durationMs, restoredPositionMs, style, scheduleDraw]);
+
+  useEffect(() => {
+    if (lastResetRevisionRef.current === resetRevision) return;
+    lastResetRevisionRef.current = resetRevision;
+    receivedPositionEventRef.current = false;
+    positionRef.current = 0;
+    scheduleDraw();
+  }, [resetRevision, scheduleDraw]);
 
   // Position events drive the playhead imperatively, never via React state.
   useEffect(() => {
@@ -225,7 +365,11 @@ export function WaveformCanvas({
       if (!draggingRef.current) {
         positionRef.current = payload.position_ms;
       }
-      scheduleDraw();
+      receivedPositionEventRef.current = true;
+      if (payload.duration_ms !== null) {
+        durationRef.current = payload.duration_ms;
+      }
+      schedulePlayhead();
     })
       .then((cleanup) => {
         if (disposed) cleanup();
@@ -238,7 +382,7 @@ export function WaveformCanvas({
       disposed = true;
       unlisten?.();
     };
-  }, [scheduleDraw]);
+  }, [schedulePlayhead]);
 
   // Measure the canvas and request a fitting resolution level on resize.
   useEffect(() => {
@@ -299,21 +443,62 @@ export function WaveformCanvas({
   }, []);
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="waveform-canvas-surface"
-      role="slider"
-      aria-label="Waveform seek"
-      aria-valuemin={0}
-      aria-valuemax={durationMs ?? 0}
-      aria-valuenow={0}
-      aria-disabled={durationMs === null}
-      tabIndex={durationMs === null ? -1 : 0}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerEnd}
-      onPointerCancel={handlePointerEnd}
-      onKeyDown={handleKeyDown}
-    />
+    <div className="waveform-interaction">
+      <canvas
+        ref={canvasRef}
+        className="waveform-canvas-surface"
+        role="slider"
+        aria-label="Waveform seek"
+        aria-valuemin={0}
+        aria-valuemax={durationMs ?? 0}
+        aria-valuenow={0}
+        aria-disabled={durationMs === null}
+        tabIndex={durationMs === null ? -1 : 0}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={(event) => finishPointerInteraction(event, true)}
+        onPointerCancel={(event) => finishPointerInteraction(event, false)}
+        onPointerLeave={handlePointerLeave}
+        onKeyDown={handleKeyDown}
+      />
+      <span
+        ref={currentMarkerRef}
+        className="waveform-current-marker"
+        data-testid="waveform-current-marker"
+        aria-hidden="true"
+        hidden
+      />
+      <span
+        ref={currentTimeRef}
+        className="waveform-time waveform-time--current"
+        data-testid="waveform-current-time"
+        aria-hidden="true"
+        hidden
+      />
+      <span
+        ref={hoverMarkerRef}
+        className="waveform-hover-marker"
+        data-testid="waveform-hover-marker"
+        aria-hidden="true"
+        hidden
+      />
+      <span
+        ref={hoverTimeRef}
+        className="waveform-time waveform-time--hover"
+        data-testid="waveform-hover-time"
+        aria-hidden="true"
+        hidden
+      />
+    </div>
   );
+}
+
+function formatWaveformTime(positionMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(positionMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${minutes}:${String(seconds).padStart(2, "0")}`;
 }

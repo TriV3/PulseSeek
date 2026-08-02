@@ -435,6 +435,96 @@ fn seek_while_playing_discards_stale_frames() {
 }
 
 #[test]
+fn channel_output_smooths_the_discontinuity_after_seek() {
+    let (worker, mut consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(1_000)), 32);
+    while consumer.available() < 32 {
+        std::thread::yield_now();
+    }
+
+    let mut before = [0.0f32; 4];
+    assert_eq!(consumer.consume_channels(&mut before, 1, 1), 4);
+    assert_eq!(before, [0.0, 1.0, 2.0, 3.0]);
+
+    let control = consumer.control();
+    let seek_thread = std::thread::spawn(move || {
+        worker.seek(seek_target(50)).unwrap();
+        worker
+    });
+    while !control.seeking.load(std::sync::atomic::Ordering::Acquire) {
+        std::thread::yield_now();
+    }
+    let mut fade_out = [0.0f32; 512];
+    assert_eq!(consumer.consume_channels(&mut fade_out, 1, 1), 0);
+    assert!(fade_out[0] > 2.9 && fade_out[0] < 3.0);
+    assert!(fade_out[127] > 0.0, "fade must last longer than the previous 128 frames");
+    assert_eq!(fade_out[511], 0.0);
+    assert!(fade_out.windows(2).all(|samples| samples[1] <= samples[0]));
+    let worker = seek_thread.join().unwrap();
+
+    let mut after = [0.0f32; 4];
+    for _ in 0..10_000 {
+        if consumer.consume_channels(&mut after, 1, 1) == 4 {
+            break;
+        }
+        std::thread::yield_now();
+    }
+
+    assert!(after[0] > 0.0, "ramp should move away from silence");
+    assert!(after[0] < 1.0, "first post-seek sample must fade in from zero");
+    assert!(after.windows(2).all(|samples| samples[1] > samples[0]));
+    control_stop_and_join(worker, consumer);
+}
+
+#[test]
+fn seek_timeout_crossfades_from_the_last_output_sample() {
+    let (mut engine, mut consumer) = PlaybackEngine::new(Box::new(RampDecoder::new(32)), 8);
+    assert!(engine.process_chunk().unwrap());
+
+    let mut before = [0.0f32; 4];
+    assert_eq!(consumer.consume_channels(&mut before, 1, 1), 4);
+    assert_eq!(before, [0.0, 1.0, 2.0, 3.0]);
+
+    // Simulate a hardware callback interval longer than the worker wait: the
+    // seek completes before render_seek_fade gets a chance to run.
+    engine.control.begin_seek();
+    engine.control.complete_user_seek();
+    assert!(engine.process_chunk().unwrap());
+
+    let mut after = [0.0f32; 1];
+    assert_eq!(consumer.consume_channels(&mut after, 1, 1), 0);
+    assert!(
+        after[0] >= 2.99,
+        "the first resumed sample must continue from the previous output, got {}",
+        after[0]
+    );
+    assert!(after[0] < 3.01, "the crossfade must start gradually, got {}", after[0]);
+}
+
+#[test]
+fn seek_generation_never_scans_a_large_stale_buffer_in_one_callback() {
+    let (mut engine, mut consumer) =
+        PlaybackEngine::new(Box::new(RampDecoder::new(262_144)), 131_072);
+    assert!(engine.process_chunk().unwrap());
+
+    let mut before = [0.0f32; 1];
+    assert_eq!(consumer.consume_channels(&mut before, 1, 1), 1);
+
+    // Simulate completion before the callback could perform the fade. The
+    // ring now contains almost 131k stale samples, matching production.
+    engine.control.begin_seek();
+    engine.control.complete_user_seek();
+    assert!(engine.process_chunk().unwrap());
+
+    let mut resumed = [0.0f32; 1];
+    assert_eq!(consumer.consume_channels(&mut resumed, 1, 1), 0);
+    assert_eq!(
+        consumer.available(),
+        0,
+        "the callback must invalidate the stale ring in constant time instead of scanning it"
+    );
+}
+
+#[test]
 fn seek_while_paused_preserves_pause_and_resumes_at_target() {
     let (worker, mut consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(1_000)), 16);
     let control = consumer.control();

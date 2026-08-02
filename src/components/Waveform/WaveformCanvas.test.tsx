@@ -155,12 +155,20 @@ describe("WaveformCanvas", () => {
     flushRaf();
     emitPosition(1500);
     flushRaf();
-    expect(mockContext.state.strokes).toBeGreaterThan(strokesBefore);
-    expect(mockContext.state.dashes).toContain("4,3");
+    expect(mockContext.state.strokes).toBe(strokesBefore);
+    expect(
+      container.querySelector("[data-testid='waveform-current-marker']"),
+    ).toHaveStyle({
+      left: "75px",
+    });
 
-    // 1000 / 2000 ms maps to the middle of a 100px-wide canvas.
-    const playheadMoves = mockContext.moves.filter(([x]) => x === 50);
-    expect(playheadMoves.length).toBeGreaterThan(0);
+    // The progress marker is composited above the static canvas; 1500 / 2000
+    // ms maps to 75px of the 100px waveform.
+    expect(
+      container.querySelector("[data-testid='waveform-current-marker']"),
+    ).toHaveStyle({
+      left: "75px",
+    });
 
     // High-frequency position updates never re-render React: the canvas node
     // is stable and the slider value is written imperatively instead.
@@ -246,20 +254,26 @@ describe("WaveformCanvas", () => {
   });
 
   it("drops a previous file's playhead when the waveform changes", () => {
-    const { rerender } = render(
+    const { container, rerender } = render(
       <WaveformCanvas waveform={LEVEL} durationMs={2000} />,
     );
     flushRaf();
     emitPosition(500);
     flushRaf();
-    expect(mockContext.state.dashes).toContain("4,3");
+    expect(
+      container.querySelector("[data-testid='waveform-current-marker']"),
+    ).toHaveStyle({
+      left: "25px",
+    });
 
     mockContext.state.dashes.length = 0;
     rerender(<WaveformCanvas waveform={LEVEL_STEREO} durationMs={2000} />);
     flushRaf();
 
     // The stale position must not paint a playhead on the new waveform.
-    expect(mockContext.state.dashes).not.toContain("4,3");
+    expect(
+      container.querySelector("[data-testid='waveform-current-marker']"),
+    ).not.toBeVisible();
   });
 
   it("keeps the playhead when only the duration updates", () => {
@@ -277,6 +291,108 @@ describe("WaveformCanvas", () => {
     expect(canvas.getAttribute("aria-valuenow")).toBe("500");
   });
 
+  it("shows the current time next to the playhead", () => {
+    const { getByTestId } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={2000} />,
+    );
+
+    emitPosition(1250);
+    flushRaf();
+
+    expect(getByTestId("waveform-current-time")).toHaveTextContent("0:01");
+    expect(getByTestId("waveform-current-time")).toHaveStyle({
+      left: "62.5px",
+    });
+  });
+
+  it("shows the hovered time next to the pointer bar", () => {
+    const { container, getByTestId } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={2000} />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+
+    fireEvent.pointerMove(canvas, { clientX: 75, pointerId: 1 });
+
+    expect(getByTestId("waveform-hover-time")).toHaveTextContent("0:01");
+    expect(getByTestId("waveform-hover-time")).toHaveStyle({ left: "75px" });
+    expect(getByTestId("waveform-hover-marker")).toHaveStyle({ left: "75px" });
+
+    fireEvent.pointerLeave(canvas);
+    expect(getByTestId("waveform-hover-time")).not.toBeVisible();
+  });
+
+  it("keeps time labels fully inside the waveform at both edges", () => {
+    const { container, getByTestId } = render(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={2000}
+        restoredPositionMs={0}
+      />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+    flushRaf();
+
+    expect(getByTestId("waveform-current-time")).toHaveStyle({ left: "24px" });
+
+    fireEvent.pointerMove(canvas, { clientX: 0, pointerId: 1 });
+    expect(getByTestId("waveform-hover-marker")).toHaveStyle({ left: "0px" });
+    expect(getByTestId("waveform-hover-time")).toHaveStyle({ left: "24px" });
+
+    fireEvent.pointerMove(canvas, { clientX: 100, pointerId: 1 });
+    expect(getByTestId("waveform-hover-marker")).toHaveStyle({ left: "100px" });
+    expect(getByTestId("waveform-hover-time")).toHaveStyle({ left: "76px" });
+  });
+
+  it("shows a restored position before native playback events arrive", () => {
+    const { container, getByTestId } = render(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={2000}
+        restoredPositionMs={1500}
+      />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    flushRaf();
+
+    expect(canvas).toHaveAttribute("aria-valuenow", "1500");
+    expect(getByTestId("waveform-current-time")).toHaveTextContent("0:01");
+  });
+
+  it("returns the visible playhead and time to zero after Stop", () => {
+    const { getByTestId, rerender } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={2000} resetRevision={0} />,
+    );
+    emitPosition(1500);
+    flushRaf();
+
+    rerender(
+      <WaveformCanvas waveform={LEVEL} durationMs={2000} resetRevision={1} />,
+    );
+    flushRaf();
+
+    expect(getByTestId("waveform-current-marker")).toHaveStyle({ left: "0px" });
+    expect(getByTestId("waveform-current-time")).toHaveTextContent("0:00");
+  });
+
+  it("can seek as soon as a position event supplies the duration", () => {
+    const onSeek = vi.fn();
+    const { container } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={null} onSeek={onSeek} />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+
+    emitPosition(250, 2000);
+    flushRaf();
+    fireEvent.pointerDown(canvas, { clientX: 50, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { pointerId: 1 });
+
+    expect(onSeek).toHaveBeenCalledWith(1000);
+    expect(canvas.getAttribute("aria-valuemax")).toBe("2000");
+  });
+
   it("seeks to the clicked position", () => {
     const onSeek = vi.fn();
     const { container } = render(
@@ -291,7 +407,7 @@ describe("WaveformCanvas", () => {
     expect(onSeek).toHaveBeenCalledWith(1000);
   });
 
-  it("seeks continuously while dragging", () => {
+  it("previews continuously while dragging and seeks once on release", () => {
     const onSeek = vi.fn();
     const { container } = render(
       <WaveformCanvas waveform={LEVEL} durationMs={2000} onSeek={onSeek} />,
@@ -302,11 +418,15 @@ describe("WaveformCanvas", () => {
     fireEvent.pointerDown(canvas, { clientX: 25, pointerId: 1 });
     fireEvent.pointerMove(canvas, { clientX: 75, pointerId: 1 });
     fireEvent.pointerMove(canvas, { clientX: 10, pointerId: 1 });
+    flushRaf();
+
+    expect(onSeek).not.toHaveBeenCalled();
+    expect(canvas.getAttribute("aria-valuenow")).toBe("200");
+
     fireEvent.pointerUp(canvas, { pointerId: 1 });
 
-    expect(onSeek).toHaveBeenNthCalledWith(1, 500);
-    expect(onSeek).toHaveBeenNthCalledWith(2, 1500);
-    expect(onSeek).toHaveBeenNthCalledWith(3, 200);
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    expect(onSeek).toHaveBeenCalledWith(200);
   });
 
   it("keeps the drag preview stable while position events arrive", () => {
@@ -318,7 +438,9 @@ describe("WaveformCanvas", () => {
     stubCanvasRect(canvas, 100);
 
     fireEvent.pointerDown(canvas, { clientX: 25, pointerId: 1 });
-    expect(onSeek).toHaveBeenLastCalledWith(500);
+    flushRaf();
+    expect(onSeek).not.toHaveBeenCalled();
+    expect(canvas.getAttribute("aria-valuenow")).toBe("500");
 
     // A throttled position event during the drag must not move the preview.
     emitPosition(1200);
@@ -327,6 +449,8 @@ describe("WaveformCanvas", () => {
 
     // After the drag, the next confirmed position reconciles the playhead.
     fireEvent.pointerUp(canvas, { pointerId: 1 });
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    expect(onSeek).toHaveBeenCalledWith(500);
     emitPosition(1200);
     flushRaf();
     expect(canvas.getAttribute("aria-valuenow")).toBe("1200");

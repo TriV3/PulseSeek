@@ -16,7 +16,6 @@ const props = {
   onStop: vi.fn(),
   onPrevious: vi.fn(),
   onNext: vi.fn(),
-  onSeek: vi.fn(),
   onVolume: vi.fn(),
   onToggleMute: vi.fn(),
 };
@@ -32,23 +31,17 @@ describe("PlayerTransport", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next" })).toBeInTheDocument();
     expect(
-      screen.getByRole("slider", { name: "Playback position" }),
-    ).toHaveValue("12000");
+      screen.queryByRole("slider", { name: "Playback position" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("slider", { name: "Volume" })).toHaveValue("100");
     expect(screen.getByText("0:12 / 1:00")).toBeInTheDocument();
   });
 
-  it("dispatches button and slider interactions", () => {
+  it("dispatches button and volume interactions", () => {
     render(<PlayerTransport {...props} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Pause" }));
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
-    fireEvent.change(
-      screen.getByRole("slider", { name: "Playback position" }),
-      {
-        target: { value: "30000" },
-      },
-    );
     fireEvent.change(screen.getByRole("slider", { name: "Volume" }), {
       target: { value: "50" },
     });
@@ -56,7 +49,6 @@ describe("PlayerTransport", () => {
 
     expect(props.onTogglePlayPause).toHaveBeenCalledOnce();
     expect(props.onStop).toHaveBeenCalledOnce();
-    expect(props.onSeek).toHaveBeenCalledWith(30_000);
     expect(props.onVolume).toHaveBeenCalledWith(0.5);
     expect(props.onToggleMute).toHaveBeenCalledOnce();
   });
@@ -77,9 +69,6 @@ describe("PlayerTransport", () => {
     expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Play" })).toBeDisabled();
-    expect(
-      screen.getByRole("slider", { name: "Playback position" }),
-    ).toBeDisabled();
     expect(screen.getByRole("alert")).toHaveTextContent("Playback failed.");
   });
 });

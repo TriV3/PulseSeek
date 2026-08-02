@@ -70,6 +70,38 @@ describe("FolderTree — selected path display", () => {
   });
 });
 
+describe("FolderTree — selected folder visibility", () => {
+  it("scrolls the selected folder into the browser viewport", () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    const props = createMockFolderTreeProps({
+      selectedPath: "/test/music",
+      folders: {
+        "/test": {
+          expanded: true,
+          children: [{ id: "/test/music", name: "music", kind: "folder" }],
+          isLoading: false,
+          error: null,
+        },
+        "/test/music": {
+          expanded: false,
+          children: [],
+          isLoading: false,
+          error: null,
+        },
+      },
+      rootPath: "/test",
+    });
+
+    render(<FolderTree {...props} />);
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+  });
+});
+
 describe("FolderTree — indentation", () => {
   it("uses one fixed indentation step per nested list", () => {
     const props = createMockFolderTreeProps({

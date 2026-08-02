@@ -47,11 +47,10 @@
 }
 
 .player-transport-position {
-  min-width: 170px;
+  min-width: 76px;
   flex: 1;
 }
 
-.player-transport-position label,
 .player-transport-volume label {
   position: absolute;
   width: 1px;
@@ -63,11 +62,6 @@
 .player-transport input[type="range"] {
   height: 4px;
   accent-color: var(--accent-range);
-}
-
-.player-transport-position input {
-  min-width: 70px;
-  flex: 1;
 }
 
 .player-transport-position output {

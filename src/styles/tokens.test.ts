@@ -70,7 +70,10 @@ const requiredTokens = [
   "wave-soft",
   "wave-selection",
   "wave-selection-border",
-  "wave-playhead",
+  "wave-seek-current",
+  "wave-seek-hover",
+  "wave-time-current",
+  "wave-time-hover",
   "focus-ring",
   "overlay-backdrop",
   "shadow-overlay",
@@ -111,6 +114,24 @@ function referencedTokens(css: string): Set<string> {
 }
 
 describe("semantic design tokens", () => {
+  it.each(themeFiles)(
+    "$name distinguishes current and hover seek indicators",
+    ({ css }) => {
+      expect(tokenValue(css, "wave-seek-current")).not.toBe(
+        tokenValue(css, "wave-seek-hover"),
+      );
+      expect(tokenValue(css, "wave-time-current")).not.toBe(
+        tokenValue(css, "wave-time-hover"),
+      );
+    },
+  );
+
+  it("gives the hover seek indicator a distinct color in every theme", () => {
+    const colors = themeFiles.map((theme) =>
+      tokenValue(theme.css, "wave-seek-hover"),
+    );
+    expect(new Set(colors).size).toBe(themeFiles.length);
+  });
   it("defines every required semantic token in each theme file", () => {
     for (const theme of themeFiles) {
       const defined = tokensInTheme(theme.css);

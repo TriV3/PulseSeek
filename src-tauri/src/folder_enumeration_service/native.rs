@@ -59,21 +59,29 @@ impl FolderEnumerationService for NativeFolderEnumerationService {
             .name("pulseseek-folder-enumeration".to_string())
             .spawn(move || {
                 let reader = pulseseek_browser_fs::NativeFolderReader;
-                let preview =
-                    reader.read_folder_preview(std::path::Path::new(&path), show_unsupported);
-                if let Ok(entries) = preview {
-                    for chunk in entries.chunks(batch_size) {
-                        if cancelled.load(Ordering::Acquire) || events.is_disconnected() {
-                            break;
+                let preview = reader.stream_folder_preview(
+                    std::path::Path::new(&path),
+                    show_unsupported,
+                    batch_size,
+                    || cancelled.load(Ordering::Acquire) || events.is_disconnected(),
+                    |chunk| {
+                        if !cancelled.load(Ordering::Acquire) && !events.is_disconnected() {
+                            emit_folder_chunk_phase(
+                                &*events,
+                                &session_for_thread,
+                                chunk,
+                                true,
+                                false,
+                            );
                         }
-                        emit_folder_chunk_phase(&*events, &session_for_thread, chunk, true, false);
-                    }
-                    if entries.is_empty()
-                        && !cancelled.load(Ordering::Acquire)
-                        && !events.is_disconnected()
-                    {
-                        emit_folder_chunk_phase(&*events, &session_for_thread, &[], true, false);
-                    }
+                    },
+                );
+                if let Err(error) = preview {
+                    tracing::warn!(
+                        path = %path,
+                        error = %error,
+                        "folder preview failed, continuing with verification",
+                    );
                 }
 
                 let result = reader.read_folder_with_options_cancellable(

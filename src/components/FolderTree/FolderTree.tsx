@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { FolderTreeState } from "./folderTreeTypes";
 import { FolderNode } from "./FolderNode";
 import "./FolderTree.css";
@@ -18,6 +18,20 @@ export function FolderTree({
   navigateUp,
   clearError,
 }: FolderTreeProps) {
+  const treeRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const selectedPath = state.selectedPath;
+    if (!selectedPath) return;
+    const target = Array.from(
+      treeRef.current?.querySelectorAll<HTMLElement>("[data-folder-path]") ??
+        [],
+    ).find((element) => element.dataset.folderPath === selectedPath);
+    if (typeof target?.scrollIntoView === "function") {
+      target.scrollIntoView({ block: "nearest" });
+    }
+  }, [state.folders, state.selectedPath]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       const selected = state.selectedPath;
@@ -103,6 +117,7 @@ export function FolderTree({
   return (
     <div
       className="folder-tree"
+      ref={treeRef}
       role="tree"
       aria-label="Folder browser"
       onKeyDown={handleKeyDown}

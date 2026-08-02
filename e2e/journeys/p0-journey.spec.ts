@@ -67,10 +67,15 @@ test.describe("P0 audition workflow", () => {
 
     // ── 5b. Seek from the waveform ────────────────────────────────────
     // A position event makes the duration known and activates the slider.
-    await emitEvent("playback:position", { position_ms: 0, duration_ms: 2000 });
-    await page
-      .getByRole("slider", { name: "Waveform seek" })
-      .click({ position: { x: 50, y: 20 } });
+    await emitEvent("playback:position", {
+      position_ms: 500,
+      duration_ms: 2000,
+    });
+    const waveformSeek = page.getByRole("slider", { name: "Waveform seek" });
+    await expect(page.getByTestId("waveform-current-time")).toHaveText("0:00");
+    await waveformSeek.hover({ position: { x: 150, y: 20 } });
+    await expect(page.getByTestId("waveform-hover-time")).toBeVisible();
+    await waveformSeek.click({ position: { x: 50, y: 20 } });
 
     // ── 6. Move a file to Trash ──────────────────────────────────────
     await mockCommand("move_to_trash", {
@@ -106,7 +111,17 @@ test.describe("P0 audition workflow", () => {
     expect(calls.some((c) => c.command === "start_enumeration")).toBeTruthy();
     expect(calls.some((c) => c.command === "pause")).toBeTruthy();
     expect(calls.some((c) => c.command === "set_playback_mode")).toBeTruthy();
-    expect(calls.some((c) => c.command === "seek")).toBeTruthy();
+    expect(
+      calls.some(
+        (c) =>
+          c.command === "seek" &&
+          typeof (c.payload as { position_ms?: unknown }).position_ms ===
+            "number" &&
+          Number.isInteger(
+            (c.payload as { position_ms: number }).position_ms,
+          ),
+      ),
+    ).toBeTruthy();
     expect(calls.some((c) => c.command === "move_to_trash")).toBeTruthy();
   });
 });

@@ -11,7 +11,17 @@ use crate::engine::BufferedSample;
 pub struct PlaybackConsumer {
     pub(crate) consumer: HeapCons<BufferedSample>,
     pub(crate) control: PlaybackControl,
+    pub(crate) observed_seek_generation: u64,
+    pub(crate) seek_ramp_frame: usize,
+    pub(crate) last_output: [f32; MAX_CALLBACK_CHANNELS],
+    pub(crate) seek_ramp_origin: [f32; MAX_CALLBACK_CHANNELS],
+    pub(crate) seek_fade_out_frame: usize,
+    pub(crate) seek_fade_out_origin: [f32; MAX_CALLBACK_CHANNELS],
+    pub(crate) buffer_cleared_for_seek: bool,
 }
+
+pub(crate) const MAX_CALLBACK_CHANNELS: usize = 32;
+pub(crate) const SEEK_RAMP_FRAMES: usize = 512;
 
 /// Lock-free playback control shared by the audio owner and callback consumer.
 #[derive(Clone)]
@@ -20,6 +30,10 @@ pub struct PlaybackControl {
     pub(crate) stopped: Arc<AtomicBool>,
     pub(crate) seeking: Arc<AtomicBool>,
     pub(crate) generation: Arc<AtomicU64>,
+    pub(crate) seek_generation: Arc<AtomicU64>,
+    pub(crate) seek_fade_requested: Arc<AtomicBool>,
+    pub(crate) seek_fade_complete: Arc<AtomicBool>,
+    pub(crate) output_active: Arc<AtomicBool>,
     pub(crate) terminal: Arc<AtomicU8>,
     pub(crate) position_frames: Arc<AtomicU64>,
 }
@@ -82,14 +96,37 @@ impl PlaybackControl {
 
     pub(crate) fn begin_seek(&self) {
         self.seeking.store(true, Ordering::Release);
+        if self.paused.load(Ordering::Acquire) || !self.output_active.load(Ordering::Acquire) {
+            self.seek_fade_complete.store(true, Ordering::Release);
+        } else {
+            self.seek_fade_complete.store(false, Ordering::Release);
+            self.seek_fade_requested.store(true, Ordering::Release);
+        }
+    }
+
+    pub(crate) fn wait_for_seek_fade(&self) {
+        const MAX_WAIT_STEPS: usize = 200;
+        for _ in 0..MAX_WAIT_STEPS {
+            if self.seek_fade_complete.load(Ordering::Acquire) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_micros(250));
+        }
     }
 
     pub(crate) fn complete_seek(&self) {
         self.generation.fetch_add(1, Ordering::AcqRel);
+        self.seek_fade_requested.store(false, Ordering::Release);
         self.seeking.store(false, Ordering::Release);
     }
 
+    pub(crate) fn complete_user_seek(&self) {
+        self.seek_generation.fetch_add(1, Ordering::AcqRel);
+        self.complete_seek();
+    }
+
     pub(crate) fn cancel_seek(&self) {
+        self.seek_fade_requested.store(false, Ordering::Release);
         self.seeking.store(false, Ordering::Release);
     }
 
@@ -165,12 +202,29 @@ impl PlaybackConsumer {
         if source_channels == 0 || output_channels == 0 {
             return 0;
         }
-        if self.control.is_stopped()
-            || self.control.is_paused()
-            || self.control.seeking.load(Ordering::Acquire)
-        {
+        if self.control.is_stopped() || self.control.is_paused() {
             buf.fill(0.0);
             return 0;
+        }
+        if self.control.seeking.load(Ordering::Acquire) {
+            self.render_seek_fade(buf, output_channels);
+            return 0;
+        }
+
+        let seek_generation = self.control.seek_generation.load(Ordering::Acquire);
+        if seek_generation != self.observed_seek_generation {
+            self.observed_seek_generation = seek_generation;
+            self.seek_ramp_frame = 0;
+            // If a large hardware buffer prevented the callback from finishing
+            // the requested fade-out before the worker timeout, retain the
+            // last sample as the crossfade origin. Starting from zero here
+            // would itself create the discontinuity we are trying to remove.
+            // After a completed fade `last_output` is already silence.
+            self.seek_ramp_origin = self.last_output;
+            if !self.buffer_cleared_for_seek {
+                self.discard_buffered_samples_fast();
+            }
+            self.buffer_cleared_for_seek = false;
         }
 
         let mut written = 0;
@@ -181,7 +235,20 @@ impl PlaybackConsumer {
         let mut drained = false;
         for frame in buf.chunks_mut(output_channels) {
             if drained || self.available() < source_channels {
-                frame.fill(0.0);
+                if self.seek_ramp_frame < SEEK_RAMP_FRAMES {
+                    let gain = 1.0 - seek_ramp_progress(self.seek_ramp_frame);
+                    for (channel, output) in frame.iter_mut().enumerate() {
+                        *output = self.seek_ramp_origin.get(channel).copied().unwrap_or(0.0) * gain;
+                    }
+                    self.seek_ramp_frame += 1;
+                    for (channel, output) in
+                        frame.iter().copied().enumerate().take(MAX_CALLBACK_CHANNELS)
+                    {
+                        self.last_output[channel] = output;
+                    }
+                } else {
+                    frame.fill(0.0);
+                }
                 drained = true;
                 continue;
             }
@@ -219,10 +286,56 @@ impl PlaybackConsumer {
                     };
                 }
             }
+
+            if self.seek_ramp_frame < SEEK_RAMP_FRAMES {
+                let progress = seek_ramp_progress(self.seek_ramp_frame);
+                let has_signal = frame.iter().any(|sample| sample.abs() > f32::EPSILON);
+                for (channel, output) in frame.iter_mut().enumerate() {
+                    let origin = self.seek_ramp_origin.get(channel).copied().unwrap_or(0.0);
+                    *output = origin + (*output - origin) * progress;
+                }
+                // Codec seeks may emit silent pre-roll. Do not consume the
+                // anti-click ramp until real audio resumes, otherwise the
+                // first audible frame can still arrive at full gain.
+                if has_signal {
+                    self.seek_ramp_frame += 1;
+                }
+            }
+            for (channel, output) in frame.iter().copied().enumerate().take(MAX_CALLBACK_CHANNELS) {
+                self.last_output[channel] = output;
+            }
             written += frame.len();
             self.control.position_frames.fetch_add(1, Ordering::Relaxed);
+            self.control.output_active.store(true, Ordering::Release);
         }
         written
+    }
+
+    fn render_seek_fade(&mut self, buf: &mut [f32], output_channels: usize) {
+        if self.control.seek_fade_requested.swap(false, Ordering::AcqRel) {
+            self.seek_fade_out_frame = 0;
+            self.seek_fade_out_origin = self.last_output;
+        }
+        for frame in buf.chunks_mut(output_channels) {
+            if self.seek_fade_out_frame < SEEK_RAMP_FRAMES {
+                let gain = 1.0 - seek_ramp_progress(self.seek_fade_out_frame);
+                for (channel, output) in frame.iter_mut().enumerate() {
+                    *output = self.seek_fade_out_origin.get(channel).copied().unwrap_or(0.0) * gain;
+                }
+                self.seek_fade_out_frame += 1;
+            } else {
+                frame.fill(0.0);
+            }
+        }
+        if self.seek_fade_out_frame >= SEEK_RAMP_FRAMES {
+            self.last_output.fill(0.0);
+            if !self.buffer_cleared_for_seek {
+                self.discard_buffered_samples_fast();
+                self.buffer_cleared_for_seek = true;
+            }
+            self.control.output_active.store(false, Ordering::Release);
+            self.control.seek_fade_complete.store(true, Ordering::Release);
+        }
     }
 
     /// Returns a handle for pausing and resuming this consumer.
@@ -232,15 +345,23 @@ impl PlaybackConsumer {
 
     fn consume_current(&mut self, output: &mut [BufferedSample]) -> usize {
         let generation = self.control.generation.load(Ordering::Acquire);
-        while self.consumer.pop_slice(output) == 1 {
-            if output[0].generation == generation {
-                if output[0].resets_position {
-                    self.control.set_position_frames(0);
-                }
-                return 1;
-            }
+        if self.consumer.pop_slice(output) != 1 || output[0].generation != generation {
+            return 0;
         }
-        0
+        if output[0].resets_position {
+            self.control.set_position_frames(0);
+        }
+        1
+    }
+
+    fn discard_buffered_samples_fast(&mut self) {
+        let count = self.consumer.occupied_len();
+        // BufferedSample is Copy and has no destructor. Advancing the SPSC
+        // consumer index therefore invalidates the snapshot in constant time
+        // without touching every stale sample on the real-time thread.
+        unsafe {
+            self.consumer.advance_read_index(count);
+        }
     }
 
     /// Maps source channels and applies volume to samples for an output callback.
@@ -267,4 +388,9 @@ impl PlaybackConsumer {
         }
         self.consumer.occupied_len()
     }
+}
+
+fn seek_ramp_progress(frame: usize) -> f32 {
+    let linear = (frame + 1) as f32 / SEEK_RAMP_FRAMES as f32;
+    linear * linear * (3.0 - 2.0 * linear)
 }

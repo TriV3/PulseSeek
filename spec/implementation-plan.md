@@ -716,12 +716,12 @@ behavior test is not applicable.
   mute, and resizable panel dimensions on launch.
 - **Tests first:** Default state, atomic immediate writes, stale-write rejection,
   corrupt-state fallback, unavailable paths/devices, browser restoration, and
-  explicit exclusion of transport state and seek position.
+  restoration of the last confirmed position without autoplay.
 - **Acceptance:** Relaunching PulseSeek restores every selectable Audio Player
   option and reveals the last played file without autoplay; transport starts
-  stopped at zero.
-- **Out of scope:** Manager database state, session marks, playback resume, seek
-  restoration, and cloud-drive authentication.
+  stopped at the restored playhead and resumes there only after Play.
+- **Out of scope:** Manager database state, session marks, autoplay, and
+  cloud-drive authentication.
 
 ## 10. Milestone G — Themes and visual polish
 
