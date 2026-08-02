@@ -5,6 +5,11 @@ import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
 import type { PlaybackSelectionStatus } from "../../hooks/usePlaybackSelection";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { ConfirmDialog } from "../ConfirmDialog/ConfirmDialog";
+import {
+  DEFAULT_FILE_SORT,
+  type FileSort,
+  type FileSortField,
+} from "./fileSort";
 import "./FileList.css";
 import "../ConfirmDialog/ConfirmDialog.css";
 
@@ -77,7 +82,35 @@ interface FileListProps {
   playbackError?: string | null;
   /** Called with entries successfully moved to the OS trash. */
   onEntriesTrashed?: (entryIds: string[]) => void;
+  /** Active sort; default name ascending when omitted. */
+  sort?: FileSort;
+  /** Called whenever the user changes the sort. */
+  onSortChange?: (sort: FileSort) => void;
 }
+
+/** Column headers that act as clickable sort controls. */
+const SORTABLE_HEADERS: Array<{
+  label: string;
+  field: FileSortField;
+}> = [
+  { label: "Name", field: "name" },
+  { label: "Duration", field: "duration" },
+  { label: "Size", field: "size" },
+  { label: "Modified", field: "date" },
+];
+
+/** Non-column fields exposed through the type/path sort control. */
+const MENU_SORT_OPTIONS: Array<{
+  label: string;
+  value: string;
+  field: FileSortField;
+  direction: "asc" | "desc";
+}> = [
+  { label: "Type (A→Z)", value: "type:asc", field: "type", direction: "asc" },
+  { label: "Type (Z→A)", value: "type:desc", field: "type", direction: "desc" },
+  { label: "Path (A→Z)", value: "path:asc", field: "path", direction: "asc" },
+  { label: "Path (Z→A)", value: "path:desc", field: "path", direction: "desc" },
+];
 
 export function FileList({
   entries,
@@ -89,6 +122,8 @@ export function FileList({
   playbackStatus = "idle",
   playbackError = null,
   onEntriesTrashed,
+  sort = DEFAULT_FILE_SORT,
+  onSortChange,
 }: FileListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
@@ -99,6 +134,15 @@ export function FileList({
   );
   const [trashError, setTrashError] = useState<string | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
+
+  const requestSort = (field: FileSortField) => {
+    if (!onSortChange) return;
+    const next: FileSort =
+      sort.field === field
+        ? { field, direction: sort.direction === "asc" ? "desc" : "asc" }
+        : { field, direction: "asc" };
+    onSortChange(next);
+  };
 
   useEffect(() => {
     setSelectedEntryId(null);
@@ -267,6 +311,37 @@ export function FileList({
         >
           Move to Trash
         </button>
+        <label className="file-list-sort-menu">
+          <span className="file-list-sort-menu-label">Sort by</span>
+          <select
+            aria-label="Sort by type or path"
+            value={
+              sort.field === "type" || sort.field === "path"
+                ? `${sort.field}:${sort.direction}`
+                : ""
+            }
+            onChange={(event) => {
+              const option = MENU_SORT_OPTIONS.find(
+                (candidate) => candidate.value === event.target.value,
+              );
+              if (option) {
+                onSortChange?.({
+                  field: option.field,
+                  direction: option.direction,
+                });
+              }
+            }}
+          >
+            <option value="" disabled>
+              Type / Path…
+            </option>
+            {MENU_SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
         {trashStatus === "moving" ? (
           <span role="status" aria-live="polite">
             Moving to Trash…
@@ -287,10 +362,33 @@ export function FileList({
         aria-rowcount={entries.length + 1}
       >
         <div className="file-list-header" role="row">
-          <span role="columnheader">Name</span>
-          <span role="columnheader">Duration</span>
-          <span role="columnheader">Size</span>
-          <span role="columnheader">Modified</span>
+          {SORTABLE_HEADERS.map((header) => {
+            const isActive = sort.field === header.field;
+            return (
+              <button
+                key={header.field}
+                type="button"
+                role="columnheader"
+                className="file-list-sort-button"
+                aria-label={header.label}
+                aria-sort={
+                  isActive
+                    ? sort.direction === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : undefined
+                }
+                onClick={() => requestSort(header.field)}
+              >
+                <span>{header.label}</span>
+                {isActive ? (
+                  <span aria-hidden="true">
+                    {sort.direction === "asc" ? " ↑" : " ↓"}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
           <span role="columnheader">Channels</span>
           <span role="columnheader">Sample rate</span>
           <span role="columnheader">Bit depth</span>
