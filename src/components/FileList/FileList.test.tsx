@@ -1,8 +1,9 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { FileList } from "./FileList";
 import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
+import { sortFileEntries, type FileSort } from "./fileSort";
 
 const mockMoveToTrash = vi.hoisted(() => vi.fn());
 
@@ -604,5 +605,215 @@ describe("FileList — large collections", () => {
     );
 
     expect(screen.getAllByRole("row")).toHaveLength(21);
+  });
+});
+
+describe("FileList — file sorting", () => {
+  const baseEntries: BrowserEntry[] = [
+    {
+      id: "/m/200.flac",
+      name: "zulu.flac",
+      kind: "playable",
+      metadata: {
+        duration_ms: 200_000,
+        size_bytes: 9_000,
+        modified_at_ms: 3_000,
+        channels: null,
+        sample_rate: null,
+        bit_depth: null,
+        codec: null,
+      },
+    },
+    {
+      id: "/m/100.wav",
+      name: "alpha.wav",
+      kind: "playable",
+      metadata: {
+        duration_ms: 10_000,
+        size_bytes: 1_000,
+        modified_at_ms: 1_000,
+        channels: null,
+        sample_rate: null,
+        bit_depth: null,
+        codec: null,
+      },
+    },
+    {
+      id: "/m/150.mp3",
+      name: "bravo.mp3",
+      kind: "playable",
+      metadata: {
+        duration_ms: 50_000,
+        size_bytes: 4_000,
+        modified_at_ms: 2_000,
+        channels: null,
+        sample_rate: null,
+        bit_depth: null,
+        codec: null,
+      },
+    },
+  ];
+
+  /** Mirrors how App sorts before rendering rows. */
+  function SortHarness({
+    onSortChange,
+  }: {
+    onSortChange?: (sort: FileSort) => void;
+  }) {
+    const [sort, setSort] = useState<FileSort>({
+      field: "name",
+      direction: "asc",
+    });
+    const entries = useMemo(() => sortFileEntries(baseEntries, sort), [sort]);
+    return (
+      <FileList
+        entries={entries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        sort={sort}
+        onSortChange={(next) => {
+          setSort(next);
+          onSortChange?.(next);
+        }}
+      />
+    );
+  }
+
+  it("shows an accessible sort control for type and path", () => {
+    render(<SortHarness />);
+
+    expect(
+      screen.getByRole("combobox", { name: /sort by type or path/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("clicking a column header requests ascending sort for that field", () => {
+    const onSortChange = vi.fn();
+    render(
+      <SortHarness
+        onSortChange={(next) => {
+          if (next.field !== "name" || next.direction !== "asc") {
+            onSortChange(next);
+          }
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("columnheader", { name: "Duration" }));
+
+    expect(onSortChange).toHaveBeenCalledWith({
+      field: "duration",
+      direction: "asc",
+    });
+  });
+
+  it("clicking the active header toggles the direction", () => {
+    const onSortChange = vi.fn();
+    render(
+      <SortHarness
+        onSortChange={(next) => {
+          if (next.field !== "name" || next.direction !== "asc") {
+            onSortChange(next);
+          }
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("columnheader", { name: "Duration" }));
+    fireEvent.click(screen.getByRole("columnheader", { name: "Duration" }));
+
+    expect(onSortChange).toHaveBeenCalledWith({
+      field: "duration",
+      direction: "desc",
+    });
+  });
+
+  it("reflects the active column and direction with aria-sort", () => {
+    render(
+      <FileList
+        entries={sortFileEntries(baseEntries, {
+          field: "size",
+          direction: "desc",
+        })}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        sort={{ field: "size", direction: "desc" }}
+        onSortChange={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole("columnheader", { name: "Size" })).toHaveAttribute(
+      "aria-sort",
+      "descending",
+    );
+    expect(
+      screen.getByRole("columnheader", { name: "Duration" }),
+    ).not.toHaveAttribute("aria-sort");
+  });
+
+  it("orders rows according to the requested sort", () => {
+    render(
+      <FileList
+        entries={sortFileEntries(baseEntries, {
+          field: "duration",
+          direction: "asc",
+        })}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        sort={{ field: "duration", direction: "asc" }}
+        onSortChange={() => undefined}
+      />,
+    );
+
+    const rows = screen.getAllByRole("row");
+    expect(rows[0]).toHaveTextContent("Name");
+    expect(rows[1]).toHaveTextContent("alpha.wav");
+    expect(rows[2]).toHaveTextContent("bravo.mp3");
+    expect(rows[3]).toHaveTextContent("zulu.flac");
+  });
+
+  it("changing the type/path sort emits a sort request", () => {
+    const onSortChange = vi.fn();
+    render(<SortHarness onSortChange={onSortChange} />);
+
+    fireEvent.change(
+      screen.getByRole("combobox", { name: /sort by type or path/i }),
+      { target: { value: "path:desc" } },
+    );
+
+    expect(onSortChange).toHaveBeenCalledWith({
+      field: "path",
+      direction: "desc",
+    });
+  });
+
+  it("keeps the selection when the sort changes", () => {
+    render(<SortHarness />);
+
+    fireEvent.click(screen.getByText("zulu.flac"));
+    expect(screen.getByRole("row", { name: /zulu\.flac/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    // Toggle Duration ascending → descending; rows reorder, selection stays.
+    fireEvent.click(screen.getByRole("columnheader", { name: "Duration" }));
+    fireEvent.click(screen.getByRole("columnheader", { name: "Duration" }));
+
+    expect(screen.getByRole("row", { name: /zulu\.flac/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("keeps sort controls keyboard accessible", () => {
+    render(<SortHarness />);
+
+    expect(screen.getByRole("columnheader", { name: "Duration" }).tagName).toBe(
+      "BUTTON",
+    );
   });
 });

@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFolderTree } from "./hooks/useFolderTree";
 import { FolderTree } from "./components/FolderTree/FolderTree";
 import { FileList } from "./components/FileList/FileList";
+import {
+  DEFAULT_FILE_SORT,
+  sortFileEntries,
+  type FileSort,
+} from "./components/FileList/fileSort";
 import { usePlaybackSelection } from "./hooks/usePlaybackSelection";
 import { usePlaybackTransport } from "./hooks/usePlaybackTransport";
 import { PlayerTransport } from "./components/PlayerTransport/PlayerTransport";
@@ -29,6 +34,7 @@ function App() {
   const [waveformSize, setWaveformSize] = useState(38);
   const [browserSize, setBrowserSize] = useState(24);
   const [waveformResetRevision, setWaveformResetRevision] = useState(0);
+  const [fileSort, setFileSort] = useState<FileSort>(DEFAULT_FILE_SORT);
   const folderTree = useFolderTree();
   const { state } = folderTree;
   const playback = usePlaybackSelection();
@@ -45,8 +51,15 @@ function App() {
     null,
   );
 
-  const fileListEntries = state.playableEntries[state.selectedPath ?? ""] ?? [];
   const fileListFolder = state.folders[state.selectedPath ?? ""] ?? undefined;
+  const fileListEntries = useMemo(
+    () => state.playableEntries[state.selectedPath ?? ""] ?? [],
+    [state.playableEntries, state.selectedPath],
+  );
+  const sortedFileListEntries = useMemo(
+    () => sortFileEntries(fileListEntries, fileSort),
+    [fileListEntries, fileSort],
+  );
   const selectAndRemember = useCallback(
     async (
       entry: import("./components/FolderTree/folderTreeTypes").BrowserEntry,
@@ -68,7 +81,7 @@ function App() {
     [playback, updatePreferences],
   );
   const transport = usePlaybackTransport({
-    entries: fileListEntries,
+    entries: sortedFileListEntries,
     selectedEntryId: playback.playback.entryId,
     playbackStatus: playback.playback.status,
     playbackGeneration: playback.playback.generation,
@@ -503,7 +516,7 @@ function App() {
             />
             <section className="app-content">
               <FileList
-                entries={fileListEntries}
+                entries={sortedFileListEntries}
                 selectedPath={state.selectedPath}
                 isLoading={fileListFolder?.isLoading ?? false}
                 error={fileListFolder?.error ?? null}
@@ -511,6 +524,8 @@ function App() {
                 playbackEntryId={playback.playback.entryId}
                 playbackStatus={playback.playback.status}
                 playbackError={playback.playback.error}
+                sort={fileSort}
+                onSortChange={setFileSort}
                 onEntriesTrashed={(entryIds) => {
                   if (state.selectedPath) {
                     folderTree.removeEntries(state.selectedPath, entryIds);
