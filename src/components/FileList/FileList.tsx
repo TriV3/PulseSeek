@@ -86,6 +86,12 @@ interface FileListProps {
   sort?: FileSort;
   /** Called whenever the user changes the sort. */
   onSortChange?: (sort: FileSort) => void;
+  /** Current folder search query; empty when no search is active. */
+  searchQuery?: string;
+  /** Called whenever the user changes the search query. */
+  onSearchQueryChange?: (query: string) => void;
+  /** Called when a matched folder row is activated for navigation. */
+  onSelectFolder?: (path: string) => void;
 }
 
 /** Column headers that act as clickable sort controls. */
@@ -97,19 +103,6 @@ const SORTABLE_HEADERS: Array<{
   { label: "Duration", field: "duration" },
   { label: "Size", field: "size" },
   { label: "Modified", field: "date" },
-];
-
-/** Non-column fields exposed through the type/path sort control. */
-const MENU_SORT_OPTIONS: Array<{
-  label: string;
-  value: string;
-  field: FileSortField;
-  direction: "asc" | "desc";
-}> = [
-  { label: "Type (A→Z)", value: "type:asc", field: "type", direction: "asc" },
-  { label: "Type (Z→A)", value: "type:desc", field: "type", direction: "desc" },
-  { label: "Path (A→Z)", value: "path:asc", field: "path", direction: "asc" },
-  { label: "Path (Z→A)", value: "path:desc", field: "path", direction: "desc" },
 ];
 
 export function FileList({
@@ -124,6 +117,9 @@ export function FileList({
   onEntriesTrashed,
   sort = DEFAULT_FILE_SORT,
   onSortChange,
+  searchQuery = "",
+  onSearchQueryChange,
+  onSelectFolder,
 }: FileListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
@@ -250,51 +246,8 @@ export function FileList({
     );
   }
 
-  // ── Error ───────────────────────────────────────────────────────────
-
-  if (error) {
-    return (
-      <div
-        className="file-list file-list--error"
-        role="region"
-        aria-label="File list"
-      >
-        <p className="file-list-placeholder file-list-placeholder--error">
-          {error}
-        </p>
-      </div>
-    );
-  }
-
-  // ── Loading (no entries yet) ────────────────────────────────────────
-
-  if (isLoading && entries.length === 0) {
-    return (
-      <div
-        className="file-list file-list--loading"
-        role="region"
-        aria-label="File list"
-      >
-        <p className="file-list-placeholder">Loading&#8230;</p>
-      </div>
-    );
-  }
-
-  // ── Empty folder ────────────────────────────────────────────────────
-
-  if (!isLoading && entries.length === 0) {
-    return (
-      <div
-        className="file-list file-list--empty"
-        role="region"
-        aria-label="File list"
-      >
-        <p className="file-list-placeholder">(no playable files)</p>
-      </div>
-    );
-  }
-
-  // ── Virtualized list ────────────────────────────────────────────────
+  // The actions bar (search, sort, trash) stays visible whenever a folder is
+  // selected so a search that matches nothing never hides the search box.
 
   return (
     <div className="file-list" role="region" aria-label="File list">
@@ -311,37 +264,14 @@ export function FileList({
         >
           Move to Trash
         </button>
-        <label className="file-list-sort-menu">
-          <span className="file-list-sort-menu-label">Sort by</span>
-          <select
-            aria-label="Sort by type or path"
-            value={
-              sort.field === "type" || sort.field === "path"
-                ? `${sort.field}:${sort.direction}`
-                : ""
-            }
-            onChange={(event) => {
-              const option = MENU_SORT_OPTIONS.find(
-                (candidate) => candidate.value === event.target.value,
-              );
-              if (option) {
-                onSortChange?.({
-                  field: option.field,
-                  direction: option.direction,
-                });
-              }
-            }}
-          >
-            <option value="" disabled>
-              Type / Path…
-            </option>
-            {MENU_SORT_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <input
+          type="search"
+          className="file-list-search"
+          aria-label="Search files"
+          placeholder="Search files"
+          value={searchQuery}
+          onChange={(event) => onSearchQueryChange?.(event.target.value)}
+        />
         {trashStatus === "moving" ? (
           <span role="status" aria-live="polite">
             Moving to Trash…
@@ -353,177 +283,261 @@ export function FileList({
           </span>
         ) : null}
       </div>
-      <div
-        ref={parentRef}
-        className="file-list-viewport"
-        role="grid"
-        aria-label="Playable files"
-        aria-colcount={9}
-        aria-rowcount={entries.length + 1}
-      >
-        <div className="file-list-header" role="row">
-          {SORTABLE_HEADERS.map((header) => {
-            const isActive = sort.field === header.field;
-            return (
-              <button
-                key={header.field}
-                type="button"
-                role="columnheader"
-                className="file-list-sort-button"
-                aria-label={header.label}
-                aria-sort={
-                  isActive
-                    ? sort.direction === "asc"
-                      ? "ascending"
-                      : "descending"
-                    : undefined
-                }
-                onClick={() => requestSort(header.field)}
-              >
-                <span>{header.label}</span>
-                {isActive ? (
-                  <span aria-hidden="true">
-                    {sort.direction === "asc" ? " ↑" : " ↓"}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
-          <span role="columnheader">Channels</span>
-          <span role="columnheader">Sample rate</span>
-          <span role="columnheader">Bit depth</span>
-          <span role="columnheader">Codec</span>
-          <span role="columnheader">Status</span>
+
+      {error ? (
+        <div className="file-list-state file-list-state--error">
+          <p className="file-list-placeholder file-list-placeholder--error">
+            {error}
+          </p>
         </div>
+      ) : isLoading && entries.length === 0 ? (
+        <div className="file-list-state file-list-state--loading">
+          <p className="file-list-placeholder">Loading&#8230;</p>
+        </div>
+      ) : entries.length === 0 ? (
+        <div className="file-list-state file-list-state--empty">
+          <p className="file-list-placeholder">
+            {searchQuery.trim() === ""
+              ? "(no playable files)"
+              : `(no files match “${searchQuery.trim()}”)`}
+          </p>
+        </div>
+      ) : (
         <div
-          className="file-list-inner"
-          style={{ height: `${virtualizer.getTotalSize()}px` }}
+          ref={parentRef}
+          className="file-list-viewport"
+          role="grid"
+          aria-label="Playable files"
+          aria-colcount={9}
+          aria-rowcount={entries.length + 1}
         >
-          {virtualizer.getVirtualItems().map((virtualRow) => {
-            const entry = entries[virtualRow.index];
-            const metadata = entry.metadata;
-            const metadataLoading = isLoading && metadata == null;
-            const isPlaybackEntry = playbackEntryId === entry.id;
-            const statusLabel = isPlaybackEntry
-              ? playbackStatus === "loading"
-                ? "Loading"
-                : playbackStatus === "playing"
-                  ? "Playing"
-                  : playbackStatus === "failed"
-                    ? "Failed"
-                    : ""
-              : "";
-            return (
-              <div
-                key={entry.id}
-                ref={(node) => {
-                  if (node) rowRefs.current.set(entry.id, node);
-                  else rowRefs.current.delete(entry.id);
-                }}
-                data-row-id={entry.id}
-                className={`file-list-row${
-                  selectedEntryIdForFolder === entry.id ? " selected" : ""
-                }`}
-                style={{
-                  height: `${virtualRow.size}px`,
-                  transform: `translateY(${virtualRow.start}px)`,
-                }}
-                onClick={() => selectEntry(entry)}
-                onKeyDown={(event) => {
-                  if (event.key === "Delete" || event.key === "Backspace") {
-                    event.preventDefault();
-                    if (trashStatus !== "moving") requestTrash(entry);
-                    return;
+          <div className="file-list-header" role="row">
+            {SORTABLE_HEADERS.map((header) => {
+              const isActive = sort.field === header.field;
+              return (
+                <button
+                  key={header.field}
+                  type="button"
+                  role="columnheader"
+                  className="file-list-sort-button"
+                  aria-label={header.label}
+                  aria-sort={
+                    isActive
+                      ? sort.direction === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : undefined
                   }
-                  if (event.key === "ArrowDown") {
-                    event.preventDefault();
-                    focusEntry(virtualRow.index + 1);
-                    return;
+                  onClick={() => requestSort(header.field)}
+                >
+                  <span>{header.label}</span>
+                  {isActive ? (
+                    <span aria-hidden="true">
+                      {sort.direction === "asc" ? " ↑" : " ↓"}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+            <span role="columnheader">Channels</span>
+            <span role="columnheader">Sample rate</span>
+            <span role="columnheader">Bit depth</span>
+            <span role="columnheader">Codec</span>
+            <span role="columnheader">Status</span>
+          </div>
+          <div
+            className="file-list-inner"
+            style={{ height: `${virtualizer.getTotalSize()}px` }}
+          >
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const entry = entries[virtualRow.index];
+
+              if (entry.kind === "folder") {
+                return (
+                  <div
+                    key={entry.id}
+                    ref={(node) => {
+                      if (node) rowRefs.current.set(entry.id, node);
+                      else rowRefs.current.delete(entry.id);
+                    }}
+                    data-row-id={entry.id}
+                    className="file-list-row file-list-row--folder"
+                    style={{
+                      height: `${virtualRow.size}px`,
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                    onClick={() => onSelectFolder?.(entry.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "ArrowDown") {
+                        event.preventDefault();
+                        focusEntry(virtualRow.index + 1);
+                        return;
+                      }
+                      if (event.key === "ArrowUp") {
+                        event.preventDefault();
+                        focusEntry(virtualRow.index - 1);
+                        return;
+                      }
+                      if (event.key === "Home") {
+                        event.preventDefault();
+                        focusEntry(0);
+                        return;
+                      }
+                      if (event.key === "End") {
+                        event.preventDefault();
+                        focusEntry(entries.length - 1);
+                        return;
+                      }
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        onSelectFolder?.(entry.id);
+                      }
+                    }}
+                    role="row"
+                    aria-rowindex={virtualRow.index + 2}
+                    aria-selected="false"
+                    tabIndex={activeEntryIdForFolder === entry.id ? 0 : -1}
+                    aria-label={`Open folder ${entry.name}`}
+                  >
+                    <span className="file-list-row-name" role="gridcell">
+                      {entry.name}
+                    </span>
+                    <span role="gridcell" aria-hidden="true"></span>
+                    <span role="gridcell" aria-hidden="true"></span>
+                    <span role="gridcell" aria-hidden="true"></span>
+                    <span role="gridcell" aria-hidden="true"></span>
+                    <span role="gridcell" aria-hidden="true"></span>
+                    <span role="gridcell" aria-hidden="true"></span>
+                    <span role="gridcell" aria-hidden="true"></span>
+                    <span role="gridcell">Folder</span>
+                  </div>
+                );
+              }
+
+              const metadata = entry.metadata;
+              const metadataLoading = isLoading && metadata == null;
+              const isPlaybackEntry = playbackEntryId === entry.id;
+              const statusLabel = isPlaybackEntry
+                ? playbackStatus === "loading"
+                  ? "Loading"
+                  : playbackStatus === "playing"
+                    ? "Playing"
+                    : playbackStatus === "failed"
+                      ? "Failed"
+                      : ""
+                : "";
+              return (
+                <div
+                  key={entry.id}
+                  ref={(node) => {
+                    if (node) rowRefs.current.set(entry.id, node);
+                    else rowRefs.current.delete(entry.id);
+                  }}
+                  data-row-id={entry.id}
+                  className={`file-list-row${
+                    selectedEntryIdForFolder === entry.id ? " selected" : ""
+                  }`}
+                  style={{
+                    height: `${virtualRow.size}px`,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                  onClick={() => selectEntry(entry)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Delete" || event.key === "Backspace") {
+                      event.preventDefault();
+                      if (trashStatus !== "moving") requestTrash(entry);
+                      return;
+                    }
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      focusEntry(virtualRow.index + 1);
+                      return;
+                    }
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      focusEntry(virtualRow.index - 1);
+                      return;
+                    }
+                    if (event.key === "Home") {
+                      event.preventDefault();
+                      focusEntry(0);
+                      return;
+                    }
+                    if (event.key === "End") {
+                      event.preventDefault();
+                      focusEntry(entries.length - 1);
+                      return;
+                    }
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      selectEntry(entry);
+                    }
+                  }}
+                  role="row"
+                  aria-rowindex={virtualRow.index + 2}
+                  aria-selected={selectedEntryIdForFolder === entry.id}
+                  tabIndex={activeEntryIdForFolder === entry.id ? 0 : -1}
+                  aria-label={`${entry.name}${statusLabel ? ` ${statusLabel}` : ""}`}
+                  aria-describedby={
+                    isPlaybackEntry && playbackError
+                      ? "file-list-playback-error"
+                      : undefined
                   }
-                  if (event.key === "ArrowUp") {
-                    event.preventDefault();
-                    focusEntry(virtualRow.index - 1);
-                    return;
-                  }
-                  if (event.key === "Home") {
-                    event.preventDefault();
-                    focusEntry(0);
-                    return;
-                  }
-                  if (event.key === "End") {
-                    event.preventDefault();
-                    focusEntry(entries.length - 1);
-                    return;
-                  }
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    selectEntry(entry);
-                  }
-                }}
-                role="row"
-                aria-rowindex={virtualRow.index + 2}
-                aria-selected={selectedEntryIdForFolder === entry.id}
-                tabIndex={activeEntryIdForFolder === entry.id ? 0 : -1}
-                aria-label={`${entry.name}${statusLabel ? ` ${statusLabel}` : ""}`}
-                aria-describedby={
-                  isPlaybackEntry && playbackError
-                    ? "file-list-playback-error"
-                    : undefined
-                }
-              >
-                <span className="file-list-row-name" role="gridcell">
-                  {entry.name}
-                </span>
-                <span role="gridcell">
-                  {metadataValue(
-                    formatDuration(metadata?.duration_ms ?? null),
-                    metadataLoading,
-                  )}
-                </span>
-                <span role="gridcell">
-                  {metadataValue(
-                    formatSize(metadata?.size_bytes ?? null),
-                    metadataLoading,
-                  )}
-                </span>
-                <span role="gridcell">
-                  {metadataValue(
-                    formatModified(metadata?.modified_at_ms ?? null),
-                    metadataLoading,
-                  )}
-                </span>
-                <span role="gridcell">
-                  {metadataValue(
-                    formatChannels(metadata?.channels ?? null),
-                    metadataLoading,
-                  )}
-                </span>
-                <span role="gridcell">
-                  {metadataValue(
-                    formatSampleRate(metadata?.sample_rate ?? null),
-                    metadataLoading,
-                  )}
-                </span>
-                <span role="gridcell">
-                  {metadataValue(
-                    metadata?.bit_depth == null
-                      ? UNAVAILABLE
-                      : `${metadata.bit_depth}-bit`,
-                    metadataLoading,
-                  )}
-                </span>
-                <span role="gridcell">
-                  {metadataValue(
-                    metadata?.codec ?? UNAVAILABLE,
-                    metadataLoading,
-                  )}
-                </span>
-                <span role="gridcell">{statusLabel}</span>
-              </div>
-            );
-          })}
+                >
+                  <span className="file-list-row-name" role="gridcell">
+                    {entry.name}
+                  </span>
+                  <span role="gridcell">
+                    {metadataValue(
+                      formatDuration(metadata?.duration_ms ?? null),
+                      metadataLoading,
+                    )}
+                  </span>
+                  <span role="gridcell">
+                    {metadataValue(
+                      formatSize(metadata?.size_bytes ?? null),
+                      metadataLoading,
+                    )}
+                  </span>
+                  <span role="gridcell">
+                    {metadataValue(
+                      formatModified(metadata?.modified_at_ms ?? null),
+                      metadataLoading,
+                    )}
+                  </span>
+                  <span role="gridcell">
+                    {metadataValue(
+                      formatChannels(metadata?.channels ?? null),
+                      metadataLoading,
+                    )}
+                  </span>
+                  <span role="gridcell">
+                    {metadataValue(
+                      formatSampleRate(metadata?.sample_rate ?? null),
+                      metadataLoading,
+                    )}
+                  </span>
+                  <span role="gridcell">
+                    {metadataValue(
+                      metadata?.bit_depth == null
+                        ? UNAVAILABLE
+                        : `${metadata.bit_depth}-bit`,
+                      metadataLoading,
+                    )}
+                  </span>
+                  <span role="gridcell">
+                    {metadataValue(
+                      metadata?.codec ?? UNAVAILABLE,
+                      metadataLoading,
+                    )}
+                  </span>
+                  <span role="gridcell">{statusLabel}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
       {playbackError &&
       playbackEntryId &&
       entries.some((entry) => entry.id === playbackEntryId) ? (

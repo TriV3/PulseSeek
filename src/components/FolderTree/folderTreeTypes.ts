@@ -97,3 +97,22 @@ export function getParentPath(path: string): string | null {
   if (lastSlash <= 0) return null;
   return normalized.substring(0, lastSlash);
 }
+
+/**
+ * Collects every folder currently visible in the browser tree, deduplicated by
+ * path. Used as the search base for folder search so a query is not limited to
+ * the children of the currently selected folder (FR-LS-004).
+ */
+export function collectFolderEntries(
+  folders: Record<string, FolderState>,
+): BrowserEntry[] {
+  const byPath = new Map<string, BrowserEntry>();
+  for (const folder of Object.values(folders)) {
+    for (const entry of folder.children) {
+      if (entry.kind === "folder" && !byPath.has(entry.id)) {
+        byPath.set(entry.id, entry);
+      }
+    }
+  }
+  return [...byPath.values()];
+}

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   pause,
   resume,
@@ -48,16 +48,22 @@ export function usePlaybackTransport({
     playbackMode,
     onSelectEntry,
   });
+  // Folder rows appear in the visible list only while a search is active;
+  // playback navigation must never select a folder.
+  const playableEntries = useMemo(
+    () => entries.filter((entry) => entry.kind === "playable"),
+    [entries],
+  );
   useLayoutEffect(() => {
     playbackContext.current = {
-      entries,
+      entries: playableEntries,
       selectedEntryId,
       playbackGeneration,
       playbackMode,
       onSelectEntry,
     };
   }, [
-    entries,
+    playableEntries,
     onSelectEntry,
     playbackGeneration,
     playbackMode,
@@ -155,11 +161,12 @@ export function usePlaybackTransport({
     }
   };
 
-  const selectedIndex = entries.findIndex(
+  const selectedIndex = playableEntries.findIndex(
     (entry) => entry.id === selectedEntryId,
   );
   const canPrevious = selectedIndex > 0;
-  const canNext = selectedIndex >= 0 && selectedIndex < entries.length - 1;
+  const canNext =
+    selectedIndex >= 0 && selectedIndex < playableEntries.length - 1;
   const effectiveStatus =
     commandStatus?.entryId === selectedEntryId &&
     commandStatus.generation === playbackGeneration
@@ -201,7 +208,7 @@ export function usePlaybackTransport({
           }
         }).then(() => undefined);
       }
-      const selected = entries[selectedIndex];
+      const selected = playableEntries[selectedIndex];
       return selected ? onSelectEntry(selected) : Promise.resolve();
     },
     handleStop: () =>
@@ -218,11 +225,13 @@ export function usePlaybackTransport({
         }
       }).then(() => undefined),
     handlePrevious: () => {
-      if (canPrevious) return onSelectEntry(entries[selectedIndex - 1]);
+      if (canPrevious) {
+        return onSelectEntry(playableEntries[selectedIndex - 1]);
+      }
       return Promise.resolve();
     },
     handleNext: () => {
-      if (canNext) return onSelectEntry(entries[selectedIndex + 1]);
+      if (canNext) return onSelectEntry(playableEntries[selectedIndex + 1]);
       return Promise.resolve();
     },
     handleSeek: async (nextPositionMs: number) => {
