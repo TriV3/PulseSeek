@@ -5,6 +5,7 @@ import {
   buildEnvelope,
   defaultTargetPeaksForWidth,
   drawEnvelope,
+  positionMsForX,
   resolveTokens,
   type Canvas2D,
   type WaveformTokens,
@@ -14,11 +15,14 @@ export interface WaveformCanvasProps {
   waveform: WaveformLevel | null;
   durationMs: number | null;
   onRequestRefetch?: (targetPeaks: number) => void;
+  onSeek?: (positionMs: number) => void | Promise<void>;
+  seekStepMs?: number;
   targetPeaksForWidth?: (widthPx: number) => number;
   getTokens?: (scope: Element | null | undefined) => WaveformTokens;
 }
 
 const REFETCH_DEBOUNCE_MS = 200;
+const DEFAULT_SEEK_STEP_MS = 5_000;
 
 /**
  * Canvas 2D waveform renderer with an imperative playhead.
@@ -32,6 +36,8 @@ export function WaveformCanvas({
   waveform,
   durationMs,
   onRequestRefetch,
+  onSeek,
+  seekStepMs = DEFAULT_SEEK_STEP_MS,
   targetPeaksForWidth = defaultTargetPeaksForWidth,
   getTokens = resolveTokens,
 }: WaveformCanvasProps) {
@@ -41,11 +47,14 @@ export function WaveformCanvas({
   const heightRef = useRef(0);
   const rafRef = useRef<number | null>(null);
   const refetchTimer = useRef<number | null>(null);
+  const draggingRef = useRef(false);
 
   const propsRef = useRef({
     waveform,
     durationMs,
     onRequestRefetch,
+    onSeek,
+    seekStepMs,
     targetPeaksForWidth,
     getTokens,
   });
@@ -54,10 +63,20 @@ export function WaveformCanvas({
       waveform,
       durationMs,
       onRequestRefetch,
+      onSeek,
+      seekStepMs,
       targetPeaksForWidth,
       getTokens,
     };
-  }, [waveform, durationMs, onRequestRefetch, targetPeaksForWidth, getTokens]);
+  }, [
+    waveform,
+    durationMs,
+    onRequestRefetch,
+    onSeek,
+    seekStepMs,
+    targetPeaksForWidth,
+    getTokens,
+  ]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -74,6 +93,10 @@ export function WaveformCanvas({
       ? buildEnvelope(waveform, width, height, positionRef.current, durationMs)
       : { channels: [], playheadX: null };
     drawEnvelope(ctx, geometry, tokens, width, height);
+
+    // The slider value tracks position imperatively so React never re-renders
+    // on high-frequency playback updates.
+    canvas.setAttribute("aria-valuenow", String(positionRef.current ?? 0));
   }, []);
 
   const scheduleDraw = useCallback(() => {
@@ -84,11 +107,101 @@ export function WaveformCanvas({
     });
   }, [draw]);
 
+  const commitSeek = useCallback(
+    (targetMs: number) => {
+      positionRef.current = targetMs;
+      scheduleDraw();
+      propsRef.current.onSeek?.(targetMs);
+    },
+    [scheduleDraw],
+  );
+
+  const targetFromPointer = useCallback((clientX: number): number | null => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const { durationMs } = propsRef.current;
+    const rect = canvas.getBoundingClientRect();
+    return positionMsForX(clientX - rect.left, rect.width, durationMs);
+  }, []);
+
+  const handlePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLCanvasElement>) => {
+      const { durationMs } = propsRef.current;
+      if (durationMs === null) return;
+      const target = targetFromPointer(event.clientX);
+      if (target === null) return;
+      draggingRef.current = true;
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture can be unavailable in non-browser environments;
+        // dragging still works without it.
+      }
+      commitSeek(target);
+    },
+    [commitSeek, targetFromPointer],
+  );
+
+  const handlePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLCanvasElement>) => {
+      if (!draggingRef.current) return;
+      const target = targetFromPointer(event.clientX);
+      if (target === null) return;
+      commitSeek(target);
+    },
+    [commitSeek, targetFromPointer],
+  );
+
+  const handlePointerEnd = useCallback(
+    (event: React.PointerEvent<HTMLCanvasElement>) => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is best-effort.
+      }
+    },
+    [],
+  );
+
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLCanvasElement>) => {
+      const { durationMs, seekStepMs } = propsRef.current;
+      if (durationMs === null) return;
+      const current = positionRef.current ?? 0;
+      let target: number | null = null;
+      switch (event.key) {
+        case "ArrowRight":
+          target = Math.min(durationMs, current + seekStepMs);
+          break;
+        case "ArrowLeft":
+          target = Math.max(0, current - seekStepMs);
+          break;
+        case "Home":
+          target = 0;
+          break;
+        case "End":
+          target = durationMs;
+          break;
+        default:
+          return;
+      }
+      event.preventDefault();
+      commitSeek(target);
+    },
+    [commitSeek],
+  );
+
   // Re-draw when waveform data or duration changes (low frequency). The
-  // playhead is reset first so a previous file's position never paints onto
-  // the new waveform.
+  // playhead is reset only when the file's waveform changes, so the same
+  // file's first duration update never wipes a freshly confirmed position.
+  const lastWaveformRef = useRef<WaveformLevel | null>(waveform);
   useEffect(() => {
-    positionRef.current = null;
+    if (lastWaveformRef.current !== waveform) {
+      lastWaveformRef.current = waveform;
+      positionRef.current = null;
+    }
     scheduleDraw();
   }, [waveform, durationMs, scheduleDraw]);
 
@@ -98,7 +211,12 @@ export function WaveformCanvas({
     let unlisten: (() => void) | undefined;
     void onPosition((payload) => {
       if (disposed) return;
-      positionRef.current = payload.position_ms;
+      // During an active drag the pointer preview owns the playhead; a
+      // confirmed position event must not fight the pointer. The next event
+      // after the drag reconciles the visual with the Rust position.
+      if (!draggingRef.current) {
+        positionRef.current = payload.position_ms;
+      }
       scheduleDraw();
     })
       .then((cleanup) => {
@@ -160,12 +278,34 @@ export function WaveformCanvas({
   }, [draw]);
 
   // Cancel any pending animation frame on unmount so a stale callback never
-  // paints to a detached canvas.
+  // paints to a detached canvas. The ref is cleared too: in dev StrictMode
+  // (mount → cleanup → mount) a cancelled-but-still-set id would otherwise
+  // make every later `scheduleDraw` skip, permanently freezing the playhead.
   useEffect(() => {
     return () => {
-      if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current);
+      if (rafRef.current !== null) {
+        window.cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
     };
   }, []);
 
-  return <canvas ref={canvasRef} className="waveform-canvas-surface" />;
+  return (
+    <canvas
+      ref={canvasRef}
+      className="waveform-canvas-surface"
+      role="slider"
+      aria-label="Waveform seek"
+      aria-valuemin={0}
+      aria-valuemax={durationMs ?? 0}
+      aria-valuenow={0}
+      aria-disabled={durationMs === null}
+      tabIndex={durationMs === null ? -1 : 0}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerEnd}
+      onPointerCancel={handlePointerEnd}
+      onKeyDown={handleKeyDown}
+    />
+  );
 }

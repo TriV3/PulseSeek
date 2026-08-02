@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 import { WaveformCanvas } from "./WaveformCanvas";
 import { onPosition } from "../../api/playbackEvents";
 import type { WaveformLevel } from "../../api/waveform";
@@ -15,6 +15,14 @@ const LEVEL: WaveformLevel = {
   samples_per_peak: 10,
   min: [-0.5, 0, 0.5],
   max: [-0.4, 0.1, 0.6],
+};
+
+const LEVEL_STEREO: WaveformLevel = {
+  format_version: 1,
+  channels: 2,
+  samples_per_peak: 10,
+  min: [-0.5, 0, 0.5, -0.3, 0.2, 0.4],
+  max: [-0.4, 0.1, 0.6, -0.2, 0.3, 0.5],
 };
 
 function createMockContext() {
@@ -132,7 +140,7 @@ describe("WaveformCanvas", () => {
       <WaveformCanvas waveform={LEVEL} durationMs={2000} />,
     );
     flushRaf();
-    const before = container.innerHTML;
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
     const strokesBefore = mockContext.state.strokes;
 
     emitPosition(500);
@@ -148,8 +156,10 @@ describe("WaveformCanvas", () => {
     const playheadMoves = mockContext.moves.filter(([x]) => x === 50);
     expect(playheadMoves.length).toBeGreaterThan(0);
 
-    // High-frequency position updates never touch React state or the DOM.
-    expect(container.innerHTML).toBe(before);
+    // High-frequency position updates never re-render React: the canvas node
+    // is stable and the slider value is written imperatively instead.
+    expect(container.querySelector("canvas")).toBe(canvas);
+    expect(canvas.getAttribute("aria-valuenow")).toBe("1500");
   });
 
   it("does not draw a playhead without a known duration", () => {
@@ -239,10 +249,148 @@ describe("WaveformCanvas", () => {
     expect(mockContext.state.dashes).toContain("4,3");
 
     mockContext.state.dashes.length = 0;
-    rerender(<WaveformCanvas waveform={LEVEL} durationMs={null} />);
+    rerender(<WaveformCanvas waveform={LEVEL_STEREO} durationMs={2000} />);
     flushRaf();
 
     // The stale position must not paint a playhead on the new waveform.
     expect(mockContext.state.dashes).not.toContain("4,3");
   });
+
+  it("keeps the playhead when only the duration updates", () => {
+    const { container, rerender } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={null} />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    flushRaf();
+    emitPosition(500, 2000);
+    flushRaf();
+    rerender(<WaveformCanvas waveform={LEVEL} durationMs={2000} />);
+    flushRaf();
+
+    // A duration change from the same file must not wipe the position.
+    expect(canvas.getAttribute("aria-valuenow")).toBe("500");
+  });
+
+  it("seeks to the clicked position", () => {
+    const onSeek = vi.fn();
+    const { container } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={2000} onSeek={onSeek} />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+
+    fireEvent.pointerDown(canvas, { clientX: 50, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { pointerId: 1 });
+
+    expect(onSeek).toHaveBeenCalledWith(1000);
+  });
+
+  it("seeks continuously while dragging", () => {
+    const onSeek = vi.fn();
+    const { container } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={2000} onSeek={onSeek} />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+
+    fireEvent.pointerDown(canvas, { clientX: 25, pointerId: 1 });
+    fireEvent.pointerMove(canvas, { clientX: 75, pointerId: 1 });
+    fireEvent.pointerMove(canvas, { clientX: 10, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { pointerId: 1 });
+
+    expect(onSeek).toHaveBeenNthCalledWith(1, 500);
+    expect(onSeek).toHaveBeenNthCalledWith(2, 1500);
+    expect(onSeek).toHaveBeenNthCalledWith(3, 200);
+  });
+
+  it("keeps the drag preview stable while position events arrive", () => {
+    const onSeek = vi.fn();
+    const { container } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={2000} onSeek={onSeek} />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+
+    fireEvent.pointerDown(canvas, { clientX: 25, pointerId: 1 });
+    expect(onSeek).toHaveBeenLastCalledWith(500);
+
+    // A throttled position event during the drag must not move the preview.
+    emitPosition(1200);
+    flushRaf();
+    expect(canvas.getAttribute("aria-valuenow")).toBe("500");
+
+    // After the drag, the next confirmed position reconciles the playhead.
+    fireEvent.pointerUp(canvas, { pointerId: 1 });
+    emitPosition(1200);
+    flushRaf();
+    expect(canvas.getAttribute("aria-valuenow")).toBe("1200");
+  });
+
+  it("clamps pointer seeks to the duration bounds", () => {
+    const onSeek = vi.fn();
+    const { container } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={2000} onSeek={onSeek} />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+
+    fireEvent.pointerDown(canvas, { clientX: 500, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { pointerId: 1 });
+    fireEvent.pointerDown(canvas, { clientX: -50, pointerId: 2 });
+    fireEvent.pointerUp(canvas, { pointerId: 2 });
+
+    expect(onSeek).toHaveBeenNthCalledWith(1, 2000);
+    expect(onSeek).toHaveBeenNthCalledWith(2, 0);
+  });
+
+  it("does not seek without a known duration", () => {
+    const onSeek = vi.fn();
+    const { container } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={null} onSeek={onSeek} />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+
+    fireEvent.pointerDown(canvas, { clientX: 50, pointerId: 1 });
+    fireEvent.keyDown(canvas, { key: "ArrowRight" });
+
+    expect(onSeek).not.toHaveBeenCalled();
+    expect(canvas.getAttribute("aria-disabled")).toBe("true");
+    expect(canvas.tabIndex).toBe(-1);
+  });
+
+  it("seeks from the keyboard", () => {
+    const onSeek = vi.fn();
+    const { container } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={2000} onSeek={onSeek} />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    flushRaf();
+    emitPosition(1000);
+    flushRaf();
+
+    fireEvent.keyDown(canvas, { key: "ArrowRight" });
+    fireEvent.keyDown(canvas, { key: "ArrowLeft" });
+    fireEvent.keyDown(canvas, { key: "Home" });
+    fireEvent.keyDown(canvas, { key: "End" });
+
+    expect(onSeek).toHaveBeenNthCalledWith(1, 2000);
+    expect(onSeek).toHaveBeenNthCalledWith(2, 0);
+    expect(onSeek).toHaveBeenNthCalledWith(3, 0);
+    expect(onSeek).toHaveBeenNthCalledWith(4, 2000);
+  });
 });
+
+function stubCanvasRect(canvas: HTMLCanvasElement, width: number) {
+  vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+    x: 0,
+    y: 0,
+    top: 0,
+    left: 0,
+    right: width,
+    bottom: 40,
+    width,
+    height: 40,
+    toJSON: () => ({}),
+  } as DOMRect);
+}

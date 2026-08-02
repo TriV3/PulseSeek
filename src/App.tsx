@@ -233,6 +233,7 @@ function App() {
           entryPath={selectedEntry?.id ?? null}
           entryName={selectedEntry?.name ?? "No file selected"}
           durationMs={transport.durationMs}
+          onSeek={transport.handleSeek}
         />
         <div
           className="splitter splitter--horizontal"

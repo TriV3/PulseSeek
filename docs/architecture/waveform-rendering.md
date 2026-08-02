@@ -28,6 +28,27 @@ consumes them into a ref and schedules a `requestAnimationFrame` redraw; the
 position is never stored in React state, so high-frequency updates do not
 re-render the component. Late frames are dropped rather than delaying audio.
 
+## Seek interaction
+
+`WaveformCanvas` is the seek surface (FR-VS-003):
+
+- Click or drag converts the pointer x coordinate into a millisecond target
+  through `positionMsForX`, clamped to `[0, durationMs]`, and forwards it to
+  `onSeek`. The app wires that to the validated `seek` command through
+  `usePlaybackTransport.handleSeek`, which keeps the confirmed Rust position
+  and surfaces command failures in the transport alert.
+- Keyboard: `ArrowLeft`/`ArrowRight` step by `seekStepMs` (default 5 s, aligned
+  with the existing keyboard shortcuts), `Home` seeks to zero, `End` to the
+  duration.
+- During a drag the playhead previews the pointer target imperatively; the next
+  confirmed position event reconciles the visual progress with the Rust
+  position (PR-036).
+- The canvas exposes `role="slider"` with `aria-valuenow` written imperatively
+  on every draw, so screen readers follow position without React re-renders.
+  Without a known duration the slider is `aria-disabled` and not tabbable.
+- Seeking beyond the duration is clamped on the frontend because the backend
+  rejects targets outside a known duration (`Duration::seek_to`).
+
 ## Failure and degradation behavior
 
 - A cache miss falls back to extraction; a cache that is unavailable or fails

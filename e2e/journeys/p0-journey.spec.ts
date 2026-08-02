@@ -65,6 +65,13 @@ test.describe("P0 audition workflow", () => {
     // Confirm the select reflects the new mode
     await expect(page.getByLabel("Playback mode")).toHaveValue("loop-current");
 
+    // ── 5b. Seek from the waveform ────────────────────────────────────
+    // A position event makes the duration known and activates the slider.
+    await emitEvent("playback:position", { position_ms: 0, duration_ms: 2000 });
+    await page
+      .getByRole("slider", { name: "Waveform seek" })
+      .click({ position: { x: 50, y: 20 } });
+
     // ── 6. Move a file to Trash ──────────────────────────────────────
     await mockCommand("move_to_trash", {
       results: [{ path: "/music/track2.wav", ok: true }],
@@ -99,6 +106,7 @@ test.describe("P0 audition workflow", () => {
     expect(calls.some((c) => c.command === "start_enumeration")).toBeTruthy();
     expect(calls.some((c) => c.command === "pause")).toBeTruthy();
     expect(calls.some((c) => c.command === "set_playback_mode")).toBeTruthy();
+    expect(calls.some((c) => c.command === "seek")).toBeTruthy();
     expect(calls.some((c) => c.command === "move_to_trash")).toBeTruthy();
   });
 });

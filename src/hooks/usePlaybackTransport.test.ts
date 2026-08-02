@@ -198,6 +198,24 @@ describe("usePlaybackTransport", () => {
     expect(setVolumeMock).toHaveBeenNthCalledWith(2, 0.5, true);
   });
 
+  it("surfaces a failed seek without discarding the selection", async () => {
+    seekMock.mockRejectedValue(new Error("seek failed"));
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        onSelectEntry: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current.handleSeek(4_000));
+
+    expect(seekMock).toHaveBeenCalledWith(4_000);
+    expect(result.current.error).toBe("seek failed");
+    expect(result.current.hasSelection).toBe(true);
+  });
+
   it("selects previous and next visible entries", async () => {
     const onSelectEntry = vi.fn().mockResolvedValue(undefined);
     const { result, rerender } = renderHook(
