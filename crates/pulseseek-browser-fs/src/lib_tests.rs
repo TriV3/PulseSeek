@@ -172,9 +172,7 @@ fn native_hides_unsupported_files_by_default() {
 
     let result = NativeFolderReader.read_folder(dir.path()).unwrap();
 
-    assert_eq!(result.len(), 1);
-    assert!(matches!(result[0], BrowserEntry::PlayableFile(_)));
-    assert_eq!(result[0].name(), "audio.bin");
+    assert!(result.is_empty());
 }
 
 #[test]
@@ -186,8 +184,7 @@ fn native_can_show_unsupported_files() {
     let result = NativeFolderReader.read_folder_with_options(dir.path(), true).unwrap();
 
     assert_eq!(result.len(), 2);
-    assert!(matches!(result[0], BrowserEntry::PlayableFile(_)));
-    assert!(matches!(result[1], BrowserEntry::UnsupportedFile(_)));
+    assert!(result.iter().all(|entry| matches!(entry, BrowserEntry::UnsupportedFile(_))));
 }
 
 #[test]
@@ -215,7 +212,7 @@ fn preview_returns_audio_names_without_decoding_content() {
 }
 
 #[test]
-fn streamed_preview_emits_small_batches_without_waiting_for_metadata() {
+fn streamed_preview_emits_only_folders_before_audio_validation() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("Samples")).unwrap();
     std::fs::write(dir.path().join("first.mp3"), b"not decoded").unwrap();
@@ -234,13 +231,9 @@ fn streamed_preview_emits_small_batches_without_waiting_for_metadata() {
         )
         .unwrap();
 
-    assert_eq!(chunks.len(), 2);
+    assert_eq!(chunks.len(), 1);
     assert!(chunks.iter().all(|chunk| chunk.len() <= 2));
     let names: Vec<&str> = chunks.iter().flatten().map(|entry| entry.name()).collect();
-    assert!(names.contains(&"Samples"));
-    assert!(names.contains(&"first.mp3"));
-    assert!(names.contains(&"second.wav"));
-    assert!(chunks.iter().flatten().all(
-        |entry| !matches!(entry, BrowserEntry::PlayableFile(file) if file.metadata.is_some())
-    ));
+    assert_eq!(names, vec!["Samples"]);
+    assert!(chunks.iter().flatten().all(|entry| matches!(entry, BrowserEntry::Folder(_))));
 }

@@ -86,7 +86,7 @@ impl FolderEnumerationService for NativeFolderEnumerationService {
 
                 let result = reader.read_folder_with_options_cancellable(
                     std::path::Path::new(&path),
-                    true,
+                    show_unsupported,
                     || cancelled.load(Ordering::Acquire) || events.is_disconnected(),
                 );
                 match result {

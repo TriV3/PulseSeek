@@ -9,6 +9,10 @@ import {
   type FileSort,
 } from "./components/FileList/fileSort";
 import { filterFileEntries } from "./components/FileList/fileSearch";
+import {
+  filterByFormat,
+  type AudioFileFormat,
+} from "./components/FileList/fileFilter";
 import { usePlaybackSelection } from "./hooks/usePlaybackSelection";
 import { usePlaybackTransport } from "./hooks/usePlaybackTransport";
 import { PlayerTransport } from "./components/PlayerTransport/PlayerTransport";
@@ -38,6 +42,7 @@ function App() {
   const [waveformResetRevision, setWaveformResetRevision] = useState(0);
   const [fileSort, setFileSort] = useState<FileSort>(DEFAULT_FILE_SORT);
   const [searchQuery, setSearchQuery] = useState("");
+  const [formatFilter, setFormatFilter] = useState<AudioFileFormat[]>([]);
   const folderTree = useFolderTree();
   const { state } = folderTree;
   const playback = usePlaybackSelection();
@@ -77,9 +82,13 @@ function App() {
     () => filterFileEntries(searchBaseEntries, searchQuery),
     [searchBaseEntries, searchQuery],
   );
+  const formatFilteredFileListEntries = useMemo(
+    () => filterByFormat(filteredFileListEntries, formatFilter),
+    [filteredFileListEntries, formatFilter],
+  );
   const sortedFileListEntries = useMemo(
-    () => sortFileEntries(filteredFileListEntries, fileSort),
-    [filteredFileListEntries, fileSort],
+    () => sortFileEntries(formatFilteredFileListEntries, fileSort),
+    [formatFilteredFileListEntries, fileSort],
   );
   const selectAndRemember = useCallback(
     async (
@@ -549,6 +558,8 @@ function App() {
                 onSortChange={setFileSort}
                 searchQuery={searchQuery}
                 onSearchQueryChange={setSearchQuery}
+                formatFilter={formatFilter}
+                onFormatFilterChange={setFormatFilter}
                 onSelectFolder={(path) => {
                   folderTree.selectFolder(path);
                   folderTree.toggleExpand(path);

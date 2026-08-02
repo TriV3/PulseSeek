@@ -88,6 +88,41 @@
   outline-offset: 1px;
 }
 
+/* ── Format filter ───────────────────────────────────────────────────── */
+
+.file-list-format-filter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.file-list-format-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.file-list-format-option input[type="checkbox"] {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.file-list-format-filter button {
+  padding: 2px 6px;
+}
+
+.file-list-format-filter button:focus-visible,
+.file-list-format-option:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
 .file-list-trash-error {
   color: var(--text-danger);
   font-size: 13px;
