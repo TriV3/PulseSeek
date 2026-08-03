@@ -129,7 +129,12 @@ export function FileList({
   onSelectFolder,
 }: FileListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
-  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  // Multi-selection stores stable backend entry ids (FR-LS-005) so rows keep
+  // their selection across sort, search, and format-filter changes.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(
+    null,
+  );
   const [activeEntryId, setActiveEntryId] = useState<string | null>(null);
   const [trashTarget, setTrashTarget] = useState<BrowserEntry | null>(null);
   const [trashStatus, setTrashStatus] = useState<"idle" | "moving" | "error">(
@@ -171,8 +176,17 @@ export function FileList({
     onSortChange(next);
   };
 
+  // Track the last playback entry id so streaming in more rows (which changes
+  // `visibleEntries`) never wipes a multi-selection; only an actual track
+  // change replaces the selection with the newly playing file. Resetting the
+  // ref on folder change preserves the previous behavior where returning to a
+  // folder re-selects the row that is still playing.
+  const lastPlaybackEntryIdRef = useRef<string | null>(null);
+
   useEffect(() => {
-    setSelectedEntryId(null);
+    setSelectedIds(new Set());
+    setSelectionAnchorId(null);
+    lastPlaybackEntryIdRef.current = null;
     setTrashTarget(null);
     setTrashStatus("idle");
     setTrashError(null);
@@ -183,14 +197,123 @@ export function FileList({
       playbackEntryId &&
       visibleEntries.some((entry) => entry.id === playbackEntryId)
     ) {
-      setSelectedEntryId(playbackEntryId);
-      setActiveEntryId(playbackEntryId);
+      if (lastPlaybackEntryIdRef.current !== playbackEntryId) {
+        setSelectedIds(new Set([playbackEntryId]));
+        setSelectionAnchorId(playbackEntryId);
+        setActiveEntryId(playbackEntryId);
+        lastPlaybackEntryIdRef.current = playbackEntryId;
+      }
     }
   }, [playbackEntryId, visibleEntries]);
 
   const selectEntry = (entry: BrowserEntry) => {
-    setSelectedEntryId(entry.id);
+    setSelectedIds(new Set([entry.id]));
+    setSelectionAnchorId(entry.id);
     onFileSelect?.(entry);
+  };
+
+  const toggleEntry = (entry: BrowserEntry) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(entry.id)) {
+        next.delete(entry.id);
+      } else {
+        next.add(entry.id);
+      }
+      return next;
+    });
+    setSelectionAnchorId(entry.id);
+    setActiveEntryId(entry.id);
+  };
+
+  const rangeSelect = (toEntry: BrowserEntry) => {
+    const anchorId =
+      selectionAnchorId &&
+      visibleEntries.some((entry) => entry.id === selectionAnchorId)
+        ? selectionAnchorId
+        : selectedIds.size > 0
+          ? [...selectedIds][0]
+          : toEntry.id;
+    const anchorIndex = visibleEntries.findIndex(
+      (entry) => entry.id === anchorId,
+    );
+    const toIndex = visibleEntries.findIndex(
+      (entry) => entry.id === toEntry.id,
+    );
+    if (anchorIndex === -1 || toIndex === -1) {
+      setSelectedIds(new Set([toEntry.id]));
+      setActiveEntryId(toEntry.id);
+      return;
+    }
+    const [start, end] =
+      anchorIndex <= toIndex ? [anchorIndex, toIndex] : [toIndex, anchorIndex];
+    const next = new Set<string>();
+    for (let i = start; i <= end; i += 1) {
+      if (visibleEntries[i]?.kind === "playable") {
+        next.add(visibleEntries[i].id);
+      }
+    }
+    setSelectedIds(next);
+    setActiveEntryId(toEntry.id);
+  };
+
+  const selectAllPlayable = () => {
+    const all = visibleEntries.filter((entry) => entry.kind === "playable");
+    setSelectedIds(new Set(all.map((entry) => entry.id)));
+    setSelectionAnchorId(all[0]?.id ?? null);
+  };
+
+  const handlePlayableRowClick = (
+    event: React.MouseEvent<HTMLDivElement>,
+    entry: BrowserEntry,
+  ) => {
+    setActiveEntryId(entry.id);
+    if (event.shiftKey) {
+      event.preventDefault();
+      rangeSelect(entry);
+      return;
+    }
+    if (event.metaKey || event.ctrlKey) {
+      event.preventDefault();
+      toggleEntry(entry);
+      return;
+    }
+    selectEntry(entry);
+  };
+
+  // Shared grid keys: select all (Cmd/Ctrl+A) and range extension via
+  // Shift+arrows. Returns true when the event was handled so each row handler
+  // can continue with its own keys.
+  const handleGridKeyDown = (
+    event: React.KeyboardEvent,
+    index: number,
+  ): boolean => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a") {
+      event.preventDefault();
+      selectAllPlayable();
+      return true;
+    }
+    if (
+      event.shiftKey &&
+      (event.key === "ArrowDown" || event.key === "ArrowUp")
+    ) {
+      event.preventDefault();
+      const nextIndex = Math.max(
+        0,
+        Math.min(
+          index + (event.key === "ArrowDown" ? 1 : -1),
+          visibleEntries.length - 1,
+        ),
+      );
+      const nextEntry = visibleEntries[nextIndex];
+      if (nextEntry) {
+        setActiveEntryId(nextEntry.id);
+        focusEntry(nextIndex);
+        rangeSelect(nextEntry);
+      }
+      return true;
+    }
+    return false;
   };
 
   const requestTrash = (entry: BrowserEntry) => {
@@ -207,7 +330,14 @@ export function FileList({
       const [result] = await moveToTrash([trashTarget.id]);
       if (result?.ok) {
         onEntriesTrashed?.([trashTarget.id]);
-        setSelectedEntryId(null);
+        setSelectedIds((current) => {
+          const next = new Set(current);
+          next.delete(trashTarget.id);
+          return next;
+        });
+        if (selectionAnchorId === trashTarget.id) {
+          setSelectionAnchorId(null);
+        }
         setTrashTarget(null);
         setTrashStatus("idle");
         return;
@@ -227,17 +357,21 @@ export function FileList({
   useKeyboardShortcuts({
     onMoveToTrash: () => {
       const selected = visibleEntries.find(
-        (entry) => entry.id === selectedEntryIdForFolder,
+        (entry) => entry.id === primarySelectedId,
       );
       if (selected) requestTrash(selected);
     },
   });
 
-  const selectedEntryIdForFolder = visibleEntries.some(
-    (entry) => entry.id === selectedEntryId,
-  )
-    ? selectedEntryId
-    : null;
+  // The primary selection is the anchor (last clicked or focused row). It
+  // drives single-file actions such as Move to Trash; batch operations are
+  // intentionally out of scope for this feature.
+  const primarySelectedId = useMemo(() => {
+    if (!selectionAnchorId || !selectedIds.has(selectionAnchorId)) {
+      return selectedIds.size > 0 ? [...selectedIds][0] : null;
+    }
+    return selectionAnchorId;
+  }, [selectedIds, selectionAnchorId]);
   const activeEntryIdForFolder = visibleEntries.some(
     (entry) => entry.id === activeEntryId,
   )
@@ -287,11 +421,11 @@ export function FileList({
           type="button"
           onClick={() => {
             const selected = visibleEntries.find(
-              (entry) => entry.id === selectedEntryIdForFolder,
+              (entry) => entry.id === primarySelectedId,
             );
             if (selected) requestTrash(selected);
           }}
-          disabled={!selectedEntryIdForFolder || trashStatus === "moving"}
+          disabled={!primarySelectedId || trashStatus === "moving"}
         >
           Move to Trash
         </button>
@@ -364,6 +498,7 @@ export function FileList({
           className="file-list-viewport"
           role="grid"
           aria-label="Playable files"
+          aria-multiselectable="true"
           aria-colcount={9}
           aria-rowcount={visibleEntries.length + 1}
         >
@@ -424,6 +559,9 @@ export function FileList({
                     }}
                     onClick={() => onSelectFolder?.(entry.id)}
                     onKeyDown={(event) => {
+                      if (handleGridKeyDown(event, virtualRow.index)) {
+                        return;
+                      }
                       if (event.key === "ArrowDown") {
                         event.preventDefault();
                         focusEntry(virtualRow.index + 1);
@@ -491,14 +629,17 @@ export function FileList({
                   }}
                   data-row-id={entry.id}
                   className={`file-list-row${
-                    selectedEntryIdForFolder === entry.id ? " selected" : ""
+                    selectedIds.has(entry.id) ? " selected" : ""
                   }`}
                   style={{
                     height: `${virtualRow.size}px`,
                     transform: `translateY(${virtualRow.start}px)`,
                   }}
-                  onClick={() => selectEntry(entry)}
+                  onClick={(event) => handlePlayableRowClick(event, entry)}
                   onKeyDown={(event) => {
+                    if (handleGridKeyDown(event, virtualRow.index)) {
+                      return;
+                    }
                     if (event.key === "Delete" || event.key === "Backspace") {
                       event.preventDefault();
                       if (trashStatus !== "moving") requestTrash(entry);
@@ -531,7 +672,7 @@ export function FileList({
                   }}
                   role="row"
                   aria-rowindex={virtualRow.index + 2}
-                  aria-selected={selectedEntryIdForFolder === entry.id}
+                  aria-selected={selectedIds.has(entry.id)}
                   tabIndex={activeEntryIdForFolder === entry.id ? 0 : -1}
                   aria-label={`${entry.name}${statusLabel ? ` ${statusLabel}` : ""}`}
                   aria-describedby={
