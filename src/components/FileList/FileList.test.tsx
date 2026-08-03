@@ -1,5 +1,11 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { useMemo, useState } from "react";
 import { FileList } from "./FileList";
 import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
@@ -10,6 +16,13 @@ import {
   filterByFormat,
   type AudioFileFormat,
 } from "./fileFilter";
+import {
+  filterByMark,
+  type MarkFilter,
+  type SessionMark,
+  type SessionMarks,
+} from "./sessionMarks";
+import { useSessionMarks } from "../../hooks/useSessionMarks";
 
 const mockMoveToTrash = vi.hoisted(() => vi.fn());
 
@@ -1724,5 +1737,325 @@ describe("FileList — multiple selection", () => {
     expect(
       screen.getByRole("button", { name: "Move to Trash" }),
     ).toBeDisabled();
+  });
+});
+
+describe("FileList — session marks", () => {
+  const markedEntries: BrowserEntry[] = [
+    { id: "song1.mp3", name: "song1.mp3", kind: "playable" },
+    { id: "song2.wav", name: "song2.wav", kind: "playable" },
+    { id: "song3.flac", name: "song3.flac", kind: "playable" },
+  ];
+
+  function MarkHarness({
+    marks = {},
+    markFilter = "all",
+    onMarkChange = vi.fn(),
+    onMarkFilterChange = vi.fn(),
+  }: {
+    marks?: SessionMarks;
+    markFilter?: MarkFilter;
+    onMarkChange?: (ids: string[], mark: SessionMark | null) => void;
+    onMarkFilterChange?: (filter: MarkFilter) => void;
+  }) {
+    return (
+      <FileList
+        entries={markedEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        marks={marks}
+        onMarkChange={onMarkChange}
+        markFilter={markFilter}
+        onMarkFilterChange={onMarkFilterChange}
+      />
+    );
+  }
+
+  it("renders mark controls in the actions bar", () => {
+    render(<MarkHarness />);
+
+    expect(
+      screen.getByRole("button", { name: "Mark Keep" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Mark Maybe" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Mark Reject" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Mark Favorite" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Select marked" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Filter by mark")).toBeInTheDocument();
+  });
+
+  it("disables mark buttons without a playable selection", () => {
+    render(<MarkHarness />);
+
+    expect(screen.getByRole("button", { name: "Mark Keep" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Clear mark" })).toBeDisabled();
+  });
+
+  it("applies a mark to the single selected file", () => {
+    const onMarkChange = vi.fn();
+    render(<MarkHarness onMarkChange={onMarkChange} />);
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Mark Keep" }));
+
+    expect(onMarkChange).toHaveBeenCalledWith(["song1.mp3"], "keep");
+  });
+
+  it("applies a mark to every selected file", () => {
+    const onMarkChange = vi.fn();
+    render(<MarkHarness onMarkChange={onMarkChange} />);
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByText("song2.wav"), { ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Mark Maybe" }));
+
+    expect(onMarkChange).toHaveBeenCalledWith(
+      ["song1.mp3", "song2.wav"],
+      "maybe",
+    );
+  });
+
+  it("clears the mark of the selection", () => {
+    const onMarkChange = vi.fn();
+    render(
+      <MarkHarness
+        marks={{ "song1.mp3": "keep" }}
+        onMarkChange={onMarkChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Clear mark" }));
+
+    expect(onMarkChange).toHaveBeenCalledWith(["song1.mp3"], null);
+  });
+
+  it("shows the session mark in the Mark column", () => {
+    render(
+      <MarkHarness marks={{ "song1.mp3": "keep", "song2.wav": "favorite" }} />,
+    );
+
+    expect(
+      within(screen.getByRole("row", { name: /song1\.mp3/ })).getByText("Keep"),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("row", { name: /song2\.wav/ })).getByText(
+        "Favorite",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("row", { name: /song3\.flac/ })).queryByText(
+        "Keep",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows colored pastilles in the name column", () => {
+    render(
+      <MarkHarness
+        marks={{
+          "song1.mp3": "keep",
+          "song2.wav": "reject",
+          "song3.flac": "favorite",
+        }}
+      />,
+    );
+
+    expect(
+      screen
+        .getByRole("row", { name: /song1\.mp3/ })
+        .querySelector(".file-list-mark-dot--keep"),
+    ).not.toBeNull();
+    expect(
+      screen
+        .getByRole("row", { name: /song2\.wav/ })
+        .querySelector(".file-list-mark-dot--reject"),
+    ).not.toBeNull();
+    const favoriteRow = screen.getByRole("row", { name: /song3\.flac/ });
+    expect(
+      favoriteRow.querySelector(".file-list-mark-dot--favorite"),
+    ).not.toBeNull();
+    expect(within(favoriteRow).getByText("★")).toBeInTheDocument();
+  });
+
+  it("keeps marks when the folder changes", () => {
+    const { rerender } = render(
+      <FileList
+        entries={markedEntries}
+        selectedPath="/a"
+        isLoading={false}
+        error={null}
+        marks={{ "song1.mp3": "keep" }}
+      />,
+    );
+
+    expect(
+      within(screen.getByRole("row", { name: /song1\.mp3/ })).getByText("Keep"),
+    ).toBeInTheDocument();
+
+    rerender(
+      <FileList
+        entries={markedEntries}
+        selectedPath="/b"
+        isLoading={false}
+        error={null}
+        marks={{ "song1.mp3": "keep" }}
+      />,
+    );
+
+    expect(
+      within(screen.getByRole("row", { name: /song1\.mp3/ })).getByText("Keep"),
+    ).toBeInTheDocument();
+  });
+
+  it("changes the mark filter through the select", () => {
+    const onMarkFilterChange = vi.fn();
+    render(<MarkHarness onMarkFilterChange={onMarkFilterChange} />);
+
+    fireEvent.change(screen.getByLabelText("Filter by mark"), {
+      target: { value: "keep" },
+    });
+
+    expect(onMarkFilterChange).toHaveBeenCalledWith("keep");
+  });
+
+  it("disables Select marked when nothing is marked", () => {
+    render(<MarkHarness />);
+    expect(
+      screen.getByRole("button", { name: "Select marked" }),
+    ).toBeDisabled();
+  });
+
+  it("batch-selects every marked file", () => {
+    render(
+      <MarkHarness marks={{ "song1.mp3": "keep", "song2.wav": "maybe" }} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Select marked" }));
+
+    expect(screen.getByRole("row", { name: /song1\.mp3/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("row", { name: /song2\.wav/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("row", { name: /song3\.flac/ })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+  });
+
+  it("applies a mark to the selection via keyboard shortcut", () => {
+    Object.defineProperty(navigator, "platform", {
+      configurable: true,
+      value: "MacIntel",
+    });
+    const onMarkChange = vi.fn();
+    render(<MarkHarness onMarkChange={onMarkChange} />);
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.keyDown(window, { key: "k", metaKey: true, shiftKey: true });
+
+    expect(onMarkChange).toHaveBeenCalledWith(["song1.mp3"], "keep");
+  });
+});
+
+describe("FileList — session marks end to end", () => {
+  const entries: BrowserEntry[] = [
+    { id: "song1.mp3", name: "song1.mp3", kind: "playable" },
+    { id: "song2.wav", name: "song2.wav", kind: "playable" },
+    { id: "song3.flac", name: "song3.flac", kind: "playable" },
+  ];
+
+  beforeEach(() => {
+    mockMoveToTrash.mockClear();
+  });
+
+  function SessionMarksHarness() {
+    const session = useSessionMarks();
+    const [filter, setFilter] = useState<MarkFilter>("all");
+    const visible = useMemo(
+      () => filterByMark(entries, session.marks, filter),
+      [session.marks, filter],
+    );
+    return (
+      <FileList
+        entries={visible}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        marks={session.marks}
+        onMarkChange={(ids, mark) => {
+          if (mark === null) session.unmark(ids);
+          else session.setMark(ids, mark);
+        }}
+        markFilter={filter}
+        onMarkFilterChange={setFilter}
+      />
+    );
+  }
+
+  it("marks a file, filters to its mark, and batch-selects marked files", () => {
+    render(<SessionMarksHarness />);
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Mark Keep" }));
+    expect(
+      within(screen.getByRole("row", { name: /song1\.mp3/ })).getByText("Keep"),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Filter by mark"), {
+      target: { value: "keep" },
+    });
+    expect(screen.queryByText("song2.wav")).not.toBeInTheDocument();
+    expect(screen.getByText("song1.mp3")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select marked" }));
+    expect(screen.getByRole("row", { name: /song1\.mp3/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("marking never touches the backend (FR-LS-007)", () => {
+    function MarkFlowHarness() {
+      const session = useSessionMarks();
+      return (
+        <FileList
+          entries={entries}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+          marks={session.marks}
+          onMarkChange={(ids, mark) => {
+            if (mark === null) session.unmark(ids);
+            else session.setMark(ids, mark);
+          }}
+        />
+      );
+    }
+
+    render(<MarkFlowHarness />);
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Mark Keep" }));
+    expect(
+      within(screen.getByRole("row", { name: /song1\.mp3/ })).getByText("Keep"),
+    ).toBeInTheDocument();
+
+    // Session marks must never create library items (FR-LS-007): the only
+    // backend call this component can make is Move to Trash, and marking
+    // must not trigger it.
+    expect(mockMoveToTrash).not.toHaveBeenCalled();
   });
 });

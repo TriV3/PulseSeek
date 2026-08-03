@@ -56,6 +56,12 @@
   --line-danger: #ff8080;
   --line-danger-strong: #ff5050;
 
+  /* Session marks */
+  --mark-keep: #00ff00;
+  --mark-maybe: #ffa500;
+  --mark-reject: #ff3030;
+  --mark-favorite: #ffff00;
+
   /* Waveform */
   --wave: #00e5ff;
   --wave-grid: #6a6a6a;

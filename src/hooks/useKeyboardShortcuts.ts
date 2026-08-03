@@ -9,6 +9,11 @@ export interface KeyboardShortcutActions {
   onSeekForward?: () => void | Promise<void>;
   onToggleLoop?: () => void | Promise<void>;
   onMoveToTrash?: () => void | Promise<void>;
+  onMarkKeep?: () => void | Promise<void>;
+  onMarkMaybe?: () => void | Promise<void>;
+  onMarkReject?: () => void | Promise<void>;
+  onMarkFavorite?: () => void | Promise<void>;
+  onMarkClear?: () => void | Promise<void>;
 }
 
 function isMacPlatform(): boolean {
@@ -113,6 +118,63 @@ export function useKeyboardShortcuts(actions: KeyboardShortcutActions): void {
       ) {
         event.preventDefault();
         void actions.onToggleLoop();
+        return;
+      }
+
+      // Session-mark shortcuts (FR-LS-006) use the platform modifier plus
+      // Shift so they never collide with typing or the unmodified grid keys.
+      if (
+        hasPlatformModifier &&
+        event.shiftKey &&
+        actions.onMarkKeep &&
+        event.key.toLowerCase() === "k"
+      ) {
+        event.preventDefault();
+        void actions.onMarkKeep();
+        return;
+      }
+
+      if (
+        hasPlatformModifier &&
+        event.shiftKey &&
+        actions.onMarkMaybe &&
+        event.key.toLowerCase() === "m"
+      ) {
+        event.preventDefault();
+        void actions.onMarkMaybe();
+        return;
+      }
+
+      if (
+        hasPlatformModifier &&
+        event.shiftKey &&
+        actions.onMarkReject &&
+        event.key.toLowerCase() === "r"
+      ) {
+        event.preventDefault();
+        void actions.onMarkReject();
+        return;
+      }
+
+      if (
+        hasPlatformModifier &&
+        event.shiftKey &&
+        actions.onMarkFavorite &&
+        event.key.toLowerCase() === "f"
+      ) {
+        event.preventDefault();
+        void actions.onMarkFavorite();
+        return;
+      }
+
+      if (
+        hasPlatformModifier &&
+        event.shiftKey &&
+        actions.onMarkClear &&
+        event.key.toLowerCase() === "u"
+      ) {
+        event.preventDefault();
+        void actions.onMarkClear();
         return;
       }
 

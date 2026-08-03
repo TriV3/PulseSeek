@@ -13,8 +13,13 @@ import {
   filterByFormat,
   type AudioFileFormat,
 } from "./components/FileList/fileFilter";
+import {
+  filterByMark,
+  type MarkFilter,
+} from "./components/FileList/sessionMarks";
 import { usePlaybackSelection } from "./hooks/usePlaybackSelection";
 import { usePlaybackTransport } from "./hooks/usePlaybackTransport";
+import { useSessionMarks } from "./hooks/useSessionMarks";
 import { PlayerTransport } from "./components/PlayerTransport/PlayerTransport";
 import { PlaybackModeSelector } from "./components/PlaybackModeSelector/PlaybackModeSelector";
 import { usePlaybackMode } from "./hooks/usePlaybackMode";
@@ -43,6 +48,8 @@ function App() {
   const [fileSort, setFileSort] = useState<FileSort>(DEFAULT_FILE_SORT);
   const [searchQuery, setSearchQuery] = useState("");
   const [formatFilter, setFormatFilter] = useState<AudioFileFormat[]>([]);
+  const [markFilter, setMarkFilter] = useState<MarkFilter>("all");
+  const sessionMarks = useSessionMarks();
   const folderTree = useFolderTree();
   const { state } = folderTree;
   const playback = usePlaybackSelection();
@@ -86,9 +93,18 @@ function App() {
     () => filterByFormat(filteredFileListEntries, formatFilter),
     [filteredFileListEntries, formatFilter],
   );
+  const markFilteredFileListEntries = useMemo(
+    () =>
+      filterByMark(
+        formatFilteredFileListEntries,
+        sessionMarks.marks,
+        markFilter,
+      ),
+    [formatFilteredFileListEntries, sessionMarks.marks, markFilter],
+  );
   const sortedFileListEntries = useMemo(
-    () => sortFileEntries(formatFilteredFileListEntries, fileSort),
-    [formatFilteredFileListEntries, fileSort],
+    () => sortFileEntries(markFilteredFileListEntries, fileSort),
+    [markFilteredFileListEntries, fileSort],
   );
   const selectAndRemember = useCallback(
     async (
@@ -560,6 +576,13 @@ function App() {
                 onSearchQueryChange={setSearchQuery}
                 formatFilter={formatFilter}
                 onFormatFilterChange={setFormatFilter}
+                marks={sessionMarks.marks}
+                onMarkChange={(ids, mark) => {
+                  if (mark === null) sessionMarks.unmark(ids);
+                  else sessionMarks.setMark(ids, mark);
+                }}
+                markFilter={markFilter}
+                onMarkFilterChange={setMarkFilter}
                 onSelectFolder={(path) => {
                   folderTree.selectFolder(path);
                   folderTree.toggleExpand(path);
