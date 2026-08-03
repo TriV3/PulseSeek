@@ -1389,3 +1389,340 @@ describe("FileList — hides non-playable entries", () => {
     expect(grid).toHaveAttribute("aria-rowcount", "2");
   });
 });
+
+describe("FileList — multiple selection", () => {
+  it("toggles a row with ctrl+click without starting playback", () => {
+    const onSelect = vi.fn();
+
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        onFileSelect={onSelect}
+      />,
+    );
+
+    const song1 = screen.getByRole("row", { name: /song1\.mp3/ });
+    const song2 = screen.getByRole("row", { name: /song2\.wav/ });
+
+    fireEvent.click(song1);
+    expect(song1).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(song2, { ctrlKey: true });
+
+    expect(song1).toHaveAttribute("aria-selected", "true");
+    expect(song2).toHaveAttribute("aria-selected", "true");
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(onSelect).toHaveBeenCalledWith(sampleEntries[0]);
+
+    fireEvent.click(song1, { ctrlKey: true });
+
+    expect(song1).toHaveAttribute("aria-selected", "false");
+    expect(song2).toHaveAttribute("aria-selected", "true");
+    expect(onSelect).toHaveBeenCalledOnce();
+  });
+
+  it("toggles a row with meta+click too", () => {
+    const onSelect = vi.fn();
+
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        onFileSelect={onSelect}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("row", { name: /song1\.mp3/ }));
+    fireEvent.click(screen.getByRole("row", { name: /song2\.wav/ }), {
+      metaKey: true,
+    });
+
+    expect(screen.getByRole("row", { name: /song1\.mp3/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("row", { name: /song2\.wav/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(onSelect).toHaveBeenCalledOnce();
+  });
+
+  it("selects a range with shift+click without starting playback", () => {
+    const onSelect = vi.fn();
+
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        onFileSelect={onSelect}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("row", { name: /song1\.mp3/ }));
+    fireEvent.click(screen.getByRole("row", { name: /song3\.flac/ }), {
+      shiftKey: true,
+    });
+
+    for (const name of [/song1\.mp3/, /song2\.wav/, /song3\.flac/]) {
+      expect(screen.getByRole("row", { name })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    }
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(onSelect).toHaveBeenCalledWith(sampleEntries[0]);
+  });
+
+  it("selects all playable rows with Ctrl/Cmd+A and skips folders", () => {
+    const entries: BrowserEntry[] = [
+      { id: "/music/kits", name: "kits", kind: "folder", metadata: null },
+      ...sampleEntries,
+    ];
+
+    render(
+      <FileList
+        entries={entries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByRole("row", { name: /kits/ }), {
+      key: "a",
+      ctrlKey: true,
+    });
+
+    for (const name of [/song1\.mp3/, /song2\.wav/, /song3\.flac/]) {
+      expect(screen.getByRole("row", { name })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    }
+    expect(screen.getByRole("row", { name: /kits/ })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+  });
+
+  it("extends the selection with shift+arrow keys", () => {
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    const song1 = screen.getByRole("row", { name: /song1\.mp3/ });
+    fireEvent.click(song1);
+    fireEvent.keyDown(song1, { key: "ArrowDown", shiftKey: true });
+
+    expect(screen.getByRole("row", { name: /song1\.mp3/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("row", { name: /song2\.wav/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("row", { name: /song3\.flac/ })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+  });
+
+  it("re-selects the playing row when returning to its folder", () => {
+    const { rerender } = render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        playbackEntryId={sampleEntries[0].id}
+        playbackStatus="playing"
+      />,
+    );
+
+    expect(screen.getByRole("row", { name: /song1\.mp3/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    // Navigate away: selection clears while playback keeps running.
+    rerender(
+      <FileList
+        entries={[]}
+        selectedPath="/other"
+        isLoading={false}
+        error={null}
+        playbackEntryId={sampleEntries[0].id}
+        playbackStatus="playing"
+      />,
+    );
+    expect(screen.queryByRole("grid", { name: "Playable files" })).toBeNull();
+
+    // Return: the still-playing row is selected again.
+    rerender(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        playbackEntryId={sampleEntries[0].id}
+        playbackStatus="playing"
+      />,
+    );
+    expect(screen.getByRole("row", { name: /song1\.mp3/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("keeps the selection when more rows stream in", () => {
+    function StreamHarness() {
+      const [entries, setEntries] = useState<BrowserEntry[]>([
+        sampleEntries[0],
+      ]);
+      return (
+        <div>
+          <button type="button" onClick={() => setEntries(sampleEntries)}>
+            Stream more
+          </button>
+          <FileList
+            entries={entries}
+            selectedPath="/music"
+            isLoading={false}
+            error={null}
+          />
+        </div>
+      );
+    }
+
+    render(<StreamHarness />);
+    fireEvent.click(screen.getByRole("row", { name: /song1\.mp3/ }));
+    expect(screen.getByRole("row", { name: /song1\.mp3/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Stream more" }));
+
+    expect(screen.getByRole("row", { name: /song1\.mp3/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("row", { name: /song2\.wav/ })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+    expect(screen.getByRole("row", { name: /song3\.flac/ })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+  });
+
+  it("prunes a trashed row from the selection and keeps survivors", async () => {
+    mockMoveToTrash.mockResolvedValueOnce([{ path: "song2.wav", ok: true }]);
+
+    function TrashHarness() {
+      const [entries, setEntries] = useState(sampleEntries);
+      return (
+        <FileList
+          entries={entries}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+          onEntriesTrashed={(ids) =>
+            setEntries((current) =>
+              current.filter((entry) => !ids.includes(entry.id)),
+            )
+          }
+        />
+      );
+    }
+
+    render(<TrashHarness />);
+    fireEvent.click(screen.getByRole("row", { name: /song1\.mp3/ }));
+    fireEvent.click(screen.getByRole("row", { name: /song2\.wav/ }), {
+      ctrlKey: true,
+    });
+    expect(screen.getByRole("row", { name: /song1\.mp3/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("row", { name: /song2\.wav/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Move to Trash" }));
+    fireEvent.click(
+      screen
+        .getByRole("alertdialog")
+        .querySelector(
+          "button.confirm-dialog-button--confirm",
+        ) as HTMLButtonElement,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("song2.wav")).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("row", { name: /song1\.mp3/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("row", { name: /song3\.flac/ })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+  });
+
+  it("clears the selection when the last selected row is removed", async () => {
+    mockMoveToTrash.mockResolvedValueOnce([{ path: "song1.mp3", ok: true }]);
+
+    function SingleHarness() {
+      const [entries, setEntries] = useState([sampleEntries[0]]);
+      return (
+        <FileList
+          entries={entries}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+          onEntriesTrashed={(ids) =>
+            setEntries((current) =>
+              current.filter((entry) => !ids.includes(entry.id)),
+            )
+          }
+        />
+      );
+    }
+
+    render(<SingleHarness />);
+    fireEvent.click(screen.getByRole("row", { name: /song1\.mp3/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Move to Trash" }));
+    fireEvent.click(
+      screen
+        .getByRole("alertdialog")
+        .querySelector(
+          "button.confirm-dialog-button--confirm",
+        ) as HTMLButtonElement,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("song1.mp3")).not.toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("button", { name: "Move to Trash" }),
+    ).toBeDisabled();
+  });
+});
