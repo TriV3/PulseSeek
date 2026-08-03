@@ -11,6 +11,16 @@ import {
   type FileSortField,
 } from "./fileSort";
 import { FORMAT_OPTIONS, type AudioFileFormat } from "./fileFilter";
+import {
+  MARK_FILTERS,
+  MARK_FILTER_LABELS,
+  SESSION_MARK_LABELS,
+  SESSION_MARKS,
+  selectMarkedEntryIds,
+  type MarkFilter,
+  type SessionMark,
+  type SessionMarks,
+} from "./sessionMarks";
 import "./FileList.css";
 import "../ConfirmDialog/ConfirmDialog.css";
 
@@ -95,6 +105,14 @@ interface FileListProps {
   formatFilter?: AudioFileFormat[];
   /** Called whenever the user changes the format filter selection. */
   onFormatFilterChange?: (formats: AudioFileFormat[]) => void;
+  /** Session marks keyed by entry id; purely in-memory (FR-LS-007). */
+  marks?: SessionMarks;
+  /** Applies `mark` to ids, or clears it when `mark` is null. */
+  onMarkChange?: (ids: string[], mark: SessionMark | null) => void;
+  /** Active mark filter; "all" shows every file. */
+  markFilter?: MarkFilter;
+  /** Called whenever the user changes the mark filter. */
+  onMarkFilterChange?: (filter: MarkFilter) => void;
   /** Called when a matched folder row is activated for navigation. */
   onSelectFolder?: (path: string) => void;
 }
@@ -126,6 +144,10 @@ export function FileList({
   onSearchQueryChange,
   formatFilter = [],
   onFormatFilterChange,
+  marks = {},
+  onMarkChange,
+  markFilter = "all",
+  onMarkFilterChange,
   onSelectFolder,
 }: FileListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -165,6 +187,28 @@ export function FileList({
   const resetFormats = () => {
     if (!onFormatFilterChange) return;
     onFormatFilterChange([]);
+  };
+
+  const applyMarkToSelection = (mark: SessionMark) => {
+    if (selectedIds.size === 0) return;
+    onMarkChange?.([...selectedIds], mark);
+  };
+
+  const clearMarkOnSelection = () => {
+    if (selectedIds.size === 0) return;
+    onMarkChange?.([...selectedIds], null);
+  };
+
+  // Playable entries that already carry a session mark, used to batch-select
+  // marked files (FR-LS-008). Folder rows are never marked.
+  const markedVisibleIds = useMemo(
+    () => selectMarkedEntryIds(visibleEntries, marks),
+    [visibleEntries, marks],
+  );
+
+  const selectMarked = () => {
+    setSelectedIds(new Set(markedVisibleIds));
+    setSelectionAnchorId(markedVisibleIds[0] ?? null);
   };
 
   const requestSort = (field: FileSortField) => {
@@ -361,6 +405,11 @@ export function FileList({
       );
       if (selected) requestTrash(selected);
     },
+    onMarkKeep: () => applyMarkToSelection("keep"),
+    onMarkMaybe: () => applyMarkToSelection("maybe"),
+    onMarkReject: () => applyMarkToSelection("reject"),
+    onMarkFavorite: () => applyMarkToSelection("favorite"),
+    onMarkClear: () => clearMarkOnSelection(),
   });
 
   // The primary selection is the anchor (last clicked or focused row). It
@@ -394,6 +443,20 @@ export function FileList({
     virtualizer.scrollToIndex(nextIndex, { align: "auto" });
     window.setTimeout(() => rowRefs.current.get(nextEntry.id)?.focus(), 0);
   };
+
+  // Empty-list message names every active filter so the user can tell which
+  // view produced the empty result.
+  const hasSearch = searchQuery.trim() !== "";
+  const hasFormat = formatFilter.length > 0;
+  const hasMark = markFilter !== "all";
+  let emptyStateMessage = "(no playable files)";
+  if (hasSearch || hasFormat || hasMark) {
+    const parts: string[] = [];
+    if (hasSearch) parts.push(`“${searchQuery.trim()}”`);
+    if (hasFormat) parts.push("the format filter");
+    if (hasMark) parts.push("the mark filter");
+    emptyStateMessage = `(no files match ${parts.join(" or ")})`;
+  }
 
   // ── No folder selected ──────────────────────────────────────────────
 
@@ -458,6 +521,53 @@ export function FileList({
             Reset
           </button>
         </fieldset>
+        <fieldset className="file-list-mark-controls">
+          <legend className="visually-hidden">Mark selection</legend>
+          {SESSION_MARKS.map((mark) => (
+            <button
+              key={mark}
+              type="button"
+              aria-label={`Mark ${SESSION_MARK_LABELS[mark]}`}
+              className={`file-list-mark-button file-list-mark-button--${mark}`}
+              disabled={selectedIds.size === 0}
+              onClick={() => applyMarkToSelection(mark)}
+            >
+              {SESSION_MARK_LABELS[mark]}
+            </button>
+          ))}
+          <button
+            type="button"
+            aria-label="Clear mark"
+            disabled={selectedIds.size === 0}
+            onClick={clearMarkOnSelection}
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            aria-label="Select marked"
+            disabled={markedVisibleIds.length === 0}
+            onClick={selectMarked}
+          >
+            Select marked
+          </button>
+        </fieldset>
+        <label className="file-list-mark-filter">
+          <span className="visually-hidden">Filter by mark</span>
+          <select
+            aria-label="Filter by mark"
+            value={markFilter}
+            onChange={(event) =>
+              onMarkFilterChange?.(event.target.value as MarkFilter)
+            }
+          >
+            {MARK_FILTERS.map((filter) => (
+              <option key={filter} value={filter}>
+                {MARK_FILTER_LABELS[filter]}
+              </option>
+            ))}
+          </select>
+        </label>
         {trashStatus === "moving" ? (
           <span role="status" aria-live="polite">
             Moving to Trash…
@@ -482,15 +592,7 @@ export function FileList({
         </div>
       ) : visibleEntries.length === 0 ? (
         <div className="file-list-state file-list-state--empty">
-          <p className="file-list-placeholder">
-            {searchQuery.trim() === "" && formatFilter.length === 0
-              ? "(no playable files)"
-              : searchQuery.trim() !== "" && formatFilter.length > 0
-                ? `(no files match “${searchQuery.trim()}” or the format filter)`
-                : searchQuery.trim() !== ""
-                  ? `(no files match “${searchQuery.trim()}”)`
-                  : "(no files match the format filter)"}
-          </p>
+          <p className="file-list-placeholder">{emptyStateMessage}</p>
         </div>
       ) : (
         <div
@@ -499,7 +601,7 @@ export function FileList({
           role="grid"
           aria-label="Playable files"
           aria-multiselectable="true"
-          aria-colcount={9}
+          aria-colcount={10}
           aria-rowcount={visibleEntries.length + 1}
         >
           <div className="file-list-header" role="row">
@@ -535,6 +637,7 @@ export function FileList({
             <span role="columnheader">Bit depth</span>
             <span role="columnheader">Codec</span>
             <span role="columnheader">Status</span>
+            <span role="columnheader">Mark</span>
           </div>
           <div
             className="file-list-inner"
@@ -604,6 +707,7 @@ export function FileList({
                     <span role="gridcell" aria-hidden="true"></span>
                     <span role="gridcell" aria-hidden="true"></span>
                     <span role="gridcell">Folder</span>
+                    <span role="gridcell" aria-hidden="true"></span>
                   </div>
                 );
               }
@@ -682,6 +786,14 @@ export function FileList({
                   }
                 >
                   <span className="file-list-row-name" role="gridcell">
+                    {marks[entry.id] ? (
+                      <span
+                        className={`file-list-mark-dot file-list-mark-dot--${marks[entry.id]}`}
+                        aria-hidden="true"
+                      >
+                        {marks[entry.id] === "favorite" ? "★" : ""}
+                      </span>
+                    ) : null}
                     {entry.name}
                   </span>
                   <span role="gridcell">
@@ -729,6 +841,15 @@ export function FileList({
                     )}
                   </span>
                   <span role="gridcell">{statusLabel}</span>
+                  <span role="gridcell">
+                    {marks[entry.id] ? (
+                      <span
+                        className={`file-list-mark file-list-mark--${marks[entry.id]}`}
+                      >
+                        {SESSION_MARK_LABELS[marks[entry.id]]}
+                      </span>
+                    ) : null}
+                  </span>
                 </div>
               );
             })}

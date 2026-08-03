@@ -134,7 +134,7 @@
   display: grid;
   grid-template-columns:
     minmax(220px, 1fr)
-    90px 90px 170px 90px 110px 90px 80px 80px;
+    90px 90px 170px 90px 110px 90px 80px 80px 70px;
   align-items: center;
   padding: 3px 7px;
   border-bottom: 1px solid var(--line);
@@ -191,7 +191,7 @@
   display: grid;
   grid-template-columns:
     minmax(220px, 1fr)
-    90px 90px 170px 90px 110px 90px 80px 80px;
+    90px 90px 170px 90px 110px 90px 80px 80px 70px;
   align-items: center;
   padding: 0 7px;
   cursor: pointer;
@@ -236,6 +236,38 @@
   font-size: 11px;
 }
 
+/* ── Mark pastilles in the name column ─────────────────────────────── */
+
+.file-list-mark-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.file-list-mark-dot--keep {
+  background-color: var(--mark-keep);
+}
+
+.file-list-mark-dot--maybe {
+  background-color: var(--mark-maybe);
+}
+
+.file-list-mark-dot--reject {
+  background-color: var(--mark-reject);
+}
+
+.file-list-mark-dot--favorite {
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  color: var(--mark-favorite);
+  font-size: 11px;
+  line-height: 1;
+}
+
 .file-list-playback-error {
   flex-shrink: 0;
   margin: 0;
@@ -243,4 +275,73 @@
   color: var(--text-danger);
   border-top: 1px solid var(--line-soft);
   font-size: 13px;
+}
+
+/* ── Session marks ─────────────────────────────────────────────────── */
+
+.file-list-mark-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.file-list-mark-controls button {
+  padding: 2px 6px;
+}
+
+.file-list-mark-controls button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.file-list-mark-filter select {
+  padding: 2px 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--bg-surface);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.file-list-mark-filter select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.file-list-mark {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.file-list-mark--keep {
+  color: var(--mark-keep);
+  background: var(--bg-subtle);
+  border-color: var(--mark-keep);
+}
+
+.file-list-mark--maybe {
+  color: var(--mark-maybe);
+  background: var(--bg-subtle);
+  border-color: var(--mark-maybe);
+}
+
+.file-list-mark--reject {
+  color: var(--mark-reject);
+  background: var(--bg-subtle);
+  border-color: var(--mark-reject);
+}
+
+.file-list-mark--favorite {
+  color: var(--mark-favorite);
+  background: var(--bg-subtle);
+  border-color: var(--mark-favorite);
 }
