@@ -30,6 +30,8 @@ export interface FolderState {
   isLoading: boolean;
   /** Error message when enumeration failed, or null. */
   error: string | null;
+  /** Whether the folder was enumerated in recursive file-view mode. */
+  recursive: boolean;
 }
 
 /** Top-level tree state managed by the reducer. */
@@ -60,7 +62,12 @@ export type FolderTreeAction =
   | { type: "FOLDER_PICKED"; path: string }
   | { type: "PICK_CANCELLED" }
   | { type: "PICK_ERROR"; message: string }
-  | { type: "START_ENUMERATING"; path: string; sessionId: string }
+  | {
+      type: "START_ENUMERATING";
+      path: string;
+      sessionId: string;
+      recursive: boolean;
+    }
   | {
       type: "ENUMERATION_CHUNK";
       path: string;
@@ -96,6 +103,22 @@ export function getParentPath(path: string): string | null {
   const lastSlash = normalized.lastIndexOf("/");
   if (lastSlash <= 0) return null;
   return normalized.substring(0, lastSlash);
+}
+
+/**
+ * Returns a file's path relative to the folder it was listed under, falling
+ * back to the bare file name when the entry is outside that folder. Recursive
+ * file views use this so files from different subfolders stay distinct even
+ * when they share a name.
+ */
+export function relativeEntryPath(
+  entryId: string,
+  selectedPath: string,
+): string {
+  if (selectedPath && entryId.startsWith(`${selectedPath}/`)) {
+    return entryId.slice(selectedPath.length + 1);
+  }
+  return entryId.split("/").filter(Boolean).at(-1) ?? entryId;
 }
 
 /**

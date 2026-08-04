@@ -61,6 +61,7 @@ describe("FolderTree — selected path display", () => {
           children: [],
           isLoading: false,
           error: null,
+          recursive: false,
         },
       },
     });
@@ -85,12 +86,14 @@ describe("FolderTree — selected folder visibility", () => {
           children: [{ id: "/test/music", name: "music", kind: "folder" }],
           isLoading: false,
           error: null,
+          recursive: false,
         },
         "/test/music": {
           expanded: false,
           children: [],
           isLoading: false,
           error: null,
+          recursive: false,
         },
       },
       rootPath: "/test",
@@ -113,18 +116,21 @@ describe("FolderTree — indentation", () => {
           children: [{ id: "/test/one", name: "one", kind: "folder" }],
           isLoading: false,
           error: null,
+          recursive: false,
         },
         "/test/one": {
           expanded: true,
           children: [{ id: "/test/one/two", name: "two", kind: "folder" }],
           isLoading: false,
           error: null,
+          recursive: false,
         },
         "/test/one/two": {
           expanded: false,
           children: [],
           isLoading: false,
           error: null,
+          recursive: false,
         },
       },
     });
@@ -149,6 +155,7 @@ describe("FolderTree — audio-only folders", () => {
           children: [],
           isLoading: false,
           error: null,
+          recursive: false,
         },
       },
       playableEntries: {
@@ -175,6 +182,7 @@ describe("FolderTree — folder expansion", () => {
           children: [folder("Sub1"), folder("Sub2")],
           isLoading: false,
           error: null,
+          recursive: false,
         },
       },
     });
@@ -194,6 +202,7 @@ describe("FolderTree — folder expansion", () => {
           children: [folder("Sub1")],
           isLoading: false,
           error: null,
+          recursive: false,
         },
       },
     });
@@ -215,6 +224,7 @@ describe("FolderTree — folder expansion", () => {
           children: [folder("Sub1")],
           isLoading: false,
           error: null,
+          recursive: false,
         },
         "/test/music/Sub1": {
           expanded: true,
@@ -227,6 +237,7 @@ describe("FolderTree — folder expansion", () => {
           ],
           isLoading: false,
           error: null,
+          recursive: false,
         },
       },
     });
@@ -251,6 +262,7 @@ describe("FolderTree — selection", () => {
           children: [folder("Sub1")],
           isLoading: false,
           error: null,
+          recursive: false,
         },
       },
     });
@@ -274,18 +286,21 @@ describe("FolderTree — keyboard navigation", () => {
           children: [folder("Sub1"), folder("Sub2")],
           isLoading: false,
           error: null,
+          recursive: false,
         },
         "/test/music/Sub1": {
           expanded: false,
           children: [],
           isLoading: false,
           error: null,
+          recursive: false,
         },
         "/test/music/Sub2": {
           expanded: false,
           children: [],
           isLoading: false,
           error: null,
+          recursive: false,
         },
       },
     });
@@ -336,6 +351,7 @@ describe("FolderTree — Go Up button", () => {
           children: [],
           isLoading: false,
           error: null,
+          recursive: false,
         },
       },
     });

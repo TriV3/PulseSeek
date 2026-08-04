@@ -237,3 +237,278 @@ fn streamed_preview_emits_only_folders_before_audio_validation() {
     assert_eq!(names, vec!["Samples"]);
     assert!(chunks.iter().flatten().all(|entry| matches!(entry, BrowserEntry::Folder(_))));
 }
+
+fn collect_recursive(
+    reader: &NativeFolderReader,
+    path: &Path,
+    show_unsupported: bool,
+    batch_size: usize,
+    is_cancelled: impl Fn() -> bool,
+) -> Vec<BrowserEntry> {
+    let mut entries = Vec::new();
+    reader
+        .stream_recursive_files(path, show_unsupported, batch_size, is_cancelled, |chunk| {
+            entries.extend(chunk.iter().cloned());
+        })
+        .expect("recursive stream should succeed");
+    entries
+}
+
+#[test]
+fn recursive_stream_finds_playable_files_in_deep_tree() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    create_wav(&dir.path().join("a/b/c/real.wav"));
+    create_file(&dir.path().join("a/notes.txt"));
+
+    let entries = collect_recursive(&NativeFolderReader, dir.path(), false, 100, || false);
+
+    let playable: Vec<&str> = entries
+        .iter()
+        .filter(|entry| matches!(entry, BrowserEntry::PlayableFile(_)))
+        .map(|entry| entry.name())
+        .collect();
+    assert_eq!(playable, vec!["real.wav"], "nested playable file must be discovered");
+    assert!(
+        entries.iter().all(|entry| entry.id().as_str().ends_with("a/b/c/real.wav")),
+        "entry id must carry the full path so recursive files are distinct",
+    );
+}
+
+#[test]
+fn recursive_stream_orders_subtrees_deterministically() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    create_wav(&dir.path().join("zzz/two.wav"));
+    create_wav(&dir.path().join("aaa/one.wav"));
+    create_wav(&dir.path().join("mid.wav"));
+
+    let entries = collect_recursive(&NativeFolderReader, dir.path(), false, 100, || false);
+
+    let names: Vec<&str> = entries.iter().map(|entry| entry.name()).collect();
+    assert_eq!(
+        names,
+        vec!["mid.wav", "one.wav", "two.wav"],
+        "recursive stream must traverse own files then sorted subtrees",
+    );
+}
+
+#[test]
+fn recursive_stream_sorts_files_within_each_directory() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    create_wav(&dir.path().join("root-b.wav"));
+    create_wav(&dir.path().join("root-a.wav"));
+    create_wav(&dir.path().join("sub/z.wav"));
+    create_wav(&dir.path().join("sub/y.wav"));
+
+    let entries = collect_recursive(&NativeFolderReader, dir.path(), false, 100, || false);
+
+    let names: Vec<&str> = entries.iter().map(|entry| entry.name()).collect();
+    assert_eq!(
+        names,
+        vec!["root-a.wav", "root-b.wav", "y.wav", "z.wav"],
+        "files must be sorted within every directory, independent of read_dir order",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn recursive_stream_breaks_directory_symlink_cycle() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    create_wav(&dir.path().join("a/x.wav"));
+    create_wav(&dir.path().join("y.wav"));
+    std::os::unix::fs::symlink(dir.path(), dir.path().join("a/loop")).expect("create symlink");
+
+    let entries = collect_recursive(&NativeFolderReader, dir.path(), false, 100, || false);
+
+    let names: Vec<&str> = entries.iter().map(|entry| entry.name()).collect();
+    assert_eq!(names.iter().filter(|name| **name == "y.wav").count(), 1);
+    assert_eq!(names.iter().filter(|name| **name == "x.wav").count(), 1);
+    assert!(
+        entries.iter().all(|entry| !matches!(entry, BrowserEntry::Inaccessible(_))),
+        "a symlink cycle must be skipped, not reported as an error",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn recursive_stream_reports_permission_boundary_and_continues() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    create_wav(&dir.path().join("ok.wav"));
+    let blocked = dir.path().join("blocked");
+    std::fs::create_dir(&blocked).expect("create blocked dir");
+    std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o000))
+        .expect("chmod blocked dir");
+
+    let entries = collect_recursive(&NativeFolderReader, dir.path(), false, 100, || false);
+
+    let _ = std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o755));
+
+    assert!(
+        entries.iter().any(|entry| entry.name() == "ok.wav"),
+        "files outside the blocked boundary must still be streamed",
+    );
+    let BrowserEntry::Inaccessible(inaccessible) = entries
+        .iter()
+        .find(|entry| matches!(entry, BrowserEntry::Inaccessible(_)))
+        .expect("blocked folder must be reported")
+    else {
+        unreachable!()
+    };
+    assert_eq!(inaccessible.name, "blocked");
+    assert_eq!(
+        inaccessible.reason,
+        pulseseek_domain::browser::entry::AccessError::PermissionDenied
+    );
+}
+
+#[test]
+fn recursive_stream_continues_after_subdirectory_io_error() {
+    use pulseseek_domain::browser::entry::AccessError;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path().to_path_buf();
+    let gone = root.join("gone");
+    let ok_dir = root.join("okdir");
+    let ok_file = ok_dir.join("ok.wav");
+    create_wav(&ok_file);
+
+    let reader = |target: &Path| -> std::io::Result<Vec<ChildListing>> {
+        if target == root {
+            Ok(vec![
+                ChildListing { path: gone.clone(), is_dir: true, is_symlink: false },
+                ChildListing { path: ok_dir.clone(), is_dir: true, is_symlink: false },
+            ])
+        } else if target == gone {
+            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "volume disconnected"))
+        } else if target == ok_dir {
+            Ok(vec![ChildListing { path: ok_file.clone(), is_dir: false, is_symlink: false }])
+        } else {
+            Ok(vec![])
+        }
+    };
+
+    let mut entries = Vec::new();
+    NativeFolderReader
+        .stream_recursive_files_with_reader(
+            &root,
+            false,
+            100,
+            || false,
+            |chunk| entries.extend(chunk.iter().cloned()),
+            reader,
+        )
+        .expect("walk must not abort on a vanished subtree");
+
+    assert!(
+        entries.iter().any(|entry| entry.name() == "ok.wav"),
+        "unaffected subtrees must still be streamed",
+    );
+    let BrowserEntry::Inaccessible(inaccessible) = entries
+        .iter()
+        .find(|entry| matches!(entry, BrowserEntry::Inaccessible(_)))
+        .expect("vanished subtree must be reported")
+    else {
+        unreachable!()
+    };
+    assert_eq!(inaccessible.name, "gone");
+    assert_eq!(inaccessible.reason, AccessError::NotFound);
+}
+
+#[test]
+fn recursive_stream_cancellation_stops_after_first_batch() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    for index in 0..10 {
+        create_wav(&dir.path().join(format!("song{index}.wav")));
+    }
+    let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let cancel_flag = cancelled.clone();
+    let mut batches = 0;
+
+    NativeFolderReader
+        .stream_recursive_files(
+            dir.path(),
+            false,
+            3,
+            || cancel_flag.load(std::sync::atomic::Ordering::Acquire),
+            |_chunk| {
+                batches += 1;
+                cancelled.store(true, std::sync::atomic::Ordering::Release);
+            },
+        )
+        .expect("cancelled walk must return cleanly");
+
+    assert_eq!(batches, 1, "walker must stop as soon as cancellation is requested");
+}
+
+#[test]
+fn recursive_stream_batches_results() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    for index in 0..5 {
+        create_wav(&dir.path().join(format!("s{index}.wav")));
+    }
+
+    let mut chunk_sizes = Vec::new();
+    NativeFolderReader
+        .stream_recursive_files(
+            dir.path(),
+            false,
+            2,
+            || false,
+            |chunk| {
+                chunk_sizes.push(chunk.len());
+            },
+        )
+        .unwrap();
+
+    assert_eq!(chunk_sizes.iter().sum::<usize>(), 5);
+    assert!(chunk_sizes.iter().all(|size| *size <= 2));
+}
+
+#[test]
+fn recursive_stream_respects_show_unsupported() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    create_wav(&dir.path().join("a/real.wav"));
+    create_file(&dir.path().join("a/notes.txt"));
+    create_file(&dir.path().join("a/setup.msi"));
+
+    let hidden = collect_recursive(&NativeFolderReader, dir.path(), false, 100, || false);
+    assert_eq!(
+        hidden.iter().filter(|entry| matches!(entry, BrowserEntry::PlayableFile(_))).count(),
+        1,
+        "unsupported files must stay hidden by default in recursive mode",
+    );
+    assert!(hidden.iter().all(|entry| !matches!(entry, BrowserEntry::UnsupportedFile(_))));
+
+    let revealed = collect_recursive(&NativeFolderReader, dir.path(), true, 100, || false);
+    let unsupported: Vec<&str> = revealed
+        .iter()
+        .filter(|entry| matches!(entry, BrowserEntry::UnsupportedFile(_)))
+        .map(|entry| entry.name())
+        .collect();
+    assert!(unsupported.contains(&"notes.txt"));
+    assert!(unsupported.contains(&"setup.msi"));
+}
+
+#[test]
+fn recursive_stream_empty_root_emits_nothing() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let mut batches = 0;
+    NativeFolderReader
+        .stream_recursive_files(dir.path(), false, 100, || false, |_chunk| batches += 1)
+        .unwrap();
+    assert_eq!(batches, 0);
+}
+
+#[test]
+fn recursive_stream_root_missing_returns_error() {
+    let result = NativeFolderReader.stream_recursive_files(
+        Path::new("/nonexistent/recursive/path"),
+        false,
+        100,
+        || false,
+        |_chunk| {},
+    );
+    let err = result.expect_err("missing root must fail");
+    assert_eq!(err.user_descriptor().category(), pulseseek_domain::error::ErrorCategory::NotFound);
+}

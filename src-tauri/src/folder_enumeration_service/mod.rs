@@ -65,11 +65,14 @@ pub trait FolderEnumerationService: Send {
     /// Starts enumerating a folder.
     ///
     /// Returns a session_id that can be used to cancel the enumeration.
+    /// When `recursive` is true, the walk covers the whole subtree below
+    /// `path` with cycle protection instead of a single folder level.
     fn start_enumeration(
         &mut self,
         path: &str,
         batch_size: usize,
         show_unsupported: bool,
+        recursive: bool,
         active: &ActiveEnumerations,
         events: Arc<dyn PlaybackEventEmitter>,
     ) -> Result<String, ApplicationError>;
@@ -82,6 +85,7 @@ pub struct FakeFolderEnumerationService {
     pub last_path: Option<String>,
     pub last_batch_size: Option<usize>,
     pub last_show_unsupported: Option<bool>,
+    pub last_recursive: Option<bool>,
     pub fail_start: bool,
     pub next_session_id: String,
 }
@@ -97,6 +101,7 @@ impl FakeFolderEnumerationService {
             last_path: None,
             last_batch_size: None,
             last_show_unsupported: None,
+            last_recursive: None,
             fail_start: false,
             next_session_id: "test-session-001".to_string(),
         }
@@ -119,6 +124,7 @@ impl FolderEnumerationService for FakeFolderEnumerationService {
         path: &str,
         batch_size: usize,
         show_unsupported: bool,
+        recursive: bool,
         _active: &ActiveEnumerations,
         _events: Arc<dyn PlaybackEventEmitter>,
     ) -> Result<String, ApplicationError> {
@@ -126,6 +132,7 @@ impl FolderEnumerationService for FakeFolderEnumerationService {
         self.last_path = Some(path.to_string());
         self.last_batch_size = Some(batch_size);
         self.last_show_unsupported = Some(show_unsupported);
+        self.last_recursive = Some(recursive);
         if self.fail_start {
             return Err(ApplicationError::new(
                 ErrorCategory::Unavailable,

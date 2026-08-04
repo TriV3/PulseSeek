@@ -313,6 +313,7 @@ export interface StartEnumerationRequest {
   path: string;
   batch_size?: number;
   show_unsupported?: boolean;
+  recursive?: boolean;
 }
 
 export interface BrowserRoot {
@@ -343,14 +344,19 @@ export interface CancelEnumerationRequest {
 
 export type CancelEnumerationResponse = Record<string, never>;
 
-/** Starts enumerating a folder. Results arrive via onFolderChunk events. */
+/** Starts enumerating a folder. Results arrive via onFolderChunk events.
+ *
+ * When `recursive` is true, the backend walks the whole subtree below `path`
+ * with cycle protection and streams every playable file it finds.
+ */
 export async function startEnumeration(
   path: string,
   batch_size?: number,
+  recursive = false,
 ): Promise<string> {
   const response = await invokeCommand<StartEnumerationResponse>(
     "start_enumeration",
-    { path, batch_size } satisfies StartEnumerationRequest,
+    { path, batch_size, recursive } satisfies StartEnumerationRequest,
   );
   return response.session_id;
 }

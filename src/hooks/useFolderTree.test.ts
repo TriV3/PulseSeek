@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   collectFolderEntries,
   INITIAL_FOLDER_TREE_STATE,
+  relativeEntryPath,
 } from "../components/FolderTree/folderTreeTypes";
 import { folderTreeReducer, getRestorationPaths } from "./useFolderTree";
 
@@ -19,13 +20,19 @@ function enumeratingState() {
           children: [],
           isLoading: false,
           error: null,
+          recursive: false,
         },
       },
       playableEntries: {
         [path]: [{ id: "old", name: "old.wav", kind: "playable" }],
       },
     },
-    { type: "START_ENUMERATING", path, sessionId: "session-1" },
+    {
+      type: "START_ENUMERATING",
+      path,
+      sessionId: "session-1",
+      recursive: false,
+    },
   );
 }
 
@@ -178,12 +185,14 @@ describe("folderTreeReducer playable entries", () => {
       children: [],
       isLoading: false,
       error: null,
+      recursive: false,
     });
 
     const childLoading = folderTreeReducer(parent, {
       type: "START_ENUMERATING",
       path: "/test/music/one",
       sessionId: "session-2",
+      recursive: false,
     });
     const child = folderTreeReducer(childLoading, {
       type: "ENUMERATION_CHUNK",
@@ -222,6 +231,88 @@ describe("folderTreeReducer playable entries", () => {
       { id: "other", name: "other.wav", kind: "playable" },
     ]);
   });
+
+  it("marks the folder recursive when a recursive enumeration starts", () => {
+    const state = folderTreeReducer(INITIAL_FOLDER_TREE_STATE, {
+      type: "START_ENUMERATING",
+      path,
+      sessionId: "session-1",
+      recursive: true,
+    });
+
+    expect(state.folders[path]?.recursive).toBe(true);
+    expect(state.playableEntries[path]).toEqual([]);
+  });
+
+  it("accumulates recursive subtree files across chunks", () => {
+    const started = folderTreeReducer(INITIAL_FOLDER_TREE_STATE, {
+      type: "START_ENUMERATING",
+      path,
+      sessionId: "session-1",
+      recursive: true,
+    });
+
+    const first = folderTreeReducer(started, {
+      type: "ENUMERATION_CHUNK",
+      path,
+      entries: [
+        { id: "/test/music/a/one.wav", name: "one.wav", kind: "playable" },
+      ],
+      done: false,
+    });
+    const complete = folderTreeReducer(first, {
+      type: "ENUMERATION_CHUNK",
+      path,
+      entries: [
+        { id: "/test/music/two.wav", name: "two.wav", kind: "playable" },
+      ],
+      done: true,
+    });
+
+    expect(complete.playableEntries[path]?.map((entry) => entry.id)).toEqual([
+      "/test/music/a/one.wav",
+      "/test/music/two.wav",
+    ]);
+    expect(complete.folders[path]?.isLoading).toBe(false);
+    expect(complete.folders[path]?.recursive).toBe(true);
+  });
+
+  it("re-enumerating without recursion clears the recursive flag", () => {
+    const recursive = folderTreeReducer(INITIAL_FOLDER_TREE_STATE, {
+      type: "START_ENUMERATING",
+      path,
+      sessionId: "session-1",
+      recursive: true,
+    });
+
+    const flat = folderTreeReducer(recursive, {
+      type: "START_ENUMERATING",
+      path,
+      sessionId: "session-2",
+      recursive: false,
+    });
+
+    expect(flat.folders[path]?.recursive).toBe(false);
+  });
+});
+
+describe("relativeEntryPath", () => {
+  it("returns the id relative to the selected folder", () => {
+    expect(relativeEntryPath("/music/album/one.wav", "/music/album")).toBe(
+      "one.wav",
+    );
+    expect(relativeEntryPath("/music/album/sub/two.wav", "/music/album")).toBe(
+      "sub/two.wav",
+    );
+  });
+
+  it("falls back to the file name for entries outside the selected folder", () => {
+    expect(relativeEntryPath("/other/x.wav", "/music/album")).toBe("x.wav");
+  });
+
+  it("returns the id when no folder is selected", () => {
+    expect(relativeEntryPath("/music/one.wav", "")).toBe("one.wav");
+  });
 });
 
 describe("collectFolderEntries", () => {
@@ -239,6 +330,7 @@ describe("collectFolderEntries", () => {
         ],
         isLoading: false,
         error: null,
+        recursive: false,
       },
       "/music/a": {
         expanded: true,
@@ -251,6 +343,7 @@ describe("collectFolderEntries", () => {
         ],
         isLoading: false,
         error: null,
+        recursive: false,
       },
     };
 
@@ -271,6 +364,7 @@ describe("collectFolderEntries", () => {
         ],
         isLoading: false,
         error: null,
+        recursive: false,
       },
       "/sounds": {
         expanded: true,
@@ -279,6 +373,7 @@ describe("collectFolderEntries", () => {
         ],
         isLoading: false,
         error: null,
+        recursive: false,
       },
     };
 
