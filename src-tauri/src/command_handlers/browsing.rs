@@ -51,6 +51,7 @@ pub(crate) fn handle(
                 &request.path,
                 batch_size,
                 request.show_unsupported,
+                request.recursive,
                 active,
                 events.clone(),
             ) {

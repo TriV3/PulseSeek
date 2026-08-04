@@ -36,6 +36,7 @@ export function folderTreeReducer(
             children: [],
             isLoading: false,
             error: null,
+            recursive: false,
           },
         ]),
       );
@@ -50,6 +51,7 @@ export function folderTreeReducer(
             children: rootEntries,
             isLoading: false,
             error: null,
+            recursive: false,
           },
         },
         status: "ready",
@@ -74,6 +76,7 @@ export function folderTreeReducer(
             children: [],
             isLoading: true,
             error: null,
+            recursive: false,
           },
         },
         status: "loading",
@@ -98,6 +101,7 @@ export function folderTreeReducer(
             children: [],
             isLoading: true,
             error: null,
+            recursive: action.recursive,
           },
         },
         playableEntries: {
@@ -146,6 +150,7 @@ export function folderTreeReducer(
             children: [],
             isLoading: false,
             error: null,
+            recursive: false,
           },
         ]),
       );
@@ -194,6 +199,7 @@ export function folderTreeReducer(
             children: existing?.children ?? [],
             isLoading: false,
             error: action.message,
+            recursive: existing?.recursive ?? false,
           },
         },
         status: "error",
@@ -319,6 +325,7 @@ export interface UseFolderTreeReturn {
   clearError: () => void;
   removeEntries: (path: string, entryIds: string[]) => void;
   restoreContext: (selectedPath: string) => Promise<string>;
+  setRecursive: (path: string, recursive: boolean) => void;
 }
 
 export function useFolderTree(): UseFolderTreeReturn {
@@ -370,7 +377,7 @@ export function useFolderTree(): UseFolderTreeReturn {
     };
   }, []);
 
-  const enumeratePath = useCallback(async (path: string) => {
+  const enumeratePath = useCallback(async (path: string, recursive = false) => {
     const current = stateRef.current;
     // Cancel any in-flight enumeration.
     if (current.activeSessionId) {
@@ -382,12 +389,12 @@ export function useFolderTree(): UseFolderTreeReturn {
     }
 
     try {
-      const sessionId = await startEnumeration(path);
+      const sessionId = await startEnumeration(path, undefined, recursive);
       // Register mapping before dispatching START_ENUMERATING so that
       // any chunks buffered during the await are applied to the correct
       // folder state after the reducer resets entries.
       SESSION_PATHS[sessionId] = path;
-      dispatch({ type: "START_ENUMERATING", path, sessionId });
+      dispatch({ type: "START_ENUMERATING", path, sessionId, recursive });
       // Replay any folder-chunk events that arrived before the mapping
       // was registered (race between Rust worker and JavaScript handler).
       // Atomically drain the buffer so new events go directly to dispatch.
@@ -491,6 +498,13 @@ export function useFolderTree(): UseFolderTreeReturn {
     dispatch({ type: "REMOVE_ENTRIES", path, entryIds });
   }, []);
 
+  const setRecursive = useCallback(
+    (path: string, recursive: boolean) => {
+      void enumeratePath(path, recursive);
+    },
+    [enumeratePath],
+  );
+
   const restoreContext = useCallback((selectedPath: string) => {
     const paths = getRestorationPaths(selectedPath);
     dispatch({
@@ -507,7 +521,12 @@ export function useFolderTree(): UseFolderTreeReturn {
           try {
             const sessionId = await startEnumeration(path);
             SESSION_PATHS[sessionId] = path;
-            dispatch({ type: "START_ENUMERATING", path, sessionId });
+            dispatch({
+              type: "START_ENUMERATING",
+              path,
+              sessionId,
+              recursive: false,
+            });
             const buffered = PENDING_CHUNKS[sessionId];
             delete PENDING_CHUNKS[sessionId];
             for (const payload of buffered ?? []) {
@@ -548,5 +567,6 @@ export function useFolderTree(): UseFolderTreeReturn {
     clearError,
     removeEntries,
     restoreContext,
+    setRecursive,
   };
 }

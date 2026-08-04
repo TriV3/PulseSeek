@@ -1,11 +1,12 @@
 pub mod trash;
 
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 use pulseseek_decoder_symphonia::registry::DecoderRegistry;
 use pulseseek_domain::browser::entry::{
-    BrowserEntry, EntryId, FolderEntry, PlayableFileEntry, PlayableFileMetadata,
-    UnsupportedFileEntry,
+    AccessError, BrowserEntry, EntryId, FolderEntry, InaccessibleEntry, PlayableFileEntry,
+    PlayableFileMetadata, UnsupportedFileEntry,
 };
 use pulseseek_domain::browser::folder_reader::{FolderReadError, FolderReader};
 use pulseseek_domain::decoder::StreamMetadata;
@@ -134,26 +135,9 @@ impl NativeFolderReader {
             let browser_entry = if file_type.is_dir() {
                 BrowserEntry::Folder(FolderEntry { id: EntryId::new(&path_str), name: name_str })
             } else {
-                let id = EntryId::new(&path_str);
-                if !likely_supported_audio(&entry.path()) {
-                    if show_unsupported {
-                        BrowserEntry::UnsupportedFile(UnsupportedFileEntry { id, name: name_str })
-                    } else {
-                        continue;
-                    }
-                } else if let Ok(mut decoder) = DecoderRegistry::open(entry.path()) {
-                    let stream_metadata = decoder.metadata().ok();
-                    let file_metadata = entry.metadata().ok();
-                    let metadata = playable_file_metadata(stream_metadata, file_metadata.as_ref());
-                    BrowserEntry::PlayableFile(PlayableFileEntry {
-                        id,
-                        name: name_str,
-                        metadata: Some(metadata),
-                    })
-                } else if show_unsupported {
-                    BrowserEntry::UnsupportedFile(UnsupportedFileEntry { id, name: name_str })
-                } else {
-                    continue;
+                match self.classify_child(&entry.path(), show_unsupported) {
+                    Some(entry) => entry,
+                    None => continue,
                 }
             };
             entries.push(browser_entry);
@@ -161,6 +145,235 @@ impl NativeFolderReader {
 
         entries.sort();
         Ok(entries)
+    }
+
+    /// Recursively walks `path` and streams playable files (and, when
+    /// requested, unsupported files) in deterministic depth-first order: each
+    /// directory emits its own files before descending into sorted
+    /// subdirectories. Directory symlinks are followed but cycles are broken
+    /// by remembering canonicalized directories, so a symlink loop terminates
+    /// without duplicating entries. Unreadable or vanished subdirectories
+    /// become `Inaccessible` boundary entries instead of aborting the walk;
+    /// only a failure to read the root propagates as an error.
+    pub fn stream_recursive_files(
+        &self,
+        path: &Path,
+        show_unsupported: bool,
+        batch_size: usize,
+        is_cancelled: impl Fn() -> bool,
+        on_batch: impl FnMut(&[BrowserEntry]),
+    ) -> Result<(), FolderReadError> {
+        self.stream_recursive_files_with_reader(
+            path,
+            show_unsupported,
+            batch_size,
+            is_cancelled,
+            on_batch,
+            default_read_children,
+        )
+    }
+
+    fn stream_recursive_files_with_reader<F, C, E>(
+        &self,
+        root: &Path,
+        show_unsupported: bool,
+        batch_size: usize,
+        is_cancelled: C,
+        mut on_batch: E,
+        mut read_children: F,
+    ) -> Result<(), FolderReadError>
+    where
+        F: FnMut(&Path) -> std::io::Result<Vec<ChildListing>>,
+        C: Fn() -> bool,
+        E: FnMut(&[BrowserEntry]),
+    {
+        let batch_size = batch_size.max(1);
+        let root_children =
+            read_children(root).map_err(|error| FolderReadError::from_io_error(error, root))?;
+
+        let mut visited = HashSet::new();
+        if let Ok(canonical) = root.canonicalize() {
+            visited.insert(canonical);
+        }
+
+        let mut pending: Vec<BrowserEntry> = Vec::with_capacity(batch_size);
+        let mut flush = |pending: &mut Vec<BrowserEntry>| {
+            if pending.is_empty() {
+                return;
+            }
+            on_batch(pending);
+            pending.clear();
+        };
+
+        // Process the root directory's own files first (sorted), then its
+        // subdirectories in sorted order.
+        let mut dir_stack: Vec<PathBuf> = Vec::new();
+        let mut root_files = Vec::new();
+        let mut root_dirs = Vec::new();
+        for child in root_children {
+            if is_cancelled() {
+                flush(&mut pending);
+                return Ok(());
+            }
+            if is_directory(&child) {
+                root_dirs.push(child.path);
+            } else if let Some(entry) = self.classify_child(&child.path, show_unsupported) {
+                root_files.push(entry);
+            }
+        }
+        root_files.sort();
+        for entry in root_files {
+            if is_cancelled() {
+                break;
+            }
+            pending.push(entry);
+            if pending.len() >= batch_size {
+                flush(&mut pending);
+            }
+        }
+        sort_child_directories(&mut root_dirs);
+        dir_stack.extend(root_dirs.into_iter().rev());
+
+        while let Some(dir) = dir_stack.pop() {
+            if is_cancelled() {
+                break;
+            }
+            let child_listings = match read_children(&dir) {
+                Ok(listings) => listings,
+                Err(error) => {
+                    pending.push(BrowserEntry::Inaccessible(InaccessibleEntry {
+                        id: EntryId::new(&dir.to_string_lossy()),
+                        name: file_name_string(&dir),
+                        reason: access_error_from_io(&error),
+                    }));
+                    if pending.len() >= batch_size {
+                        flush(&mut pending);
+                    }
+                    continue;
+                },
+            };
+            let mut child_dirs = Vec::new();
+            let mut child_files = Vec::new();
+            for child in child_listings {
+                if is_cancelled() {
+                    break;
+                }
+                if is_directory(&child) {
+                    child_dirs.push(child.path);
+                } else if let Some(entry) = self.classify_child(&child.path, show_unsupported) {
+                    child_files.push(entry);
+                }
+            }
+            child_files.sort();
+            for entry in child_files {
+                if is_cancelled() {
+                    break;
+                }
+                pending.push(entry);
+                if pending.len() >= batch_size {
+                    flush(&mut pending);
+                }
+            }
+            sort_child_directories(&mut child_dirs);
+            for child_dir in child_dirs.into_iter().rev() {
+                if is_cancelled() {
+                    break;
+                }
+                let canonical = match child_dir.canonicalize() {
+                    Ok(canonical) => canonical,
+                    Err(_) => child_dir.clone(),
+                };
+                if visited.insert(canonical) {
+                    dir_stack.push(child_dir);
+                }
+            }
+        }
+
+        if !is_cancelled() {
+            flush(&mut pending);
+        }
+        Ok(())
+    }
+
+    /// Classifies a candidate file path into a playable, unsupported, or
+    /// skipped browser entry. Directories are classified by callers.
+    fn classify_child(&self, path: &Path, show_unsupported: bool) -> Option<BrowserEntry> {
+        let id = EntryId::new(&path.to_string_lossy());
+        let name = file_name_string(path);
+        if !likely_supported_audio(path) {
+            if show_unsupported {
+                Some(BrowserEntry::UnsupportedFile(UnsupportedFileEntry { id, name }))
+            } else {
+                None
+            }
+        } else if let Ok(mut decoder) = DecoderRegistry::open(path) {
+            let stream_metadata = decoder.metadata().ok();
+            let file_metadata = std::fs::metadata(path).ok();
+            Some(BrowserEntry::PlayableFile(PlayableFileEntry {
+                id,
+                name,
+                metadata: Some(playable_file_metadata(stream_metadata, file_metadata.as_ref())),
+            }))
+        } else if show_unsupported {
+            Some(BrowserEntry::UnsupportedFile(UnsupportedFileEntry { id, name }))
+        } else {
+            None
+        }
+    }
+}
+
+/// A single child discovered while listing a directory.
+pub(crate) struct ChildListing {
+    pub path: PathBuf,
+    pub is_dir: bool,
+    pub is_symlink: bool,
+}
+
+/// Reads the direct children of a directory as [`ChildListing`] values.
+fn default_read_children(dir: &Path) -> std::io::Result<Vec<ChildListing>> {
+    let mut children = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        children.push(ChildListing {
+            path: entry.path(),
+            is_dir: file_type.is_dir(),
+            is_symlink: file_type.is_symlink(),
+        });
+    }
+    Ok(children)
+}
+
+/// Returns whether a listing is a directory to descend into, following
+/// symlinks so linked folders participate in the recursive view.
+fn is_directory(child: &ChildListing) -> bool {
+    child.is_dir || (child.is_symlink && child.path.is_dir())
+}
+
+/// Sorts child directory paths case-insensitively for deterministic descent.
+fn sort_child_directories(dirs: &mut [PathBuf]) {
+    dirs.sort_by(|left, right| {
+        left.file_name().and_then(|name| name.to_str()).unwrap_or_default().to_lowercase().cmp(
+            &right.file_name().and_then(|name| name.to_str()).unwrap_or_default().to_lowercase(),
+        )
+    });
+}
+
+/// Extracts the last path component as a string, falling back to the whole
+/// path when the component is not valid UTF-8.
+fn file_name_string(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| path.to_string_lossy().to_string())
+}
+
+/// Maps an `io::Error` to the domain access error used for boundary entries.
+fn access_error_from_io(error: &std::io::Error) -> AccessError {
+    match error.kind() {
+        std::io::ErrorKind::PermissionDenied => AccessError::PermissionDenied,
+        std::io::ErrorKind::NotFound => AccessError::NotFound,
+        _ => AccessError::Other(error.to_string()),
     }
 }
 

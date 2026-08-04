@@ -37,6 +37,7 @@ impl FolderEnumerationService for NativeFolderEnumerationService {
         path: &str,
         batch_size: usize,
         show_unsupported: bool,
+        recursive: bool,
         active: &ActiveEnumerations,
         events: Arc<dyn PlaybackEventEmitter>,
     ) -> Result<String, ApplicationError> {
@@ -59,6 +60,41 @@ impl FolderEnumerationService for NativeFolderEnumerationService {
             .name("pulseseek-folder-enumeration".to_string())
             .spawn(move || {
                 let reader = pulseseek_browser_fs::NativeFolderReader;
+
+                if recursive {
+                    let result = reader.stream_recursive_files(
+                        std::path::Path::new(&path),
+                        show_unsupported,
+                        batch_size,
+                        || cancelled.load(Ordering::Acquire) || events.is_disconnected(),
+                        |chunk| {
+                            if !cancelled.load(Ordering::Acquire) && !events.is_disconnected() {
+                                emit_folder_chunk_phase(
+                                    &*events,
+                                    &session_for_thread,
+                                    chunk,
+                                    false,
+                                    false,
+                                );
+                            }
+                        },
+                    );
+                    if let Err(error) = result {
+                        tracing::warn!(
+                            path = %path,
+                            error = %error,
+                            "recursive folder enumeration failed, sending empty result",
+                        );
+                    }
+                    // Always emit done=true so the frontend exits its loading
+                    // state, even when the walk failed or was cancelled.
+                    if !cancelled.load(Ordering::Acquire) && !events.is_disconnected() {
+                        emit_folder_chunk_phase(&*events, &session_for_thread, &[], true, true);
+                    }
+                    active_for_thread.remove(&session_for_thread);
+                    return;
+                }
+
                 let preview = reader.stream_folder_preview(
                     std::path::Path::new(&path),
                     show_unsupported,

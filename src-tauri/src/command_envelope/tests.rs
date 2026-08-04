@@ -1467,6 +1467,58 @@ fn start_enumeration_defaults_batch_size() {
 }
 
 #[test]
+fn start_enumeration_passes_recursive_flag() {
+    let mut service = FakePlaybackService::new();
+    let mut device_service = FakeAudioDeviceService::new();
+    let mut enum_service = FakeFolderEnumerationService::new();
+    let active = ActiveEnumerations::new();
+
+    let envelope = CommandEnvelope {
+        version: CURRENT_COMMAND_VERSION,
+        command: "start_enumeration".to_string(),
+        payload: serde_json::json!({"path": "/music", "recursive": true}),
+    };
+
+    let _response = dispatch(
+        envelope,
+        &mut service,
+        &mut device_service,
+        &mut enum_service,
+        &noop_trash(),
+        &active,
+        &noop_events(),
+    );
+
+    assert_eq!(enum_service.last_recursive, Some(true));
+}
+
+#[test]
+fn start_enumeration_defaults_recursive_false() {
+    let mut service = FakePlaybackService::new();
+    let mut device_service = FakeAudioDeviceService::new();
+    let mut enum_service = FakeFolderEnumerationService::new();
+    let active = ActiveEnumerations::new();
+
+    let envelope = CommandEnvelope {
+        version: CURRENT_COMMAND_VERSION,
+        command: "start_enumeration".to_string(),
+        payload: serde_json::json!({"path": "/music"}),
+    };
+
+    let _response = dispatch(
+        envelope,
+        &mut service,
+        &mut device_service,
+        &mut enum_service,
+        &noop_trash(),
+        &active,
+        &noop_events(),
+    );
+
+    assert_eq!(enum_service.last_recursive, Some(false));
+}
+
+#[test]
 fn start_enumeration_invalid_payload_rejected() {
     let mut service = FakePlaybackService::new();
     let mut device_service = FakeAudioDeviceService::new();

@@ -258,3 +258,43 @@ describe("listBrowserRoots", () => {
     });
   });
 });
+
+describe("startEnumeration", () => {
+  it("sends the recursive flag when a recursive view is requested", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: true,
+      data: { session_id: "session-1" },
+    });
+
+    const { startEnumeration } = await import("./commandEnvelope");
+    await expect(startEnumeration("/music", 100, true)).resolves.toBe(
+      "session-1",
+    );
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: {
+        version: 1,
+        command: "start_enumeration",
+        payload: { path: "/music", batch_size: 100, recursive: true },
+      },
+    });
+  });
+
+  it("defaults recursive to false when omitted", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: true,
+      data: { session_id: "session-1" },
+    });
+
+    const { startEnumeration } = await import("./commandEnvelope");
+    await startEnumeration("/music");
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: {
+        version: 1,
+        command: "start_enumeration",
+        payload: { path: "/music", batch_size: undefined, recursive: false },
+      },
+    });
+  });
+});

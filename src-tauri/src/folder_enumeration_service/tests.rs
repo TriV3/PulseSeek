@@ -34,7 +34,8 @@ fn fake_service_starts_enumeration() {
     let active = ActiveEnumerations::new();
     let events = Arc::new(FakeEventEmitter::new()) as Arc<dyn PlaybackEventEmitter>;
 
-    let session_id = service.start_enumeration("/music", 50, false, &active, events).unwrap();
+    let session_id =
+        service.start_enumeration("/music", 50, false, false, &active, events).unwrap();
 
     assert_eq!(service.start_call_count, 1);
     assert_eq!(service.last_path, Some("/music".to_string()));
@@ -49,7 +50,7 @@ fn fake_service_fails_with_error() {
     let active = ActiveEnumerations::new();
     let events = Arc::new(FakeEventEmitter::new()) as Arc<dyn PlaybackEventEmitter>;
 
-    let result = service.start_enumeration("/music", 50, false, &active, events);
+    let result = service.start_enumeration("/music", 50, false, false, &active, events);
 
     assert!(result.is_err());
     assert_eq!(result.unwrap_err().user_descriptor().category(), ErrorCategory::Unavailable);
@@ -61,9 +62,20 @@ fn fake_service_records_show_unsupported_preference() {
     let active = ActiveEnumerations::new();
     let events = Arc::new(FakeEventEmitter::new()) as Arc<dyn PlaybackEventEmitter>;
 
-    service.start_enumeration("/music", 50, true, &active, events).unwrap();
+    service.start_enumeration("/music", 50, true, false, &active, events).unwrap();
 
     assert_eq!(service.last_show_unsupported, Some(true));
+}
+
+#[test]
+fn fake_service_records_recursive_flag() {
+    let mut service = FakeFolderEnumerationService::new();
+    let active = ActiveEnumerations::new();
+    let events = Arc::new(FakeEventEmitter::new()) as Arc<dyn PlaybackEventEmitter>;
+
+    service.start_enumeration("/music", 50, false, true, &active, events).unwrap();
+
+    assert_eq!(service.last_recursive, Some(true));
 }
 
 #[test]
@@ -85,7 +97,7 @@ fn native_service_rejects_a_missing_saved_folder_before_starting_a_worker() {
     let missing = tempfile::tempdir().unwrap().path().join("removed-folder");
 
     let error = service
-        .start_enumeration(&missing.to_string_lossy(), 50, false, &active, events)
+        .start_enumeration(&missing.to_string_lossy(), 50, false, false, &active, events)
         .expect_err("missing saved folder must fail synchronously");
 
     assert_eq!(error.user_descriptor().category(), ErrorCategory::InvalidInput);
@@ -102,6 +114,17 @@ fn folder_chunk_entries(events: &Arc<FakeEventEmitter>) -> Vec<BrowserEntryData>
         entries.extend(payload.entries);
     }
     entries
+}
+
+fn folder_chunk_payloads(events: &Arc<FakeEventEmitter>) -> Vec<FolderChunkPayload> {
+    events
+        .recorded_events()
+        .iter()
+        .filter(|envelope| envelope.event == EVENT_FOLDER_CHUNK)
+        .map(|envelope| {
+            serde_json::from_value(envelope.payload.clone()).expect("folder chunk payload")
+        })
+        .collect()
 }
 
 fn wait_for_enumeration_done(events: &Arc<FakeEventEmitter>) {
@@ -156,6 +179,7 @@ fn native_enumeration_omits_non_audio_files_by_default() {
             &dir.path().to_string_lossy(),
             50,
             false,
+            false,
             &active,
             events.clone() as Arc<dyn PlaybackEventEmitter>,
         )
@@ -199,6 +223,7 @@ fn native_enumeration_emits_unsupported_files_when_requested() {
             &dir.path().to_string_lossy(),
             50,
             true,
+            false,
             &active,
             events.clone() as Arc<dyn PlaybackEventEmitter>,
         )
@@ -216,6 +241,66 @@ fn native_enumeration_emits_unsupported_files_when_requested() {
             .filter(|entry| matches!(entry.name.as_str(), "setup.msi" | "disk.dmg"))
             .all(|entry| entry.kind == "unsupported"),
         "disk images and installers must never be classified as playable",
+    );
+}
+
+#[test]
+fn native_service_recursive_emits_all_subtree_files() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    std::fs::create_dir_all(dir.path().join("sub")).expect("create subfolder");
+    std::fs::write(
+        dir.path().join("top.wav"),
+        include_bytes!(
+            "../../../crates/pulseseek-decoder-symphonia/tests/fixtures/silent-stereo-44100.wav"
+        ),
+    )
+    .expect("write top WAV");
+    std::fs::write(
+        dir.path().join("sub").join("nested.wav"),
+        include_bytes!(
+            "../../../crates/pulseseek-decoder-symphonia/tests/fixtures/silent-stereo-44100.wav"
+        ),
+    )
+    .expect("write nested WAV");
+    let events = Arc::new(FakeEventEmitter::new());
+    let active = ActiveEnumerations::new();
+    let mut service = NativeFolderEnumerationService::new();
+
+    service
+        .start_enumeration(
+            &dir.path().to_string_lossy(),
+            50,
+            false,
+            true,
+            &active,
+            events.clone() as Arc<dyn PlaybackEventEmitter>,
+        )
+        .expect("start recursive enumeration");
+    wait_for_enumeration_done(&events);
+
+    let entries = folder_chunk_entries(&events);
+    let playable: Vec<&str> = entries
+        .iter()
+        .filter(|entry| entry.kind == "playable")
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert_eq!(
+        playable,
+        vec!["top.wav", "nested.wav"],
+        "recursive mode must stream files from every subtree level",
+    );
+    assert!(
+        entries.iter().all(|entry| entry.kind != "folder"),
+        "recursive mode streams files only, never folder rows",
+    );
+    let chunks = folder_chunk_payloads(&events);
+    assert!(
+        chunks.iter().filter(|chunk| !chunk.done).all(|chunk| !chunk.folders_done),
+        "loading state must stay active until the recursive walk completes",
+    );
+    assert!(
+        chunks.last().expect("done chunk").done,
+        "recursive enumeration must end with a done chunk",
     );
 }
 

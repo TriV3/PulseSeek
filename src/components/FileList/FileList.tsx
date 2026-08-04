@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { moveToTrash } from "../../api/commandEnvelope";
 import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
+import { relativeEntryPath } from "../FolderTree/folderTreeTypes";
 import type { PlaybackSelectionStatus } from "../../hooks/usePlaybackSelection";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { ConfirmDialog } from "../ConfirmDialog/ConfirmDialog";
@@ -115,6 +116,10 @@ interface FileListProps {
   onMarkFilterChange?: (filter: MarkFilter) => void;
   /** Called when a matched folder row is activated for navigation. */
   onSelectFolder?: (path: string) => void;
+  /** Whether the current folder is shown as a flat recursive file view. */
+  recursive?: boolean;
+  /** Called when the user toggles the recursive file view. */
+  onRecursiveChange?: (recursive: boolean) => void;
 }
 
 /** Column headers that act as clickable sort controls. */
@@ -149,6 +154,8 @@ export function FileList({
   markFilter = "all",
   onMarkFilterChange,
   onSelectFolder,
+  recursive = false,
+  onRecursiveChange,
 }: FileListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   // Multi-selection stores stable backend entry ids (FR-LS-005) so rows keep
@@ -492,6 +499,14 @@ export function FileList({
         >
           Move to Trash
         </button>
+        <button
+          type="button"
+          className="file-list-recursive-toggle"
+          aria-pressed={recursive}
+          onClick={() => onRecursiveChange?.(!recursive)}
+        >
+          Recursive view
+        </button>
         <input
           type="search"
           className="file-list-search"
@@ -794,7 +809,9 @@ export function FileList({
                         {marks[entry.id] === "favorite" ? "★" : ""}
                       </span>
                     ) : null}
-                    {entry.name}
+                    {recursive
+                      ? relativeEntryPath(entry.id, selectedPath ?? "")
+                      : entry.name}
                   </span>
                   <span role="gridcell">
                     {metadataValue(

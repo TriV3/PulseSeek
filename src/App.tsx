@@ -67,6 +67,7 @@ function App() {
   );
 
   const fileListFolder = state.folders[state.selectedPath ?? ""] ?? undefined;
+  const recursiveView = fileListFolder?.recursive ?? false;
   const fileListEntries = useMemo(
     () => state.playableEntries[state.selectedPath ?? ""] ?? [],
     [state.playableEntries, state.selectedPath],
@@ -590,6 +591,12 @@ function App() {
                 onEntriesTrashed={(entryIds) => {
                   if (state.selectedPath) {
                     folderTree.removeEntries(state.selectedPath, entryIds);
+                  }
+                }}
+                recursive={recursiveView}
+                onRecursiveChange={(next) => {
+                  if (state.selectedPath) {
+                    folderTree.setRecursive(state.selectedPath, next);
                   }
                 }}
               />

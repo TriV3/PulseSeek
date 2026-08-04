@@ -2059,3 +2059,71 @@ describe("FileList — session marks end to end", () => {
     expect(mockMoveToTrash).not.toHaveBeenCalled();
   });
 });
+
+describe("FileList — recursive view", () => {
+  it("renders a toggle that reports changes and shows the pressed state", () => {
+    const onRecursiveChange = vi.fn();
+    render(
+      <FileList
+        entries={[]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        recursive={false}
+        onRecursiveChange={onRecursiveChange}
+      />,
+    );
+
+    const toggle = screen.getByRole("button", { name: "Recursive view" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(toggle);
+    expect(onRecursiveChange).toHaveBeenCalledWith(true);
+  });
+
+  it("shows relative paths instead of bare names in recursive mode", () => {
+    render(
+      <FileList
+        entries={[
+          {
+            id: "/music/album/one.wav",
+            name: "one.wav",
+            kind: "playable",
+          },
+          {
+            id: "/music/album/sub/two.wav",
+            name: "two.wav",
+            kind: "playable",
+          },
+        ]}
+        selectedPath="/music/album"
+        isLoading={false}
+        error={null}
+        recursive
+      />,
+    );
+
+    expect(screen.getByText("one.wav")).toBeInTheDocument();
+    expect(screen.getByText("sub/two.wav")).toBeInTheDocument();
+    expect(screen.queryByText("two.wav")).not.toBeInTheDocument();
+  });
+
+  it("keeps bare names when recursive mode is off", () => {
+    render(
+      <FileList
+        entries={[
+          {
+            id: "/music/album/one.wav",
+            name: "one.wav",
+            kind: "playable",
+          },
+        ]}
+        selectedPath="/music/album"
+        isLoading={false}
+        error={null}
+        recursive={false}
+      />,
+    );
+
+    expect(screen.getByText("one.wav")).toBeInTheDocument();
+  });
+});

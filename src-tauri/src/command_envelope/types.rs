@@ -138,6 +138,8 @@ pub struct StartEnumerationRequest {
     pub batch_size: Option<u64>,
     #[serde(default)]
     pub show_unsupported: bool,
+    #[serde(default)]
+    pub recursive: bool,
 }
 
 #[derive(Debug, Serialize)]
