@@ -298,3 +298,75 @@ describe("startEnumeration", () => {
     });
   });
 });
+
+describe("recent folders", () => {
+  it("lists recent folders from the backend", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: true,
+      data: {
+        folders: [
+          { path: "/music/project", name: "project", last_opened_ms: 42 },
+        ],
+      },
+    });
+
+    const { listRecentFolders } = await import("./commandEnvelope");
+    await expect(listRecentFolders()).resolves.toEqual([
+      { path: "/music/project", name: "project", last_opened_ms: 42 },
+    ]);
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: {
+        version: 1,
+        command: "list_recent_folders",
+        payload: {},
+      },
+    });
+  });
+
+  it("records a folder path", async () => {
+    mockInvoke.mockResolvedValueOnce({ version: 1, ok: true, data: {} });
+
+    const { recordRecentFolder } = await import("./commandEnvelope");
+    await recordRecentFolder("/music/project");
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: {
+        version: 1,
+        command: "record_recent_folder",
+        payload: { path: "/music/project" },
+      },
+    });
+  });
+
+  it("clears the recent-folder history", async () => {
+    mockInvoke.mockResolvedValueOnce({ version: 1, ok: true, data: {} });
+
+    const { clearRecentFolders } = await import("./commandEnvelope");
+    await clearRecentFolders();
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: {
+        version: 1,
+        command: "clear_recent_folders",
+        payload: {},
+      },
+    });
+  });
+
+  it("surfaces backend rejection as CommandError", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: false,
+      error: {
+        category: "InvalidInput",
+        message: "PulseSeek received invalid input.",
+        diagnostic_code: "browser.read",
+      },
+    });
+
+    const { recordRecentFolder, CommandError } =
+      await import("./commandEnvelope");
+    await expect(recordRecentFolder("/missing")).rejects.toBeInstanceOf(
+      CommandError,
+    );
+  });
+});

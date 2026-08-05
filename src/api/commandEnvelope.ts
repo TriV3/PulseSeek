@@ -409,3 +409,47 @@ export async function moveToTrash(
   } satisfies MoveToTrashRequest);
   return response.results;
 }
+
+// ── Recent folders types ───────────────────────────────────────────────
+
+export interface RecentFolderData {
+  path: string;
+  name: string;
+  last_opened_ms: number;
+}
+
+export interface ListRecentFoldersResponse {
+  folders: RecentFolderData[];
+}
+
+export interface RecordRecentFolderRequest {
+  path: string;
+}
+
+export type RecordRecentFolderResponse = Record<string, never>;
+export type ClearRecentFoldersResponse = Record<string, never>;
+
+/** Returns the recent-folder history from most to least recent (FR-BR-011). */
+export async function listRecentFolders(): Promise<RecentFolderData[]> {
+  const response = await invokeCommand<ListRecentFoldersResponse>(
+    "list_recent_folders",
+    {},
+  );
+  return response.folders;
+}
+
+/** Records `path` as the most recently opened folder (best-effort history).
+ *
+ * Missing or non-directory paths are rejected by the backend with a safe
+ * error; callers treat recording as non-critical.
+ */
+export async function recordRecentFolder(path: string): Promise<void> {
+  await invokeCommand<RecordRecentFolderResponse>("record_recent_folder", {
+    path,
+  } satisfies RecordRecentFolderRequest);
+}
+
+/** Removes the entire recent-folder history. */
+export async function clearRecentFolders(): Promise<void> {
+  await invokeCommand<ClearRecentFoldersResponse>("clear_recent_folders", {});
+}

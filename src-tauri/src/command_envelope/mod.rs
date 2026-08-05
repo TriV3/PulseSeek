@@ -6,10 +6,11 @@ use pulseseek_domain::error::{ApplicationError, ErrorContract};
 
 use crate::audio_device_service::AudioDeviceService;
 pub use crate::command_handlers::browsing::handle_pick_folder;
-use crate::command_handlers::{browsing, device, parse_payload, playback};
+use crate::command_handlers::{browsing, device, parse_payload, playback, recent_folders};
 use crate::folder_enumeration_service::{ActiveEnumerations, FolderEnumerationService};
 use crate::playback_events::PlaybackEventEmitter;
 use crate::playback_service::PlaybackService;
+use crate::recent_folders_service::RecentFoldersService;
 use crate::trash_service::TrashService;
 pub(crate) use types::*;
 
@@ -21,6 +22,7 @@ pub fn dispatch(
     enum_service: &mut dyn FolderEnumerationService,
     trash_service: &dyn TrashService,
     active: &ActiveEnumerations,
+    recent_service: &dyn RecentFoldersService,
     events: &Arc<dyn PlaybackEventEmitter>,
 ) -> CommandResponse {
     if envelope.version != CURRENT_COMMAND_VERSION {
@@ -57,6 +59,9 @@ pub fn dispatch(
                 active,
                 events,
             )
+        },
+        "list_recent_folders" | "record_recent_folder" | "clear_recent_folders" => {
+            recent_folders::handle(&envelope.command, envelope.payload, recent_service)
         },
         _ => CommandResponse::err(BoundaryError {
             category: "Unsupported".to_string(),
@@ -106,6 +111,7 @@ pub async fn pick_folder_dialog(app: tauri::AppHandle) -> Result<PickFolderRespo
 /// Tauri command: dispatches a versioned command envelope and returns a
 /// versioned response. This is the single entry point for all frontend
 /// commands.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn invoke_command(
     envelope: CommandEnvelope,
@@ -114,12 +120,14 @@ pub fn invoke_command(
     enum_state: tauri::State<'_, std::sync::Mutex<Box<dyn FolderEnumerationService>>>,
     trash_state: tauri::State<'_, std::sync::Mutex<Box<dyn TrashService>>>,
     active: tauri::State<'_, ActiveEnumerations>,
+    recent_state: tauri::State<'_, std::sync::Mutex<Box<dyn RecentFoldersService>>>,
     events: tauri::State<'_, Arc<dyn PlaybackEventEmitter>>,
 ) -> CommandResponse {
     let mut service = state.lock().expect("playback service lock poisoned");
     let mut device_service = device_state.lock().expect("audio device service lock poisoned");
     let mut enum_service = enum_state.lock().expect("enumeration service lock poisoned");
     let trash_service = trash_state.lock().expect("trash service lock poisoned");
+    let recent_service = recent_state.lock().expect("recent folders service lock poisoned");
     dispatch(
         envelope,
         &mut **service,
@@ -127,6 +135,7 @@ pub fn invoke_command(
         &mut **enum_service,
         &**trash_service,
         &active,
+        &**recent_service,
         &events,
     )
 }

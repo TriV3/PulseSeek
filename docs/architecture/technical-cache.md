@@ -19,8 +19,18 @@ independent SQLite files described in ADR 0003.
   source_modified_ms, algorithm_version, data, created_at_ms)` for versioned
   waveform data keyed by source path. Size, modified timestamp, and algorithm
   version validate every load; stale or corrupt rows are deleted on access.
-  Remaining feature record tables (recent folders, shortcuts, visualization
-  settings) are added by the PRs that own them through later migrations.
+- Schema version 3 (PR-074) adds
+  `recent_folders(path TEXT PRIMARY KEY, name TEXT NOT NULL,
+  last_opened_ms INTEGER NOT NULL)` for the bounded recent-folder history
+  (FR-BR-011). Records are plain paths the user selected; the store is
+  path-agnostic and never probes the filesystem, so a folder that disappears
+  later stays listed and reopening it fails gracefully. The history is
+  bounded to 10 entries and reorders by most-recently-opened timestamp, which
+  is monotonic per database so ordering is deterministic. Display names are
+  basenames and the service never logs paths or embeds a path in an error
+  message.
+  Remaining feature record tables (shortcuts, visualization settings) are
+  added by the PRs that own them through later migrations.
 - `migrations(version, applied_at_ms)` records the applied schema version.
   Migrations run in a transaction and are idempotent on repeat startup.
 - The database is opened and migrated on `start`; every subsequent operation
@@ -32,7 +42,9 @@ independent SQLite files described in ADR 0003.
   `<name>.corrupt-<timestamp>` and recreated; the cache reports
   `CacheStatus::Degraded` and remains usable.
 - **Open failure** (permissions, missing directory): `start` returns an error,
-  startup logs a warning, and the app continues without a cache.
+  startup logs a warning, and the app continues without a cache. Recent-folder
+  commands then fall back to an in-memory, session-only history so the feature
+  keeps working without blocking startup.
 - **Destructive migration**: an existing database is copied to
   `<name>.backup-<version>.sqlite` before any pending migration; a failed
   migration rolls back to the previous version.

@@ -174,3 +174,112 @@ describe("application shell", () => {
     ).toBe(true);
   });
 });
+
+describe("recent folders wiring", () => {
+  const envelopeResponse = (data: unknown) => ({
+    version: 1,
+    ok: true,
+    data,
+  });
+
+  beforeEach(() => {
+    vi.mocked(invoke).mockImplementation(async (command: string, args) => {
+      if (command === "load_player_preferences") {
+        return { version: 1, preferences: DEFAULT_PLAYER_PREFERENCES };
+      }
+      if (command === "save_player_preferences") {
+        const preferences = (args as { preferences: PlayerPreferences })
+          .preferences;
+        return { version: 1, preferences };
+      }
+      if (command === "invoke_command") {
+        const envelope = (
+          args as { envelope: { command: string; payload: unknown } }
+        ).envelope;
+        switch (envelope.command) {
+          case "list_browser_roots":
+            return envelopeResponse({
+              roots: [{ path: "/music", name: "Music" }],
+            });
+          case "list_recent_folders":
+            return envelopeResponse({ folders: [] });
+          case "record_recent_folder":
+          case "clear_recent_folders":
+            return envelopeResponse({});
+          case "start_enumeration":
+            return envelopeResponse({ session_id: "session-1" });
+          default:
+            // Unknown commands fail like an unmocked backend so hooks fall
+            // back to their empty/error states instead of crashing.
+            return {
+              version: 1,
+              ok: false,
+              error: {
+                category: "Unavailable",
+                message: "Unmocked command.",
+                diagnostic_code: "command.unknown",
+              },
+            };
+        }
+      }
+      return undefined;
+    });
+  });
+
+  it("shows an empty recent-folders state on first launch", async () => {
+    render(<App />);
+
+    await waitFor(() =>
+      expect(screen.getByText("No recent folders yet.")).toBeInTheDocument(),
+    );
+  });
+
+  it("records a selected folder and clears the history", async () => {
+    render(<App />);
+
+    await screen.findByText("Computer", { exact: true });
+    fireEvent.click(screen.getByText("Computer", { exact: true }));
+    await screen.findByText("Music", { exact: true });
+    fireEvent.click(screen.getByText("Music", { exact: true }));
+
+    // The selected folder appears in the recent-folders sidebar with its
+    // path basename ("music", unlike the capitalized tree root label).
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "music" })).toBeInTheDocument(),
+    );
+
+    expect(
+      vi.mocked(invoke).mock.calls.some(
+        ([command, args]) =>
+          command === "invoke_command" &&
+          (
+            args as {
+              envelope: { command: string; payload: { path?: string } };
+            }
+          ).envelope.command === "record_recent_folder" &&
+          (args as { envelope: { payload: { path?: string } } }).envelope
+            .payload.path === "/music",
+      ),
+    ).toBe(true);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Clear recent folders" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "music" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      vi
+        .mocked(invoke)
+        .mock.calls.some(
+          ([command, args]) =>
+            command === "invoke_command" &&
+            (args as { envelope: { command: string } }).envelope.command ===
+              "clear_recent_folders",
+        ),
+    ).toBe(true);
+  });
+});
