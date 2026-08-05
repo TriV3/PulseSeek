@@ -9,6 +9,7 @@ use crate::dialog_service::FakeFolderPicker;
 use crate::folder_enumeration_service::{ActiveEnumerations, FakeFolderEnumerationService};
 use crate::playback_events::{FakeEventEmitter, NoopEventEmitter};
 use crate::playback_service::FakePlaybackService;
+use crate::recent_folders_service::InMemoryRecentFoldersService;
 use crate::trash_service::FakeTrashService;
 
 fn noop_events() -> Arc<dyn PlaybackEventEmitter> {
@@ -37,6 +38,10 @@ fn noop_trash() -> FakeTrashService {
     FakeTrashService::new(Box::new(|_| vec![]))
 }
 
+fn noop_recent() -> InMemoryRecentFoldersService {
+    InMemoryRecentFoldersService::new()
+}
+
 fn health_envelope() -> CommandEnvelope {
     CommandEnvelope {
         version: CURRENT_COMMAND_VERSION,
@@ -58,6 +63,7 @@ fn health_command_round_trip() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -85,6 +91,7 @@ fn unknown_version_rejected() {
             &mut noop_enum(),
             &noop_trash(),
             &noop_active(),
+            &noop_recent(),
             &noop_events(),
         );
 
@@ -113,6 +120,7 @@ fn unknown_command_rejected() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -140,6 +148,7 @@ fn invalid_payload_rejected() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -187,6 +196,7 @@ fn play_command_dispatches_to_service() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -213,6 +223,7 @@ fn play_command_invalid_payload_rejected() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -240,6 +251,7 @@ fn play_command_missing_path_rejected() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -265,6 +277,7 @@ fn set_playback_mode_dispatches_and_returns_confirmed_mode() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -289,6 +302,7 @@ fn set_playback_mode_rejects_unknown_mode() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -314,6 +328,7 @@ fn set_playback_mode_maps_service_failure() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -341,6 +356,7 @@ fn pause_command_dispatches_to_service() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -365,6 +381,7 @@ fn pause_command_invalid_payload_rejected() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -392,6 +409,7 @@ fn resume_command_dispatches_to_service() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -416,6 +434,7 @@ fn resume_command_invalid_payload_rejected() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -442,6 +461,7 @@ fn stop_command_dispatches_to_service() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -466,6 +486,7 @@ fn stop_command_invalid_payload_rejected() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -493,6 +514,7 @@ fn seek_command_dispatches_to_service() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -520,6 +542,7 @@ fn seek_command_invalid_payload_rejected() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -544,6 +567,7 @@ fn seek_command_missing_position_rejected() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -570,6 +594,7 @@ fn volume_command_dispatches_to_service() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -596,6 +621,7 @@ fn volume_command_muted_state_dispatches_to_service() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -621,6 +647,7 @@ fn volume_command_invalid_payload_rejected() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -645,6 +672,7 @@ fn volume_command_missing_fields_rejected() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -672,6 +700,7 @@ fn play_service_error_maps_to_boundary_error() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -699,6 +728,7 @@ fn pause_service_error_maps_to_boundary_error() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -725,6 +755,7 @@ fn resume_service_error_maps_to_boundary_error() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -751,6 +782,7 @@ fn stop_service_error_maps_to_boundary_error() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -777,6 +809,7 @@ fn seek_service_error_maps_to_boundary_error() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -803,6 +836,7 @@ fn volume_service_error_maps_to_boundary_error() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -831,6 +865,7 @@ fn play_emits_playing_state_event() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &events,
     );
 
@@ -860,6 +895,7 @@ fn play_emits_event_only_on_success() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &events,
     );
 
@@ -884,6 +920,7 @@ fn pause_emits_paused_state_event() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &events,
     );
 
@@ -912,6 +949,7 @@ fn resume_emits_playing_state_event() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &events,
     );
 
@@ -939,6 +977,7 @@ fn stop_emits_stopped_state_event() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &events,
     );
 
@@ -966,6 +1005,7 @@ fn seek_does_not_emit_state_event() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &events,
     );
 
@@ -990,6 +1030,7 @@ fn volume_does_not_emit_state_event() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &events,
     );
 
@@ -1014,6 +1055,7 @@ fn state_event_has_versioned_envelope() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &events,
     );
 
@@ -1041,6 +1083,7 @@ fn list_devices_command_returns_devices() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1070,6 +1113,7 @@ fn list_devices_command_invalid_payload_rejected() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1096,6 +1140,7 @@ fn list_devices_service_error_maps_to_boundary() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1124,6 +1169,7 @@ fn current_device_command_returns_none_when_no_device() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1150,6 +1196,7 @@ fn current_device_command_returns_device_when_set() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1178,6 +1225,7 @@ fn current_device_service_error_maps_to_boundary() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1203,6 +1251,7 @@ fn select_device_command_dispatches_to_service() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1230,6 +1279,7 @@ fn select_device_command_invalid_payload_rejected() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1256,6 +1306,7 @@ fn select_device_command_missing_id_rejected() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1283,6 +1334,7 @@ fn select_device_service_error_maps_to_boundary() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1310,6 +1362,7 @@ fn select_device_emits_device_lost_event() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &events,
     );
 
@@ -1340,6 +1393,7 @@ fn select_device_does_not_emit_device_lost_when_not_lost() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &events,
     );
 
@@ -1364,6 +1418,7 @@ fn unknown_device_command_rejected() {
         &mut noop_enum(),
         &noop_trash(),
         &noop_active(),
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1393,6 +1448,7 @@ fn start_enumeration_returns_session_id() {
         &mut enum_service,
         &noop_trash(),
         &active,
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1431,6 +1487,7 @@ fn list_browser_roots_returns_typed_roots() {
         &mut enumeration,
         &noop_trash(),
         &active,
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1460,6 +1517,7 @@ fn start_enumeration_defaults_batch_size() {
         &mut enum_service,
         &noop_trash(),
         &active,
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1486,6 +1544,7 @@ fn start_enumeration_passes_recursive_flag() {
         &mut enum_service,
         &noop_trash(),
         &active,
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1512,6 +1571,7 @@ fn start_enumeration_defaults_recursive_false() {
         &mut enum_service,
         &noop_trash(),
         &active,
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1538,6 +1598,7 @@ fn start_enumeration_invalid_payload_rejected() {
         &mut enum_service,
         &noop_trash(),
         &active,
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1565,6 +1626,7 @@ fn start_enumeration_missing_path_rejected() {
         &mut enum_service,
         &noop_trash(),
         &active,
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1593,6 +1655,7 @@ fn start_enumeration_service_error_maps_to_boundary() {
         &mut enum_service,
         &noop_trash(),
         &active,
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1621,6 +1684,7 @@ fn cancel_enumeration_cancels_session() {
         &mut enum_service,
         &noop_trash(),
         &active,
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1648,6 +1712,7 @@ fn cancel_enumeration_unknown_session_idempotent() {
         &mut enum_service,
         &noop_trash(),
         &active,
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1674,6 +1739,7 @@ fn cancel_enumeration_invalid_payload_rejected() {
         &mut enum_service,
         &noop_trash(),
         &active,
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1708,6 +1774,7 @@ fn move_to_trash_command_dispatches_and_returns_results() {
         &mut enum_service,
         &trash_service,
         &active,
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1751,6 +1818,7 @@ fn move_to_trash_reports_partial_failure() {
         &mut enum_service,
         &trash_service,
         &active,
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1784,6 +1852,7 @@ fn move_to_trash_invalid_payload_rejected() {
         &mut enum_service,
         &trash_service,
         &active,
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1814,6 +1883,7 @@ fn move_to_trash_empty_paths_returns_empty() {
         &mut enum_service,
         &trash_service,
         &active,
+        &noop_recent(),
         &noop_events(),
     );
 
@@ -1855,4 +1925,128 @@ fn handle_pick_folder_maps_service_error() {
     assert!(!response.ok);
     let error = response.error.unwrap();
     assert_eq!(error.category, "PermissionDenied");
+}
+
+// ── Recent folders command tests ───────────────────────────────────
+
+fn recent_folder_dispatch(
+    command: &str,
+    payload: serde_json::Value,
+    recent_service: &dyn crate::recent_folders_service::RecentFoldersService,
+) -> CommandResponse {
+    let mut service = FakePlaybackService::new();
+    let mut device_service = FakeAudioDeviceService::new();
+    let mut enum_service = FakeFolderEnumerationService::new();
+    let active = ActiveEnumerations::new();
+    let trash_service = FakeTrashService::new(Box::new(|_| vec![]));
+    let envelope =
+        CommandEnvelope { version: CURRENT_COMMAND_VERSION, command: command.to_string(), payload };
+    dispatch(
+        envelope,
+        &mut service,
+        &mut device_service,
+        &mut enum_service,
+        &trash_service,
+        &active,
+        recent_service,
+        &noop_events(),
+    )
+}
+
+#[test]
+fn recent_folder_record_and_list_round_trip() {
+    let recent_service = InMemoryRecentFoldersService::new();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_str().expect("utf8 temp path").to_string();
+
+    let record = recent_folder_dispatch(
+        "record_recent_folder",
+        serde_json::json!({ "path": path }),
+        &recent_service,
+    );
+    assert!(record.ok, "record succeeds for an existing directory");
+
+    let list =
+        recent_folder_dispatch("list_recent_folders", serde_json::json!({}), &recent_service);
+    assert!(list.ok);
+    let data: ListRecentFoldersResponse = serde_json::from_value(list.data.unwrap()).unwrap();
+    assert_eq!(data.folders.len(), 1);
+    assert_eq!(data.folders[0].path, path);
+    assert!(!data.folders[0].name.is_empty());
+}
+
+#[test]
+fn recent_folder_clear_empties_history() {
+    let recent_service = InMemoryRecentFoldersService::new();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_str().expect("utf8 temp path").to_string();
+
+    assert!(
+        recent_folder_dispatch(
+            "record_recent_folder",
+            serde_json::json!({ "path": path }),
+            &recent_service,
+        )
+        .ok
+    );
+
+    let clear =
+        recent_folder_dispatch("clear_recent_folders", serde_json::json!({}), &recent_service);
+    assert!(clear.ok);
+
+    let list =
+        recent_folder_dispatch("list_recent_folders", serde_json::json!({}), &recent_service);
+    let data: ListRecentFoldersResponse = serde_json::from_value(list.data.unwrap()).unwrap();
+    assert!(data.folders.is_empty());
+}
+
+#[test]
+fn recent_folder_missing_path_returns_safe_error() {
+    let recent_service = InMemoryRecentFoldersService::new();
+    let secret = "/nonexistent/private-records";
+
+    let response = recent_folder_dispatch(
+        "record_recent_folder",
+        serde_json::json!({ "path": secret }),
+        &recent_service,
+    );
+
+    assert!(!response.ok);
+    let error = response.error.unwrap();
+    assert_eq!(error.category, "InvalidInput");
+    assert!(!error.message.contains("private-records"), "error must not embed the path");
+    assert!(!error.message.contains("/nonexistent"), "error must not embed the path");
+}
+
+#[test]
+fn recent_folder_virtual_root_is_ignored() {
+    let recent_service = InMemoryRecentFoldersService::new();
+
+    let response = recent_folder_dispatch(
+        "record_recent_folder",
+        serde_json::json!({ "path": "computer://" }),
+        &recent_service,
+    );
+
+    assert!(response.ok);
+    let list =
+        recent_folder_dispatch("list_recent_folders", serde_json::json!({}), &recent_service);
+    let data: ListRecentFoldersResponse = serde_json::from_value(list.data.unwrap()).unwrap();
+    assert!(data.folders.is_empty());
+}
+
+#[test]
+fn recent_folder_invalid_payload_rejected() {
+    let recent_service = InMemoryRecentFoldersService::new();
+
+    let response = recent_folder_dispatch(
+        "record_recent_folder",
+        serde_json::json!("not_an_object"),
+        &recent_service,
+    );
+
+    assert!(!response.ok);
+    let error = response.error.unwrap();
+    assert_eq!(error.category, "InvalidInput");
+    assert_eq!(error.diagnostic_code, "command.payload");
 }

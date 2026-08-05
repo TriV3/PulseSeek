@@ -177,6 +177,28 @@ pub struct MoveToTrashItemResult {
     pub diagnostic_code: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ListRecentFoldersRequest {}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListRecentFoldersResponse {
+    pub folders: Vec<crate::recent_folders_service::RecentFolderData>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RecordRecentFolderRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RecordRecentFolderResponse {}
+
+#[derive(Debug, Deserialize)]
+pub struct ClearRecentFoldersRequest {}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClearRecentFoldersResponse {}
+
 impl CommandResponse {
     pub fn ok(data: Value) -> Self {
         Self { version: CURRENT_COMMAND_VERSION, ok: true, data: Some(data), error: None }

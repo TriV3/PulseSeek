@@ -256,6 +256,24 @@ input {
   overflow: hidden;
 }
 
+/* The sidebar stacks the folder tree (which grows) above the bounded
+   recent-folder history instead of letting the tree's 100% height clip it. */
+.app-sidebar {
+  display: flex;
+  flex-direction: column;
+}
+
+.app-sidebar > .folder-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+
+.app-sidebar > .recent-folders {
+  flex: 0 0 auto;
+  max-height: 40%;
+}
+
 .app-content {
   display: flex;
 }

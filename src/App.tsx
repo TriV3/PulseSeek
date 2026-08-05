@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFolderTree } from "./hooks/useFolderTree";
 import { FolderTree } from "./components/FolderTree/FolderTree";
+import { RecentFolders } from "./components/RecentFolders/RecentFolders";
+import { useRecentFolders } from "./hooks/useRecentFolders";
 import { collectFolderEntries } from "./components/FolderTree/folderTreeTypes";
 import { FileList } from "./components/FileList/FileList";
 import {
@@ -51,6 +53,7 @@ function App() {
   const [markFilter, setMarkFilter] = useState<MarkFilter>("all");
   const sessionMarks = useSessionMarks();
   const folderTree = useFolderTree();
+  const recentFolders = useRecentFolders();
   const { state } = folderTree;
   const playback = usePlaybackSelection();
   const playbackMode = usePlaybackMode();
@@ -136,6 +139,19 @@ function App() {
     onSelectEntry: selectAndRemember,
   });
 
+  // Opens a folder: records it in the recent-folder history (FR-BR-011),
+  // persists it as the selected folder, and selects it in the tree. When
+  // `expand` is set the folder is also enumerated so its contents appear.
+  const openFolder = useCallback(
+    (path: string, options?: { expand?: boolean }) => {
+      playerPreferences.update({ selected_folder_path: path });
+      recentFolders.record(path);
+      folderTree.selectFolder(path);
+      if (options?.expand) folderTree.toggleExpand(path);
+    },
+    [folderTree, playerPreferences, recentFolders],
+  );
+
   useEffect(() => {
     if (!playerPreferences.isLoaded || restoredOptions.current) return;
     restoredOptions.current = true;
@@ -165,6 +181,9 @@ function App() {
       void folderTree
         .restoreContext(saved.selected_folder_path)
         .then((restoredPath) => {
+          if (restoredPath !== "computer://") {
+            recentFolders.record(restoredPath);
+          }
           if (restoredPath !== saved.selected_folder_path) {
             playerPreferences.update({
               selected_folder_path:
@@ -187,6 +206,7 @@ function App() {
     playerPreferences,
     playerPreferences.isLoaded,
     playerPreferences.preferences,
+    recentFolders,
     state.status,
   ]);
 
@@ -520,19 +540,29 @@ function App() {
                   folderTree.toggleExpand(path);
                 }}
                 selectFolder={(path) => {
-                  playerPreferences.update({ selected_folder_path: path });
-                  folderTree.selectFolder(path);
+                  openFolder(path);
                 }}
                 navigateUp={() => {
                   const selected = state.selectedPath;
                   const trimmed = selected?.replace(/\/+$/, "") ?? "";
                   const separator = trimmed.lastIndexOf("/");
                   if (separator > 0) {
-                    playerPreferences.update({
-                      selected_folder_path: trimmed.substring(0, separator),
-                    });
+                    const parent = trimmed.substring(0, separator);
+                    playerPreferences.update({ selected_folder_path: parent });
+                    recentFolders.record(parent);
                   }
                   folderTree.navigateUp();
+                }}
+              />
+              <RecentFolders
+                folders={recentFolders.folders}
+                isLoading={recentFolders.isLoading}
+                error={recentFolders.error}
+                onReopen={(path) => {
+                  openFolder(path, { expand: true });
+                }}
+                onClear={() => {
+                  void recentFolders.clear();
                 }}
               />
             </aside>
@@ -585,8 +615,7 @@ function App() {
                 markFilter={markFilter}
                 onMarkFilterChange={setMarkFilter}
                 onSelectFolder={(path) => {
-                  folderTree.selectFolder(path);
-                  folderTree.toggleExpand(path);
+                  openFolder(path, { expand: true });
                 }}
                 onEntriesTrashed={(entryIds) => {
                   if (state.selectedPath) {

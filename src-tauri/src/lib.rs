@@ -11,6 +11,7 @@ pub mod path_validation;
 pub mod playback_events;
 pub mod playback_service;
 pub mod player_preferences;
+pub mod recent_folders_service;
 pub mod trash_service;
 pub mod waveform_service;
 
@@ -97,11 +98,19 @@ pub fn run() {
             // The file watcher uses the same port to invalidate stale rows.
             let mut watcher_cache: Option<Arc<dyn WaveformCachePort>> = None;
             let mut waveform_service: Option<Arc<dyn WaveformService>> = None;
+            let mut recent_service: std::sync::Mutex<
+                Box<dyn recent_folders_service::RecentFoldersService>,
+            > = std::sync::Mutex::new(Box::new(
+                recent_folders_service::InMemoryRecentFoldersService::new(),
+            ));
             if let Ok(config_dir) = app.path().app_config_dir() {
                 let cache_path = config_dir.join("app-cache.sqlite");
                 match pulseseek_cache::technical_cache::TechnicalCache::start(&cache_path) {
                     Ok(cache) => {
                         let status = cache.status();
+                        let recent_port: Arc<
+                            dyn pulseseek_cache::recent_folders::RecentFoldersCachePort,
+                        > = Arc::new(cache.clone());
                         let meta_port: Arc<
                             dyn pulseseek_cache::technical_cache::TechnicalCachePort,
                         > = Arc::new(cache.clone());
@@ -109,6 +118,9 @@ pub fn run() {
                         watcher_cache = Some(Arc::clone(&waveform_port));
                         tracing::info!(status = ?status, "technical cache ready");
                         app.manage(meta_port);
+                        recent_service = std::sync::Mutex::new(Box::new(
+                            recent_folders_service::NativeRecentFoldersService::new(recent_port),
+                        ));
                         waveform_service =
                             Some(Arc::new(NativeWaveformService::new(Some(waveform_port))));
                     },
@@ -121,6 +133,7 @@ pub fn run() {
                     },
                 }
             }
+            app.manage(recent_service);
 
             // Waveform service always exists: with a cache port when the
             // cache opened, without one when it did not. It is only reachable

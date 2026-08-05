@@ -6,6 +6,10 @@ use std::thread;
 use pulseseek_domain::waveform::levels::MultiresolutionWaveform;
 use rusqlite::params;
 
+use crate::recent_folders::{
+    clear_recent_folders_db, list_recent_folders_db, record_recent_folder_db, RecentFolder,
+    RecentFoldersCachePort, RecentFoldersError,
+};
 use crate::sqlite::{now_ms, open_or_recover, Migration, OpenedDatabase, SqliteError};
 use crate::waveform_cache::{
     delete_waveform_db, encode, load_waveform_db, store_waveform_db, WaveformCacheError,
@@ -13,14 +17,15 @@ use crate::waveform_cache::{
 };
 
 /// Schema version of the technical cache database.
-pub const CACHE_SCHEMA_VERSION: u32 = 2;
+pub const CACHE_SCHEMA_VERSION: u32 = 3;
 
 /// Migrations for `app-cache.sqlite`.
 ///
 /// The first version only carries cache metadata. Record tables (waveform,
 /// recent folders, preferences, ...) are added by the feature PRs that own
-/// them. Version 2 adds the waveform cache owned by PR-063.
-pub const CACHE_MIGRATIONS: [Migration; 2] = [
+/// them. Version 2 adds the waveform cache owned by PR-063. Version 3 adds
+/// the recent-folder history owned by PR-074.
+pub const CACHE_MIGRATIONS: [Migration; 3] = [
     Migration {
         version: 1,
         sql: "CREATE TABLE cache_meta (\
@@ -37,6 +42,13 @@ pub const CACHE_MIGRATIONS: [Migration; 2] = [
               algorithm_version INTEGER NOT NULL, \
               data BLOB NOT NULL, \
               created_at_ms INTEGER NOT NULL);",
+    },
+    Migration {
+        version: 3,
+        sql: "CREATE TABLE recent_folders (\
+              path TEXT PRIMARY KEY, \
+              name TEXT NOT NULL, \
+              last_opened_ms INTEGER NOT NULL);",
     },
 ];
 
@@ -131,6 +143,16 @@ enum WorkerCommand {
     DeleteWaveform {
         key: String,
         reply: SyncSender<Result<(), WaveformCacheError>>,
+    },
+    RecordRecentFolder {
+        path: String,
+        reply: SyncSender<Result<(), RecentFoldersError>>,
+    },
+    ListRecentFolders {
+        reply: SyncSender<Result<Vec<RecentFolder>, RecentFoldersError>>,
+    },
+    ClearRecentFolders {
+        reply: SyncSender<Result<(), RecentFoldersError>>,
     },
 }
 
@@ -250,6 +272,32 @@ impl WaveformCachePort for TechnicalCache {
     }
 }
 
+impl RecentFoldersCachePort for TechnicalCache {
+    fn record_recent_folder(&self, path: &str) -> Result<(), RecentFoldersError> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::RecordRecentFolder { path: path.to_string(), reply: reply_tx })
+            .map_err(|_| RecentFoldersError::WorkerStopped)?;
+        reply_rx.recv().map_err(|_| RecentFoldersError::WorkerStopped)?
+    }
+
+    fn list_recent_folders(&self) -> Result<Vec<RecentFolder>, RecentFoldersError> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::ListRecentFolders { reply: reply_tx })
+            .map_err(|_| RecentFoldersError::WorkerStopped)?;
+        reply_rx.recv().map_err(|_| RecentFoldersError::WorkerStopped)?
+    }
+
+    fn clear_recent_folders(&self) -> Result<(), RecentFoldersError> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::ClearRecentFolders { reply: reply_tx })
+            .map_err(|_| RecentFoldersError::WorkerStopped)?;
+        reply_rx.recv().map_err(|_| RecentFoldersError::WorkerStopped)?
+    }
+}
+
 fn worker_loop(receiver: Receiver<WorkerCommand>, mut database: OpenedDatabase) {
     while let Ok(command) = receiver.recv() {
         match command {
@@ -272,6 +320,15 @@ fn worker_loop(receiver: Receiver<WorkerCommand>, mut database: OpenedDatabase) 
             },
             WorkerCommand::DeleteWaveform { key, reply } => {
                 let _ = reply.send(delete_waveform_db(&mut database, &key));
+            },
+            WorkerCommand::RecordRecentFolder { path, reply } => {
+                let _ = reply.send(record_recent_folder_db(&mut database, &path));
+            },
+            WorkerCommand::ListRecentFolders { reply } => {
+                let _ = reply.send(list_recent_folders_db(&mut database));
+            },
+            WorkerCommand::ClearRecentFolders { reply } => {
+                let _ = reply.send(clear_recent_folders_db(&mut database));
             },
         }
     }
