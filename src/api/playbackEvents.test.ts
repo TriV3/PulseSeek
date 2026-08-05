@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isFolderChunkPayload } from "./playbackEvents";
+import { isFileChangePayload, isFolderChunkPayload } from "./playbackEvents";
 
 describe("folder chunk payload validation", () => {
   it("accepts partial playable metadata", () => {
@@ -85,5 +85,17 @@ describe("folder chunk payload validation", () => {
         done: true,
       }),
     ).toBe(false);
+  });
+});
+
+describe("file change payload validation", () => {
+  it("accepts a valid file change payload", () => {
+    expect(isFileChangePayload({ path: "/music" })).toBe(true);
+  });
+
+  it("rejects payloads without a path", () => {
+    expect(isFileChangePayload({})).toBe(false);
+    expect(isFileChangePayload(null)).toBe(false);
+    expect(isFileChangePayload({ path: 42 })).toBe(false);
   });
 });

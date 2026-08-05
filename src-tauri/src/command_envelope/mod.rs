@@ -13,6 +13,7 @@ use crate::playback_service::PlaybackService;
 use crate::trash_service::TrashService;
 pub(crate) use types::*;
 
+#[allow(clippy::too_many_arguments)]
 pub fn dispatch(
     envelope: CommandEnvelope,
     service: &mut dyn PlaybackService,

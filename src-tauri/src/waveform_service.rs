@@ -334,6 +334,11 @@ mod tests {
             }
             Ok(self.entries.lock().unwrap().get(key).cloned())
         }
+
+        fn delete_waveform(&self, key: &str) -> Result<(), WaveformCacheError> {
+            self.entries.lock().unwrap().remove(key);
+            Ok(())
+        }
     }
 
     fn temp_source(dir: &tempfile::TempDir, bytes: &[u8]) -> PathBuf {

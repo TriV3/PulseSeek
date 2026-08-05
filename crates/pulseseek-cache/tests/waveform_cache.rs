@@ -187,6 +187,32 @@ fn corrupt_cache_row_is_miss_and_deleted() {
     assert_eq!(waveform_row_count(&dir), 0, "corrupt row must be deleted");
 }
 
+// ── Explicit invalidation (FR-FM-010 file watcher) ────────────────
+
+#[test]
+fn delete_waveform_removes_stored_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = start_cache(&dir);
+    let source = identity("/music/track.wav", 1000, 100);
+    let key = waveform_cache_key(&source);
+    cache.store_waveform(&key, &source, &sample_waveform()).expect("store");
+
+    cache.delete_waveform(&key).expect("delete");
+
+    assert_eq!(cache.load_waveform(&key, &source).expect("load"), None, "deleted row is a miss");
+    drop(cache);
+    assert_eq!(waveform_row_count(&dir), 0, "row must be gone");
+}
+
+#[test]
+fn delete_waveform_missing_key_is_idempotent() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = start_cache(&dir);
+    let key = waveform_cache_key(&identity("/music/never.wav", 1000, 100));
+
+    cache.delete_waveform(&key).expect("deleting a missing key is a no-op");
+}
+
 // ── Versioned file cache key ──────────────────────────────────────
 
 #[test]
@@ -194,7 +220,7 @@ fn cache_key_is_deterministic_path_scoped_and_versioned() {
     let source = identity("/music/track.wav", 1000, 100);
     let key = waveform_cache_key(&source);
 
-    assert!(key.starts_with("waveform:v1:"), "key carries a format version");
+    assert!(key.starts_with("waveform:v2:"), "key carries a format version");
     assert_eq!(key, waveform_cache_key(&source), "same identity yields same key");
     assert_eq!(
         key,

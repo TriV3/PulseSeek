@@ -3,6 +3,7 @@ pub mod command_envelope;
 mod command_handlers;
 pub mod diagnostics;
 pub mod dialog_service;
+pub mod file_watcher_service;
 pub mod folder_enumeration_service;
 pub mod native_audio_device_service;
 pub mod native_playback_service;
@@ -50,11 +51,10 @@ pub fn run() {
         )));
 
     // Native folder enumeration service.
+    let native_enum_service = folder_enumeration_service::NativeFolderEnumerationService::new();
     let enum_service: std::sync::Mutex<
         Box<dyn folder_enumeration_service::FolderEnumerationService>,
-    > = std::sync::Mutex::new(Box::new(
-        folder_enumeration_service::NativeFolderEnumerationService::new(),
-    ));
+    > = std::sync::Mutex::new(Box::new(native_enum_service));
 
     let active_enumerations: folder_enumeration_service::ActiveEnumerations =
         folder_enumeration_service::ActiveEnumerations::new();
@@ -94,6 +94,8 @@ pub fn run() {
             // prevent Audio Player startup, so startup logs and continues.
             // The same worker backs the waveform service through its own port;
             // without a cache the service degrades to extract-without-store.
+            // The file watcher uses the same port to invalidate stale rows.
+            let mut watcher_cache: Option<Arc<dyn WaveformCachePort>> = None;
             let mut waveform_service: Option<Arc<dyn WaveformService>> = None;
             if let Ok(config_dir) = app.path().app_config_dir() {
                 let cache_path = config_dir.join("app-cache.sqlite");
@@ -104,6 +106,7 @@ pub fn run() {
                             dyn pulseseek_cache::technical_cache::TechnicalCachePort,
                         > = Arc::new(cache.clone());
                         let waveform_port: Arc<dyn WaveformCachePort> = Arc::new(cache);
+                        watcher_cache = Some(Arc::clone(&waveform_port));
                         tracing::info!(status = ?status, "technical cache ready");
                         app.manage(meta_port);
                         waveform_service =
@@ -136,7 +139,35 @@ pub fn run() {
             {
                 playback.set_events(Some(Arc::clone(&event_emitter)));
             }
+
             app.manage(event_emitter);
+
+            // Inject the file watcher into the enumeration service so it
+            // watches the browsed folder for external changes (FR-BR-008).
+            let watcher = match file_watcher_service::NativeFileWatcherService::with_defaults(
+                // We already managed event_emitter; cloning the Arc is safe.
+                // The debouncer callback runs on its own thread and holds an
+                // Arc clone, keeping the emitter alive independently.
+                (*app.state::<Arc<dyn playback_events::PlaybackEventEmitter>>()).clone(),
+                watcher_cache,
+            ) {
+                Ok(watcher) => {
+                    Box::new(watcher) as Box<dyn file_watcher_service::FileWatcherService>
+                },
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        "file watcher unavailable; continuing without watching"
+                    );
+                    Box::new(file_watcher_service::FakeFileWatcherService::new())
+                        as Box<dyn file_watcher_service::FileWatcherService>
+                },
+            };
+            if let Ok(mut enum_service) =
+                app.state::<std::sync::Mutex<Box<dyn folder_enumeration_service::FolderEnumerationService>>>().lock()
+            {
+                enum_service.set_watcher(watcher);
+            }
 
             // Native folder picker dialog backed by the OS. Wrapped in Arc so
             // the command handler can clone it and spawn a blocking dialog

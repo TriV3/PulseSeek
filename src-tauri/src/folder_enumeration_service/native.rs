@@ -1,8 +1,9 @@
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContext, ErrorCategory};
 
+use crate::file_watcher_service::FileWatcherService;
 use crate::playback_events::{
     BrowserEntryData, FolderChunkPayload, PlayableFileMetadataData, PlaybackEventEmitter,
     EVENT_FOLDER_CHUNK,
@@ -11,13 +12,23 @@ use crate::playback_events::{
 use super::{ActiveEnumerations, BrowserRootData, FolderEnumerationService};
 
 /// Native folder enumeration service. Reads and probes files on worker thread.
+/// When a file watcher is configured, enumeration automatically starts watching
+/// the browsed folder so external changes refresh the frontend and invalidate
+/// stale waveform cache rows (FR-BR-008, FR-FM-010). The watcher is shared
+/// behind an `Arc` so starting a watch never blocks the command loop.
 pub struct NativeFolderEnumerationService {
-    next_session_id: std::sync::atomic::AtomicU64,
+    next_session_id: AtomicU64,
+    watcher: Option<Arc<Mutex<Box<dyn FileWatcherService>>>>,
+    watch_generation: Arc<AtomicU64>,
 }
 
 impl NativeFolderEnumerationService {
     pub fn new() -> Self {
-        Self { next_session_id: std::sync::atomic::AtomicU64::new(1) }
+        Self {
+            next_session_id: AtomicU64::new(1),
+            watcher: None,
+            watch_generation: Arc::new(AtomicU64::new(0)),
+        }
     }
 }
 
@@ -30,6 +41,12 @@ impl Default for NativeFolderEnumerationService {
 impl FolderEnumerationService for NativeFolderEnumerationService {
     fn list_roots(&self) -> Result<Vec<BrowserRootData>, ApplicationError> {
         Ok(system_roots())
+    }
+
+    /// Attaches a file watcher. Called once during Tauri setup through the
+    /// trait object so the concrete service receives it via the vtable.
+    fn set_watcher(&mut self, watcher: Box<dyn FileWatcherService>) {
+        self.watcher = Some(Arc::new(Mutex::new(watcher)));
     }
 
     fn start_enumeration(
@@ -48,6 +65,58 @@ impl FolderEnumerationService for NativeFolderEnumerationService {
                 DiagnosticContext::new(DiagnosticCode::BrowserRead),
                 std::io::Error::other("batch size must be greater than zero"),
             ));
+        }
+
+        // Watch the browsed folder so external changes refresh the frontend
+        // and invalidate stale waveform cache rows (FR-BR-008, FR-FM-010).
+        // The watch runs on a dedicated thread so a slow filesystem watcher
+        // can never block enumeration or the command loop. The filesystem
+        // root is skipped: watching "/" recursively triggers a system-wide
+        // FSEvents scan that can stall startup on macOS.
+        if let Some(watcher) = self.watcher.clone() {
+            let generation = self.watch_generation.fetch_add(1, Ordering::AcqRel) + 1;
+            let current_generation = Arc::clone(&self.watch_generation);
+            if path != "/" {
+                let watch_path = path.to_owned();
+                let spawned = std::thread::Builder::new()
+                    .name("pulseseek-file-watch".to_string())
+                    .spawn(move || {
+                        // Navigation can queue several enumeration requests.
+                        // Only latest request may replace active OS watch;
+                        // stale threads must not navigate watcher back.
+                        if current_generation.load(Ordering::Acquire) != generation {
+                            return;
+                        }
+                        if let Ok(mut watcher) = watcher.lock() {
+                            if current_generation.load(Ordering::Acquire) != generation {
+                                return;
+                            }
+                            if let Err(error) = watcher.start_watching(&watch_path) {
+                                tracing::warn!(
+                                    error = %error,
+                                    path = %watch_path,
+                                    "file watcher unavailable; continuing without watching"
+                                );
+                            }
+                        }
+                    });
+                if let Err(error) = spawned {
+                    tracing::warn!(error = %error, "failed to spawn file watcher thread");
+                }
+            } else {
+                let spawned = std::thread::Builder::new()
+                    .name("pulseseek-file-watch-stop".to_string())
+                    .spawn(move || {
+                        if current_generation.load(Ordering::Acquire) == generation {
+                            if let Ok(mut watcher) = watcher.lock() {
+                                let _ = watcher.stop_watching();
+                            }
+                        }
+                    });
+                if let Err(error) = spawned {
+                    tracing::warn!(error = %error, "failed to stop file watcher thread");
+                }
+            }
         }
 
         let session_id = format!("folder-{}", self.next_session_id.fetch_add(1, Ordering::Relaxed));

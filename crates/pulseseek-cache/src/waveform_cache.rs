@@ -10,7 +10,8 @@
 //! algorithm version. A load treats a row as a miss and deletes it when any of
 //! those no longer matches the caller's identity (stale) or when the blob
 //! cannot be decoded (corrupt), so the cache self-heals on access.
-//! File-watcher invalidation is deliberately out of scope.
+//! The file watcher also invalidates rows proactively when an external change
+//! is observed (FR-FM-010).
 //!
 //! # Privacy
 //!
@@ -42,7 +43,7 @@ pub const WAVEFORM_ALGORITHM_VERSION: u32 = 1;
 ///
 /// Bumping this changes every derived key, naturally invalidating all rows
 /// written by an older key format.
-pub const WAVEFORM_KEY_FORMAT_VERSION: u32 = 1;
+pub const WAVEFORM_KEY_FORMAT_VERSION: u32 = 2;
 
 /// Magic bytes at the start of every serialized waveform blob.
 const BLOB_MAGIC: &[u8; 4] = b"PSWF";
@@ -72,13 +73,19 @@ impl WaveformIdentity {
 /// Derives the versioned file cache key for `identity`.
 ///
 /// The key is scoped by the source path and prefixed with the key-scheme
-/// version. Size and modified timestamp intentionally do not participate in
-/// the key: they are validation columns so an edited source invalidates the
-/// same row instead of leaving orphaned rows behind.
+/// version. The path is canonicalized when the file exists so the same file
+/// reached through a symlinked prefix (for example `/var` on macOS, which
+/// resolves to `/private/var`) always derives the same key; the file watcher
+/// delivers canonicalized paths, so this keeps proactive invalidation aligned
+/// with stored rows. When the file no longer exists the raw path is used.
+/// Size and modified timestamp intentionally do not participate in the key:
+/// they are validation columns so an edited source invalidates the same row
+/// instead of leaving orphaned rows behind.
 pub fn waveform_cache_key(identity: &WaveformIdentity) -> String {
+    let canonical = std::fs::canonicalize(&identity.path).unwrap_or_else(|_| identity.path.clone());
     format!(
         "waveform:v{WAVEFORM_KEY_FORMAT_VERSION}:{}",
-        hex_encode(identity.path.as_os_str().as_encoded_bytes())
+        hex_encode(canonical.as_os_str().as_encoded_bytes())
     )
 }
 
@@ -138,6 +145,13 @@ pub trait WaveformCachePort: Send + Sync {
         key: &str,
         identity: &WaveformIdentity,
     ) -> Result<Option<MultiresolutionWaveform>, WaveformCacheError>;
+
+    /// Deletes the waveform stored under `key`.
+    ///
+    /// Deleting a missing key is a no-op. Used by the file watcher so an
+    /// externally modified source invalidates its cached row proactively
+    /// (FR-FM-010).
+    fn delete_waveform(&self, key: &str) -> Result<(), WaveformCacheError>;
 }
 
 /// Serializes a validated waveform into the versioned binary format.
@@ -380,7 +394,7 @@ mod tests {
     fn key_prefix_encodes_format_version() {
         let identity = WaveformIdentity::new(Path::new("/music/track.wav"), 1000, 100);
         let key = waveform_cache_key(&identity);
-        assert!(key.starts_with("waveform:v1:"));
+        assert!(key.starts_with("waveform:v2:"));
         assert!(key.contains("2f6d757369632f747261636b2e776176"), "hex-encoded path");
     }
 

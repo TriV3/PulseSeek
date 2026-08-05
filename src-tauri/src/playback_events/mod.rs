@@ -16,6 +16,7 @@ pub const EVENT_POSITION: &str = "playback:position";
 pub const EVENT_COMPLETED: &str = "playback:completed";
 pub const EVENT_DEVICE_LOST: &str = "audio:device-lost";
 pub const EVENT_FOLDER_CHUNK: &str = "browser:folder-chunk";
+pub const EVENT_FILE_CHANGE: &str = "browser:file-change";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EventEnvelope {

@@ -44,6 +44,99 @@ fn fake_service_starts_enumeration() {
 }
 
 #[test]
+fn set_watcher_via_trait_starts_watching_on_enumeration() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use crate::file_watcher_service::FileWatcherService;
+    use pulseseek_domain::error::ApplicationError;
+
+    struct CountingWatcher {
+        calls: Arc<AtomicUsize>,
+    }
+    impl FileWatcherService for CountingWatcher {
+        fn start_watching(&mut self, _path: &str) -> Result<(), ApplicationError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+        fn stop_watching(&mut self) -> Result<(), ApplicationError> {
+            Ok(())
+        }
+        fn watched_path(&self) -> Option<String> {
+            None
+        }
+    }
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut service: Box<dyn FolderEnumerationService> =
+        Box::new(NativeFolderEnumerationService::new());
+    service.set_watcher(Box::new(CountingWatcher { calls: Arc::clone(&calls) }));
+
+    let active = ActiveEnumerations::new();
+    let events =
+        Arc::new(crate::playback_events::NoopEventEmitter) as Arc<dyn PlaybackEventEmitter>;
+    service
+        .start_enumeration(&dir.path().to_string_lossy(), 50, false, false, &active, events)
+        .expect("enumeration starts");
+
+    // The watch runs on a dedicated thread; wait for it to complete.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && calls.load(Ordering::SeqCst) == 0 {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "start_enumeration must start watching through the trait-injected watcher"
+    );
+}
+
+#[test]
+fn watcher_skips_filesystem_root() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use crate::file_watcher_service::FileWatcherService;
+    use pulseseek_domain::error::ApplicationError;
+
+    struct CountingWatcher {
+        calls: Arc<AtomicUsize>,
+    }
+    impl FileWatcherService for CountingWatcher {
+        fn start_watching(&mut self, _path: &str) -> Result<(), ApplicationError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+        fn stop_watching(&mut self) -> Result<(), ApplicationError> {
+            Ok(())
+        }
+        fn watched_path(&self) -> Option<String> {
+            None
+        }
+    }
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut service: Box<dyn FolderEnumerationService> =
+        Box::new(NativeFolderEnumerationService::new());
+    service.set_watcher(Box::new(CountingWatcher { calls: Arc::clone(&calls) }));
+
+    let active = ActiveEnumerations::new();
+    let events =
+        Arc::new(crate::playback_events::NoopEventEmitter) as Arc<dyn PlaybackEventEmitter>;
+    service
+        .start_enumeration("/", 50, false, false, &active, events)
+        .expect("root enumeration starts");
+
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "the filesystem root must never be watched recursively"
+    );
+}
+
+#[test]
 fn fake_service_fails_with_error() {
     let mut service = FakeFolderEnumerationService::new();
     service.fail_start = true;
