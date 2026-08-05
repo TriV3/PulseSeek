@@ -294,6 +294,45 @@ describe("folderTreeReducer playable entries", () => {
 
     expect(flat.folders[path]?.recursive).toBe(false);
   });
+
+  it("keeps stable playable entries when re-enumerating after a file change", () => {
+    // Folder already shows one playable file when an external change event
+    // triggers a re-enumeration (FR-BR-008). The stable entry id must survive
+    // the refresh so the current selection is retained.
+    const loaded = folderTreeReducer(enumeratingState(), {
+      type: "ENUMERATION_CHUNK",
+      path,
+      entries: [
+        { id: `${path}/stable.wav`, name: "stable.wav", kind: "playable" },
+      ],
+      foldersDone: true,
+      done: true,
+    });
+
+    const restart = folderTreeReducer(loaded, {
+      type: "START_ENUMERATING",
+      path,
+      sessionId: "session-2",
+      recursive: false,
+    });
+    expect(restart.playableEntries[path]).toEqual([]);
+
+    const refreshed = folderTreeReducer(restart, {
+      type: "ENUMERATION_CHUNK",
+      path,
+      entries: [
+        { id: `${path}/stable.wav`, name: "stable.wav", kind: "playable" },
+        { id: `${path}/new.wav`, name: "new.wav", kind: "playable" },
+      ],
+      foldersDone: true,
+      done: true,
+    });
+
+    expect(refreshed.playableEntries[path]?.map((entry) => entry.id)).toEqual([
+      `${path}/new.wav`,
+      `${path}/stable.wav`,
+    ]);
+  });
 });
 
 describe("relativeEntryPath", () => {

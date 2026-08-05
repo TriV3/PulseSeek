@@ -48,6 +48,16 @@ export interface FolderChunkPayload {
   done: boolean;
 }
 
+export interface FileChangePayload {
+  path: string;
+}
+
+export function isFileChangePayload(
+  value: unknown,
+): value is FileChangePayload {
+  return isRecord(value) && typeof value.path === "string";
+}
+
 export function isFolderChunkPayload(
   value: unknown,
 ): value is FolderChunkPayload {
@@ -120,6 +130,7 @@ export const EVENT_POSITION = "playback:position";
 export const EVENT_COMPLETED = "playback:completed";
 export const EVENT_DEVICE_LOST = "audio:device-lost";
 export const EVENT_FOLDER_CHUNK = "browser:folder-chunk";
+export const EVENT_FILE_CHANGE = "browser:file-change";
 
 // ── Typed event listeners ─────────────────────────────────────────────
 
@@ -177,6 +188,22 @@ export function onFolderChunk(
 ): Promise<UnlistenFn> {
   return listen<FolderChunkPayload>(EVENT_FOLDER_CHUNK, (event) => {
     if (isFolderChunkPayload(event.payload)) {
+      handler(event.payload);
+    }
+  });
+}
+
+/**
+ * Listens for filesystem changes in the watched folder.
+ *
+ * The frontend re-reads the folder so external edits appear without a manual
+ * refresh (FR-BR-008). Returns an `unlisten` function to stop listening.
+ */
+export function onFileChanged(
+  handler: (payload: FileChangePayload) => void,
+): Promise<UnlistenFn> {
+  return listen<FileChangePayload>(EVENT_FILE_CHANGE, (event) => {
+    if (isFileChangePayload(event.payload)) {
       handler(event.payload);
     }
   });

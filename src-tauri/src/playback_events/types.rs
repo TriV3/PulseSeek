@@ -49,3 +49,13 @@ pub struct FolderChunkPayload {
     pub folders_done: bool,
     pub done: bool,
 }
+
+/// Payload for [`EVENT_FILE_CHANGE`](super::EVENT_FILE_CHANGE).
+///
+/// Signals that the watched folder changed and the frontend should re-read it.
+/// The payload carries the watched path so a stale listener can ignore changes
+/// that no longer belong to the open folder.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FileChangePayload {
+    pub path: String,
+}

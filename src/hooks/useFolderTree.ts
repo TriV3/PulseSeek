@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   cancelEnumeration,
   listBrowserRoots,
   startEnumeration,
 } from "../api/commandEnvelope";
-import { onFolderChunk, type FolderChunkPayload } from "../api/playbackEvents";
+import {
+  onFileChanged,
+  onFolderChunk,
+  type FolderChunkPayload,
+} from "../api/playbackEvents";
 import type {
   FolderTreeAction,
   FolderTreeState,
@@ -450,6 +455,30 @@ export function useFolderTree(): UseFolderTreeReturn {
     }
     return () => {
       active = false;
+    };
+  }, [enumeratePath]);
+
+  // Re-read folders whose contents changed externally (FR-BR-008). The file
+  // watcher debounces bursts into a single event per watched folder; only
+  // folders that are loaded and idle are re-enumerated so an in-flight scan is
+  // never restarted. The reducer merges new rows by entry id, so the current
+  // selection survives when its stable target remains.
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    void onFileChanged((payload) => {
+      const { path } = payload;
+      const folder = stateRef.current.folders[path];
+      if (!folder || folder.isLoading || folder.error) return;
+      void enumeratePath(path, folder.recursive);
+    })
+      .then((unlistenFn) => {
+        unlisten = unlistenFn;
+      })
+      .catch(() => {
+        // Listening is best-effort; the manual refresh still works.
+      });
+    return () => {
+      unlisten?.();
     };
   }, [enumeratePath]);
 

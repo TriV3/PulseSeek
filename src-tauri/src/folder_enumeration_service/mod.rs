@@ -76,6 +76,11 @@ pub trait FolderEnumerationService: Send {
         active: &ActiveEnumerations,
         events: Arc<dyn PlaybackEventEmitter>,
     ) -> Result<String, ApplicationError>;
+
+    /// Attaches a file watcher that observes external changes to the browsed
+    /// folder (FR-BR-008, FR-FM-010). The default implementation is a no-op
+    /// so fake services used in tests do not need to override this.
+    fn set_watcher(&mut self, _watcher: Box<dyn crate::file_watcher_service::FileWatcherService>) {}
 }
 
 /// Fake implementation of [`FolderEnumerationService`] for tests.

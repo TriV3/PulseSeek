@@ -8,8 +8,8 @@ use rusqlite::params;
 
 use crate::sqlite::{now_ms, open_or_recover, Migration, OpenedDatabase, SqliteError};
 use crate::waveform_cache::{
-    encode, load_waveform_db, store_waveform_db, WaveformCacheError, WaveformCachePort,
-    WaveformIdentity,
+    delete_waveform_db, encode, load_waveform_db, store_waveform_db, WaveformCacheError,
+    WaveformCachePort, WaveformIdentity,
 };
 
 /// Schema version of the technical cache database.
@@ -128,6 +128,10 @@ enum WorkerCommand {
         identity: WaveformIdentity,
         reply: SyncSender<Result<Option<MultiresolutionWaveform>, WaveformCacheError>>,
     },
+    DeleteWaveform {
+        key: String,
+        reply: SyncSender<Result<(), WaveformCacheError>>,
+    },
 }
 
 /// Client handle to the dedicated technical cache worker.
@@ -236,6 +240,14 @@ impl WaveformCachePort for TechnicalCache {
             .map_err(|_| WaveformCacheError::WorkerStopped)?;
         reply_rx.recv().map_err(|_| WaveformCacheError::WorkerStopped)?
     }
+
+    fn delete_waveform(&self, key: &str) -> Result<(), WaveformCacheError> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::DeleteWaveform { key: key.to_string(), reply: reply_tx })
+            .map_err(|_| WaveformCacheError::WorkerStopped)?;
+        reply_rx.recv().map_err(|_| WaveformCacheError::WorkerStopped)?
+    }
 }
 
 fn worker_loop(receiver: Receiver<WorkerCommand>, mut database: OpenedDatabase) {
@@ -257,6 +269,9 @@ fn worker_loop(receiver: Receiver<WorkerCommand>, mut database: OpenedDatabase) 
             },
             WorkerCommand::LoadWaveform { key, identity, reply } => {
                 let _ = reply.send(load_waveform_db(&mut database, &key, &identity));
+            },
+            WorkerCommand::DeleteWaveform { key, reply } => {
+                let _ = reply.send(delete_waveform_db(&mut database, &key));
             },
         }
     }

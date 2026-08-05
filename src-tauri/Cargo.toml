@@ -18,6 +18,7 @@ pulseseek-audio-cpal = { path = "../crates/pulseseek-audio-cpal" }
 pulseseek-playback = { path = "../crates/pulseseek-playback" }
 pulseseek-decoder-symphonia = { path = "../crates/pulseseek-decoder-symphonia" }
 pulseseek-cache = { path = "../crates/pulseseek-cache" }
+notify-debouncer-full = "0.7.0"
 
 [dev-dependencies]
 tempfile = "3"
