@@ -1,3 +1,4 @@
+pub mod move_file;
 pub mod rename;
 pub mod trash;
 

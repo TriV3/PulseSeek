@@ -440,6 +440,50 @@ export async function renameFile(
   return response;
 }
 
+// ── Move files types ───────────────────────────────────────────────────
+
+export interface StartMoveFilesRequest {
+  paths: string[];
+  target_dir: string;
+}
+
+export interface StartMoveFilesResponse {
+  session_id: string;
+}
+
+export interface CancelMoveFilesRequest {
+  session_id: string;
+}
+
+export type CancelMoveFilesResponse = Record<string, never>;
+
+/** Starts moving `paths` into `target_dir` (FR-FM-004, FR-FM-005).
+ *
+ * Returns a session id. Per-file progress arrives through the
+ * `browser:move-progress` event; use `cancelMoveFiles` to stop the batch.
+ * Throws `CommandError` on invalid targets or selection.
+ */
+export async function startMoveFiles(
+  paths: string[],
+  targetDir: string,
+): Promise<string> {
+  const response = await invokeCommand<StartMoveFilesResponse>(
+    "start_move_files",
+    {
+      paths,
+      target_dir: targetDir,
+    } satisfies StartMoveFilesRequest,
+  );
+  return response.session_id;
+}
+
+/** Requests cancellation of a running move batch (no-op when finished). */
+export async function cancelMoveFiles(sessionId: string): Promise<void> {
+  await invokeCommand<CancelMoveFilesResponse>("cancel_move_files", {
+    session_id: sessionId,
+  } satisfies CancelMoveFilesRequest);
+}
+
 // ── Recent folders types ───────────────────────────────────────────────
 
 export interface RecentFolderData {

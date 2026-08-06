@@ -4,6 +4,7 @@ import {
   fireEvent,
   waitFor,
   within,
+  act,
 } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { useMemo, useState } from "react";
@@ -26,10 +27,28 @@ import { useSessionMarks } from "../../hooks/useSessionMarks";
 
 const mockMoveToTrash = vi.hoisted(() => vi.fn());
 const mockRenameFile = vi.hoisted(() => vi.fn());
+const mockStartMoveFiles = vi.hoisted(() => vi.fn());
+const mockCancelMoveFiles = vi.hoisted(() => vi.fn());
+const mockPickFolder = vi.hoisted(() => vi.fn());
 
 vi.mock("../../api/commandEnvelope", () => ({
   moveToTrash: mockMoveToTrash,
   renameFile: mockRenameFile,
+  startMoveFiles: mockStartMoveFiles,
+  cancelMoveFiles: mockCancelMoveFiles,
+  pickFolder: mockPickFolder,
+}));
+
+type EventHandler = (event: { payload: unknown }) => void;
+const eventHandlers = new Map<string, EventHandler>();
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async (event: string, handler: EventHandler) => {
+    eventHandlers.set(event, handler);
+    return () => {
+      eventHandlers.delete(event);
+    };
+  }),
 }));
 
 // Mock TanStack Virtual to render all items synchronously (jsdom has no
@@ -2274,5 +2293,356 @@ describe("FileList — rename", () => {
       );
     });
     expect(screen.getByText("song1.mp3")).toBeInTheDocument();
+  });
+});
+
+describe("FileList — move", () => {
+  beforeEach(() => {
+    mockStartMoveFiles.mockClear();
+    mockCancelMoveFiles.mockReset();
+    mockCancelMoveFiles.mockResolvedValue(undefined);
+    mockPickFolder.mockClear();
+    eventHandlers.clear();
+  });
+
+  function emitMoveProgress(payload: unknown) {
+    const handler = eventHandlers.get("browser:move-progress");
+    if (!handler) throw new Error("move-progress listener not registered");
+    act(() => {
+      handler({ payload });
+    });
+  }
+
+  function selectSongs() {
+    fireEvent.click(screen.getByRole("row", { name: /song1\.mp3/ }));
+    fireEvent.click(screen.getByRole("row", { name: /song2\.wav/ }), {
+      ctrlKey: true,
+    });
+  }
+
+  it("disables Move… without a playable selection", () => {
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Move…" })).toBeDisabled();
+  });
+
+  it("opens the dialog and requires a target folder before confirming", async () => {
+    mockPickFolder.mockResolvedValueOnce("/library");
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    selectSongs();
+    fireEvent.click(screen.getByRole("button", { name: "Move…" }));
+
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Move 2 files into a folder.");
+    expect(within(dialog).getByRole("button", { name: "Move" })).toBeDisabled();
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Choose folder…" }),
+    );
+    await waitFor(() => {
+      expect(within(dialog).getByText("/library")).toBeInTheDocument();
+    });
+    expect(
+      within(dialog).getByRole("button", { name: "Move" }),
+    ).not.toBeDisabled();
+  });
+
+  it("starts the move with the selected ids and target", async () => {
+    mockPickFolder.mockResolvedValueOnce("/library");
+    mockStartMoveFiles.mockResolvedValueOnce("move-1");
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    selectSongs();
+    fireEvent.click(screen.getByRole("button", { name: "Move…" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Choose folder…",
+      }),
+    );
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole("alertdialog")).getByRole("button", {
+          name: "Move",
+        }),
+      ).not.toBeDisabled();
+    });
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Move",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mockStartMoveFiles).toHaveBeenCalledWith(
+        ["song1.mp3", "song2.wav"],
+        "/library",
+      );
+    });
+    expect(screen.getByText("Moving file 0 of 2…")).toBeInTheDocument();
+  });
+
+  it("reports success and failure separately and drops moved rows", async () => {
+    mockPickFolder.mockResolvedValueOnce("/library");
+    mockStartMoveFiles.mockResolvedValueOnce("move-1");
+    const onEntriesMoved = vi.fn();
+    function Harness() {
+      const [entries, setEntries] = useState(sampleEntries);
+      return (
+        <FileList
+          entries={entries}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+          onEntriesMoved={(moved) => {
+            onEntriesMoved(moved);
+            setEntries((current) =>
+              current.filter(
+                (entry) => !moved.some((item) => item.oldId === entry.id),
+              ),
+            );
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+    selectSongs();
+    fireEvent.click(screen.getByRole("button", { name: "Move…" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Choose folder…",
+      }),
+    );
+    await waitFor(() => {
+      expect(mockPickFolder).toHaveBeenCalled();
+    });
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Move",
+      }),
+    );
+    await waitFor(() => {
+      expect(mockStartMoveFiles).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(eventHandlers.has("browser:move-progress")).toBe(true);
+    });
+
+    emitMoveProgress({
+      session_id: "move-1",
+      completed: 1,
+      total: 2,
+      done: false,
+      results: [
+        { path: "song1.mp3", new_path: "/library/song1.mp3", ok: true },
+      ],
+    });
+    emitMoveProgress({
+      session_id: "move-1",
+      completed: 2,
+      total: 2,
+      done: true,
+      results: [
+        { path: "song1.mp3", new_path: "/library/song1.mp3", ok: true },
+        {
+          path: "song2.wav",
+          ok: false,
+          category: "Conflict",
+          message: "PulseSeek could not apply that change.",
+          diagnostic_code: "file.operation",
+        },
+      ],
+    });
+
+    await waitFor(() => {
+      expect(onEntriesMoved).toHaveBeenCalledWith([
+        { oldId: "song1.mp3", newId: "/library/song1.mp3" },
+      ]);
+    });
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText("1 file moved.")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("1 file could not be moved:"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("song1.mp3")).not.toBeInTheDocument();
+    expect(screen.getByText("song2.wav")).toBeInTheDocument();
+  });
+
+  it("completes when the done event races the start reply", async () => {
+    mockPickFolder.mockResolvedValueOnce("/library");
+    let resolveStart: (sessionId: string) => void = () => {};
+    mockStartMoveFiles.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    const onEntriesMoved = vi.fn();
+    function Harness() {
+      const [entries, setEntries] = useState(sampleEntries);
+      return (
+        <FileList
+          entries={entries}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+          onEntriesMoved={(moved) => {
+            onEntriesMoved(moved);
+            setEntries((current) =>
+              current.filter(
+                (entry) => !moved.some((item) => item.oldId === entry.id),
+              ),
+            );
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+    selectSongs();
+    fireEvent.click(screen.getByRole("button", { name: "Move…" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Choose folder…",
+      }),
+    );
+    await waitFor(() => {
+      expect(mockPickFolder).toHaveBeenCalled();
+    });
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Move",
+      }),
+    );
+    await waitFor(() => {
+      expect(eventHandlers.has("browser:move-progress")).toBe(true);
+    });
+
+    // The worker can finish before the start IPC reply reaches the UI; the
+    // buffered done event must still produce the summary (no stuck dialog).
+    emitMoveProgress({
+      session_id: "move-1",
+      completed: 2,
+      total: 2,
+      done: true,
+      results: [
+        { path: "song1.mp3", new_path: "/library/song1.mp3", ok: true },
+        { path: "song2.wav", new_path: "/library/song2.wav", ok: true },
+      ],
+    });
+    act(() => {
+      resolveStart("move-1");
+    });
+
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole("alertdialog")).getByText("2 files moved."),
+      ).toBeInTheDocument();
+    });
+    expect(onEntriesMoved).toHaveBeenCalledWith([
+      { oldId: "song1.mp3", newId: "/library/song1.mp3" },
+      { oldId: "song2.wav", newId: "/library/song2.wav" },
+    ]);
+    expect(screen.queryByText("song1.mp3")).not.toBeInTheDocument();
+    expect(screen.queryByText("song2.wav")).not.toBeInTheDocument();
+  });
+
+  it("cancels a running batch through the backend", async () => {
+    mockPickFolder.mockResolvedValueOnce("/library");
+    mockStartMoveFiles.mockResolvedValueOnce("move-1");
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    selectSongs();
+    fireEvent.click(screen.getByRole("button", { name: "Move…" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Choose folder…",
+      }),
+    );
+    await waitFor(() => {
+      expect(mockPickFolder).toHaveBeenCalled();
+    });
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Move",
+      }),
+    );
+    await waitFor(() => {
+      expect(mockStartMoveFiles).toHaveBeenCalled();
+    });
+
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Cancel",
+      }),
+    );
+    expect(mockCancelMoveFiles).toHaveBeenCalledWith("move-1");
+  });
+
+  it("keeps the dialog open and shows the error when the start fails", async () => {
+    mockPickFolder.mockResolvedValueOnce("/library");
+    mockStartMoveFiles.mockRejectedValueOnce(
+      new Error("That folder is unavailable."),
+    );
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    selectSongs();
+    fireEvent.click(screen.getByRole("button", { name: "Move…" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Choose folder…",
+      }),
+    );
+    await waitFor(() => {
+      expect(mockPickFolder).toHaveBeenCalled();
+    });
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Move",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "That folder is unavailable.",
+      );
+    });
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
   });
 });

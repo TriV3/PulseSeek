@@ -59,3 +59,36 @@ pub struct FolderChunkPayload {
 pub struct FileChangePayload {
     pub path: String,
 }
+/// One file's outcome in a move batch, reported through
+/// [`EVENT_MOVE_PROGRESS`](super::EVENT_MOVE_PROGRESS). Successful and failed
+/// targets are reported separately so the UI can summarize each group.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MoveItemResultData {
+    /// Source path of the file before the move.
+    pub path: String,
+    /// Full path after a successful move; absent when the file failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_path: Option<String>,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic_code: Option<String>,
+}
+/// Payload for [`EVENT_MOVE_PROGRESS`](super::EVENT_MOVE_PROGRESS).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MoveProgressPayload {
+    pub session_id: String,
+    /// Number of files processed so far, including failures.
+    pub completed: usize,
+    /// Total number of files in the batch.
+    pub total: usize,
+    /// True when the batch finished (all files processed or cancelled).
+    pub done: bool,
+    /// Per-file results in batch order. Only populated on the final event
+    /// (`done == true`); intermediate events carry an empty list so large
+    /// batches stay O(N) over the event channel.
+    pub results: Vec<MoveItemResultData>,
+}

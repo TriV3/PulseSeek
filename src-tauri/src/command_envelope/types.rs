@@ -171,6 +171,25 @@ pub struct RenameFileRequest {
     pub new_name: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct StartMoveFilesRequest {
+    pub paths: Vec<String>,
+    pub target_dir: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StartMoveFilesResponse {
+    pub session_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CancelMoveFilesRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CancelMoveFilesResponse {}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RenameFileResponse {
     pub old_path: String,
