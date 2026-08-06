@@ -52,6 +52,55 @@ export interface FileChangePayload {
   path: string;
 }
 
+export interface MoveItemResultData {
+  /** Source path of the file before the move. */
+  path: string;
+  /** Full path after a successful move; absent when the file failed. */
+  new_path?: string;
+  ok: boolean;
+  category?: string;
+  message?: string;
+  diagnostic_code?: string;
+}
+
+export interface MoveProgressPayload {
+  session_id: string;
+  completed: number;
+  total: number;
+  done: boolean;
+  /** Per-file results in batch order; only populated when `done` is true. */
+  results: MoveItemResultData[];
+}
+
+export function isMoveItemResultData(
+  value: unknown,
+): value is MoveItemResultData {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.path === "string" &&
+    (value.new_path === undefined || typeof value.new_path === "string") &&
+    typeof value.ok === "boolean" &&
+    (value.category === undefined || typeof value.category === "string") &&
+    (value.message === undefined || typeof value.message === "string") &&
+    (value.diagnostic_code === undefined ||
+      typeof value.diagnostic_code === "string")
+  );
+}
+
+export function isMoveProgressPayload(
+  value: unknown,
+): value is MoveProgressPayload {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.session_id === "string" &&
+    isOptionalSafeInteger(value.completed) &&
+    isOptionalSafeInteger(value.total) &&
+    typeof value.done === "boolean" &&
+    Array.isArray(value.results) &&
+    value.results.every(isMoveItemResultData)
+  );
+}
+
 export function isFileChangePayload(
   value: unknown,
 ): value is FileChangePayload {
@@ -131,6 +180,7 @@ export const EVENT_COMPLETED = "playback:completed";
 export const EVENT_DEVICE_LOST = "audio:device-lost";
 export const EVENT_FOLDER_CHUNK = "browser:folder-chunk";
 export const EVENT_FILE_CHANGE = "browser:file-change";
+export const EVENT_MOVE_PROGRESS = "browser:move-progress";
 
 // ── Typed event listeners ─────────────────────────────────────────────
 
@@ -188,6 +238,22 @@ export function onFolderChunk(
 ): Promise<UnlistenFn> {
   return listen<FolderChunkPayload>(EVENT_FOLDER_CHUNK, (event) => {
     if (isFolderChunkPayload(event.payload)) {
+      handler(event.payload);
+    }
+  });
+}
+
+/**
+ * Listens for per-file move progress.
+ *
+ * Intermediate events carry only `completed`/`total`; the final `done` event
+ * carries the full per-file `results` list. Returns an `unlisten` function.
+ */
+export function onMoveProgress(
+  handler: (payload: MoveProgressPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<MoveProgressPayload>(EVENT_MOVE_PROGRESS, (event) => {
+    if (isMoveProgressPayload(event.payload)) {
       handler(event.payload);
     }
   });

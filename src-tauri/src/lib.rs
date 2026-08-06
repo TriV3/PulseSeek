@@ -5,6 +5,7 @@ pub mod diagnostics;
 pub mod dialog_service;
 pub mod file_watcher_service;
 pub mod folder_enumeration_service;
+pub mod move_service;
 pub mod native_audio_device_service;
 pub mod native_playback_service;
 pub mod path_validation;
@@ -40,11 +41,14 @@ pub fn run() {
     let audio_output: Arc<Mutex<CpalAudioOutput>> = Arc::new(Mutex::new(CpalAudioOutput::new()));
 
     // Native playback service that owns decoder workers and drives the
-    // shared cpal output. Events are wired during setup.
-    let playback_service: std::sync::Mutex<Box<dyn playback_service::PlaybackService>> =
-        std::sync::Mutex::new(Box::new(native_playback_service::NativePlaybackService::new(
-            Arc::clone(&audio_output),
-        )));
+    // shared cpal output. Events are wired during setup. The value is managed
+    // behind an `Arc` so long-lived workers (such as the move service) can
+    // reconcile the tracked path without owning the playback engine.
+    let playback_service: std::sync::Arc<
+        std::sync::Mutex<Box<dyn playback_service::PlaybackService>>,
+    > = std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+        native_playback_service::NativePlaybackService::new(Arc::clone(&audio_output)),
+    )));
 
     // Native audio-device service. It falls back to the operating-system
     // default when a requested device is unavailable.
@@ -155,6 +159,41 @@ pub fn run() {
                 )));
             }
             app.manage(rename_service);
+            // Move service: runs each batch on its own worker thread, streams
+            // per-file progress events, invalidates moved-away waveform rows
+            // through the opened cache, and reconciles the tracked playback
+            // path when the playing file moves. Cache and reconcile failures
+            // never fail the move itself.
+            let playback_for_reconcile: std::sync::Arc<
+                std::sync::Mutex<Box<dyn playback_service::PlaybackService>>,
+            > = app
+                .state::<std::sync::Arc<
+                    std::sync::Mutex<Box<dyn playback_service::PlaybackService>>,
+                >>()
+                .inner()
+                .clone();
+            let move_service: std::sync::Mutex<Box<dyn move_service::MoveService>> =
+                std::sync::Mutex::new(Box::new(
+                    move_service::NativeMoveService::new(
+                        pulseseek_browser_fs::move_file::NativeFileMover::new(),
+                    )
+                    .with_cache(watcher_cache.clone())
+                    .with_reconcile(Some(Arc::new(move |old: &str, new: &str| {
+                        match playback_for_reconcile.lock() {
+                            Ok(mut playback) => playback.reconcile_path(old, new),
+                            Err(_) => Err(
+                                pulseseek_domain::error::ApplicationError::new(
+                                    pulseseek_domain::error::ErrorCategory::Internal,
+                                    pulseseek_domain::error::DiagnosticContext::new(
+                                        pulseseek_domain::error::DiagnosticCode::PlaybackControl,
+                                    ),
+                                    std::io::Error::other("playback service lock poisoned"),
+                                ),
+                            ),
+                        }
+                    }))),
+                ));
+            app.manage(move_service);
 
             // Waveform service always exists: with a cache port when the
             // cache opened, without one when it did not. It is only reachable
@@ -168,8 +207,11 @@ pub fn run() {
                 Arc::new(playback_events::TauriEventEmitter::new(app.handle().clone()));
             // Wire real events into the playback service before manage moves
             // the emitter into Tauri managed state.
-            if let Ok(mut playback) =
-                app.state::<std::sync::Mutex<Box<dyn playback_service::PlaybackService>>>().lock()
+            if let Ok(mut playback) = app
+                .state::<std::sync::Arc<
+                    std::sync::Mutex<Box<dyn playback_service::PlaybackService>>,
+                >>()
+                .lock()
             {
                 playback.set_events(Some(Arc::clone(&event_emitter)));
             }

@@ -1,12 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { moveToTrash, renameFile } from "../../api/commandEnvelope";
+import {
+  cancelMoveFiles,
+  moveToTrash,
+  pickFolder,
+  renameFile,
+  startMoveFiles,
+} from "../../api/commandEnvelope";
+import {
+  onMoveProgress,
+  type MoveProgressPayload,
+} from "../../api/playbackEvents";
 import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
 import { relativeEntryPath } from "../FolderTree/folderTreeTypes";
 import type { PlaybackSelectionStatus } from "../../hooks/usePlaybackSelection";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { ConfirmDialog } from "../ConfirmDialog/ConfirmDialog";
 import { RenameDialog } from "../RenameDialog/RenameDialog";
+import {
+  MoveDialog,
+  type MoveProgress,
+  type MoveSummary,
+} from "../MoveDialog/MoveDialog";
+
+/** One successfully moved file: the source id and the destination id. */
+export interface MovedEntry {
+  oldId: string;
+  newId: string;
+}
 import {
   DEFAULT_FILE_SORT,
   type FileSort,
@@ -26,6 +47,7 @@ import {
 import "./FileList.css";
 import "../ConfirmDialog/ConfirmDialog.css";
 import "../RenameDialog/RenameDialog.css";
+import "../MoveDialog/MoveDialog.css";
 
 const UNAVAILABLE = "—";
 
@@ -98,6 +120,8 @@ interface FileListProps {
   onEntriesTrashed?: (entryIds: string[]) => void;
   /** Called after a successful rename so owners can reconcile state. */
   onEntryRenamed?: (oldId: string, newId: string, newName: string) => void;
+  /** Called with the source and destination ids of files successfully moved. */
+  onEntriesMoved?: (moved: MovedEntry[]) => void;
   /** Active sort; default name ascending when omitted. */
   sort?: FileSort;
   /** Called whenever the user changes the sort. */
@@ -148,6 +172,7 @@ export function FileList({
   playbackError = null,
   onEntriesTrashed,
   onEntryRenamed,
+  onEntriesMoved,
   sort = DEFAULT_FILE_SORT,
   onSortChange,
   searchQuery = "",
@@ -180,7 +205,28 @@ export function FileList({
     "idle" | "renaming" | "error"
   >("idle");
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveTarget, setMoveTarget] = useState<string | null>(null);
+  const [moveStatus, setMoveStatus] = useState<
+    "idle" | "moving" | "done" | "error"
+  >("idle");
+  const [moveSessionId, setMoveSessionId] = useState<string | null>(null);
+  const [moveProgress, setMoveProgress] = useState<MoveProgress | null>(null);
+  const [moveSummary, setMoveSummary] = useState<MoveSummary | null>(null);
+  // Refs keep the progress listener and its session id reachable outside the
+  // render cycle: the listener is subscribed before the batch starts so a
+  // fast batch can never drop its final done event, and payloads that race
+  // the start reply are buffered until the session id is known.
+  const moveSessionIdRef = useRef<string | null>(null);
+  const movePendingRef = useRef<MoveProgressPayload | null>(null);
+  const moveUnlistenRef = useRef<(() => void) | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const onEntriesMovedRef = useRef(onEntriesMoved);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
+
+  useEffect(() => {
+    onEntriesMovedRef.current = onEntriesMoved;
+  }, [onEntriesMoved]);
 
   // Only folders and confirmed playable files may be listed. Unsupported or
   // inaccessible entries must never render, even if a stale backend still
@@ -456,6 +502,146 @@ export function FileList({
     }
   };
 
+  // ── Move flow (FR-FM-004, FR-FM-005) ────────────────────────────────
+  //
+  // The user picks a target folder, then the batch runs on a backend worker.
+  // Per-file progress arrives through `browser:move-progress`; when the batch
+  // finishes, successful and failed targets are reported separately and the
+  // successful source ids are handed to the owner so the view can drop them.
+
+  const requestMove = () => {
+    moveSessionIdRef.current = null;
+    movePendingRef.current = null;
+    moveUnlistenRef.current?.();
+    moveUnlistenRef.current = null;
+    setMoveError(null);
+    setMoveStatus("idle");
+    setMoveTarget(null);
+    setMoveProgress(null);
+    setMoveSummary(null);
+    setMoveSessionId(null);
+    setMoveOpen(true);
+  };
+
+  const pickMoveTarget = async () => {
+    if (moveStatus === "moving") return;
+    try {
+      const picked = await pickFolder();
+      if (picked) {
+        setMoveTarget(picked);
+        setMoveError(null);
+      }
+    } catch (error: unknown) {
+      setMoveError(
+        error instanceof Error ? error.message : "Unable to choose a folder.",
+      );
+    }
+  };
+
+  // Applies one move-progress payload. Events can arrive before the start
+  // reply resolves (the worker emits as soon as the batch starts), so a
+  // pending payload is buffered and replayed once the session id is known.
+  const handleMoveProgress = (payload: MoveProgressPayload) => {
+    if (!moveSessionIdRef.current) {
+      movePendingRef.current = payload;
+      return;
+    }
+    if (payload.session_id !== moveSessionIdRef.current) return;
+    movePendingRef.current = null;
+    setMoveProgress({ completed: payload.completed, total: payload.total });
+    if (payload.done) {
+      const okCount = payload.results.filter((item) => item.ok).length;
+      const failed = payload.results.filter((item) => !item.ok);
+      const moved: MovedEntry[] = payload.results
+        .filter((item) => item.ok)
+        .map((item) => ({
+          oldId: item.path,
+          newId: item.new_path ?? item.path,
+        }));
+      setMoveSummary({ okCount, failed });
+      setMoveStatus("done");
+      moveSessionIdRef.current = null;
+      setMoveSessionId(null);
+      moveUnlistenRef.current?.();
+      moveUnlistenRef.current = null;
+      // Drop moved rows from the local selection so stale ids can never
+      // feed later batch actions.
+      setSelectedIds((current) => {
+        if (moved.length === 0) return current;
+        const next = new Set(current);
+        for (const entry of moved) next.delete(entry.oldId);
+        return next;
+      });
+      onEntriesMovedRef.current?.(moved);
+    }
+  };
+
+  const confirmMove = async () => {
+    if (!moveTarget || moveStatus === "moving") return;
+    const selected = visibleEntries
+      .filter((entry) => entry.kind === "playable" && selectedIds.has(entry.id))
+      .map((entry) => entry.id);
+    if (selected.length === 0) return;
+    setMoveError(null);
+    setMoveSummary(null);
+    setMoveProgress({ completed: 0, total: selected.length });
+    setMoveStatus("moving");
+    try {
+      // Subscribe before starting the batch: the worker can emit the final
+      // done event within the start_move IPC round trip, so the listener must
+      // already exist before the backend begins.
+      movePendingRef.current = null;
+      const unlisten = await onMoveProgress(handleMoveProgress);
+      moveUnlistenRef.current = unlisten;
+      const sessionId = await startMoveFiles(selected, moveTarget);
+      moveSessionIdRef.current = sessionId;
+      setMoveSessionId(sessionId);
+      // Replay an event that raced the start reply. The cast defeats
+      // control-flow narrowing from the null assignment above.
+      const pending = movePendingRef.current as MoveProgressPayload | null;
+      if (pending && pending.session_id === sessionId) {
+        handleMoveProgress(pending);
+      }
+    } catch (error: unknown) {
+      moveUnlistenRef.current?.();
+      moveUnlistenRef.current = null;
+      moveSessionIdRef.current = null;
+      movePendingRef.current = null;
+      setMoveStatus("error");
+      setMoveProgress(null);
+      setMoveError(
+        error instanceof Error ? error.message : "Unable to start move.",
+      );
+    }
+  };
+
+  // Releases the move-progress listener if the component unmounts mid-batch.
+  useEffect(
+    () => () => {
+      moveUnlistenRef.current?.();
+    },
+    [],
+  );
+
+  const cancelMove = () => {
+    if (moveSessionId) {
+      // Ask the backend to stop; the remaining files report Cancelled and
+      // the batch still emits a done event so the summary stays accurate.
+      void cancelMoveFiles(moveSessionId).catch(() => {
+        // Best-effort cancel.
+      });
+      return;
+    }
+    moveUnlistenRef.current?.();
+    moveUnlistenRef.current = null;
+    moveSessionIdRef.current = null;
+    movePendingRef.current = null;
+    if (moveStatus !== "moving") {
+      setMoveOpen(false);
+      setMoveStatus("idle");
+    }
+  };
+
   useKeyboardShortcuts({
     onMoveToTrash: () => {
       const selected = visibleEntries.find(
@@ -471,8 +657,8 @@ export function FileList({
   });
 
   // The primary selection is the anchor (last clicked or focused row). It
-  // drives single-file actions such as Move to Trash; batch operations are
-  // intentionally out of scope for this feature.
+  // drives single-file actions such as Move to Trash and Rename; batch
+  // operations (Move) act on the whole playable selection (FR-FM-005).
   const primarySelectedId = useMemo(() => {
     if (!selectionAnchorId || !selectedIds.has(selectionAnchorId)) {
       return selectedIds.size > 0 ? [...selectedIds][0] : null;
@@ -486,6 +672,18 @@ export function FileList({
     [visibleEntries, primarySelectedId],
   );
   const canRenamePrimary = primarySelectedEntry?.kind === "playable";
+  // Move targets every selected playable file, so the action needs at least
+  // one selected playable row and a batch that is not already running.
+  const selectedPlayableIds = useMemo(
+    () =>
+      visibleEntries
+        .filter(
+          (entry) => entry.kind === "playable" && selectedIds.has(entry.id),
+        )
+        .map((entry) => entry.id),
+    [visibleEntries, selectedIds],
+  );
+  const canMoveSelection = selectedPlayableIds.length > 0;
   const activeEntryIdForFolder = visibleEntries.some(
     (entry) => entry.id === activeEntryId,
   )
@@ -566,6 +764,14 @@ export function FileList({
           disabled={!canRenamePrimary || renameStatus === "renaming"}
         >
           Rename
+        </button>
+        <button
+          type="button"
+          className="file-list-move-button"
+          onClick={requestMove}
+          disabled={!canMoveSelection || moveStatus === "moving"}
+        >
+          Move…
         </button>
         <button
           type="button"
@@ -988,6 +1194,23 @@ export function FileList({
             setRenameError(null);
           }
         }}
+      />
+      <MoveDialog
+        open={moveOpen}
+        title="Move Files"
+        fileNameCount={selectedPlayableIds.length}
+        targetDir={moveTarget}
+        busy={moveStatus === "moving"}
+        error={moveError}
+        progress={moveProgress}
+        summary={moveStatus === "done" ? moveSummary : null}
+        onPickTarget={() => {
+          void pickMoveTarget();
+        }}
+        onConfirm={() => {
+          void confirmMove();
+        }}
+        onCancel={cancelMove}
       />
     </div>
   );

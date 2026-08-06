@@ -648,6 +648,26 @@ function App() {
                     playerPreferences.update({ last_played_file_path: newId });
                   }
                 }}
+                onEntriesMoved={(moved) => {
+                  if (state.selectedPath) {
+                    folderTree.removeEntries(
+                      state.selectedPath,
+                      moved.map((entry) => entry.oldId),
+                    );
+                  }
+                  for (const entry of moved) {
+                    playback.reconcile(entry.oldId, entry.newId);
+                    sessionMarks.reconcile(entry.oldId, entry.newId);
+                    if (
+                      playerPreferences.preferences.last_played_file_path ===
+                      entry.oldId
+                    ) {
+                      playerPreferences.update({
+                        last_played_file_path: entry.newId,
+                      });
+                    }
+                  }
+                }}
                 recursive={recursiveView}
                 onRecursiveChange={(next) => {
                   if (state.selectedPath) {
