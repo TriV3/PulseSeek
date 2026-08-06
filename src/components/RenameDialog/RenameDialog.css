@@ -1,0 +1,40 @@
+.rename-dialog-field {
+  margin: 12px 20px 0;
+}
+
+.rename-dialog-field input {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 0.95rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--bg-canvas);
+  color: var(--text);
+}
+
+.rename-dialog-field input:focus {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.rename-dialog-field input[aria-invalid="true"] {
+  border-color: var(--line-danger);
+}
+
+.rename-dialog-error {
+  margin: 8px 20px 0;
+  color: var(--text-danger);
+  font-size: 0.9rem;
+}
+
+/* Renaming is non-destructive, so the confirm action uses the accent color
+ * instead of the danger color shared by the trash confirmation. */
+.confirm-dialog-button--confirm.rename-dialog-confirm {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-color: var(--accent-strong);
+}
+
+.confirm-dialog-button--confirm.rename-dialog-confirm:hover {
+  background: var(--accent-strong);
+}

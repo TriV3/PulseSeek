@@ -410,6 +410,36 @@ export async function moveToTrash(
   return response.results;
 }
 
+// ── Rename-file types ──────────────────────────────────────────────────
+
+export interface RenameFileRequest {
+  path: string;
+  new_name: string;
+}
+
+export interface RenameFileResponse {
+  old_path: string;
+  new_path: string;
+  /** True when the renamed file is the currently playing file (FR-FM-009). */
+  was_playing: boolean;
+}
+
+/** Renames `path` to `new_name` within the same directory (FR-FM-004).
+ *
+ * Returns the old and new paths and whether the renamed file was playing.
+ * Throws `CommandError` on invalid names, collisions, or filesystem errors.
+ */
+export async function renameFile(
+  path: string,
+  newName: string,
+): Promise<RenameFileResponse> {
+  const response = await invokeCommand<RenameFileResponse>("rename_file", {
+    path,
+    new_name: newName,
+  } satisfies RenameFileRequest);
+  return response;
+}
+
 // ── Recent folders types ───────────────────────────────────────────────
 
 export interface RecentFolderData {

@@ -7,22 +7,28 @@ use serde_json::Value;
 use crate::command_envelope::types::{
     CancelEnumerationRequest, CancelEnumerationResponse, ListBrowserRootsRequest,
     ListBrowserRootsResponse, MoveToTrashItemResult, MoveToTrashRequest, MoveToTrashResponse,
-    PickFolderResponse, StartEnumerationRequest, StartEnumerationResponse,
+    PickFolderResponse, RenameFileRequest, RenameFileResponse, StartEnumerationRequest,
+    StartEnumerationResponse,
 };
 use crate::command_envelope::{from_application_error, CommandResponse};
 use crate::command_handlers::parse_payload;
 use crate::dialog_service::FolderPicker;
 use crate::folder_enumeration_service::{ActiveEnumerations, FolderEnumerationService};
 use crate::playback_events::PlaybackEventEmitter;
+use crate::playback_service::PlaybackService;
+use crate::rename_service::RenameService;
 use crate::trash_service::TrashService;
 
-/// Handles browsing commands: start_enumeration, cancel_enumeration, and
-/// move_to_trash.
+/// Handles browsing commands: start_enumeration, cancel_enumeration,
+/// move_to_trash, and rename_file.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle(
     command: &str,
     payload: Value,
     enum_service: &mut dyn FolderEnumerationService,
     trash_service: &dyn TrashService,
+    rename_service: &dyn RenameService,
+    playback: &mut dyn PlaybackService,
     active: &ActiveEnumerations,
     events: &Arc<dyn PlaybackEventEmitter>,
 ) -> CommandResponse {
@@ -108,6 +114,31 @@ pub(crate) fn handle(
             CommandResponse::ok(
                 serde_json::to_value(MoveToTrashResponse { results: response_results }).unwrap(),
             )
+        },
+        "rename_file" => {
+            let request: RenameFileRequest = match parse_payload("rename_file", payload) {
+                Ok(request) => request,
+                Err(response) => return response,
+            };
+            match rename_service.rename(&request.path, &request.new_name) {
+                Ok(outcome) => {
+                    let was_playing = match playback
+                        .reconcile_path(&outcome.old_path, &outcome.new_path)
+                    {
+                        Ok(value) => value,
+                        Err(error) => return CommandResponse::err(from_application_error(&error)),
+                    };
+                    CommandResponse::ok(
+                        serde_json::to_value(RenameFileResponse {
+                            old_path: outcome.old_path,
+                            new_path: outcome.new_path,
+                            was_playing,
+                        })
+                        .unwrap(),
+                    )
+                },
+                Err(error) => CommandResponse::err(from_application_error(&error)),
+            }
         },
         _ => unreachable!("unhandled browsing command: {command}"),
     }

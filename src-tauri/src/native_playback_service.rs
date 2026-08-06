@@ -327,6 +327,17 @@ impl PlaybackService for NativePlaybackService {
         Ok(mode)
     }
 
+    fn reconcile_path(&mut self, old_path: &str, new_path: &str) -> Result<bool, ApplicationError> {
+        let Some(current) = self.current_path.as_deref() else {
+            return Ok(false);
+        };
+        if current != old_path {
+            return Ok(false);
+        }
+        self.current_path = Some(new_path.to_string());
+        Ok(true)
+    }
+
     fn select_output_device(&mut self, device_id: &str) -> Result<(), ApplicationError> {
         let output_is_already_usable = {
             let output =
@@ -392,11 +403,54 @@ impl PlaybackService for NativePlaybackService {
 
 #[cfg(test)]
 mod tests {
-    use super::frames_to_millis;
+    use std::sync::{Arc, Mutex};
+
+    use pulseseek_audio_cpal::CpalAudioOutput;
+
+    use super::*;
+
+    fn service() -> NativePlaybackService {
+        NativePlaybackService::new(Arc::new(Mutex::new(CpalAudioOutput::new())))
+    }
 
     #[test]
     fn output_frames_are_converted_to_wall_clock_milliseconds() {
         assert_eq!(frames_to_millis(48_000, 48_000), 1_000);
         assert_eq!(frames_to_millis(44_100, 44_100), 1_000);
+    }
+
+    #[test]
+    fn reconcile_path_updates_current_path_when_playing_renamed_file() {
+        let mut service = service();
+        service.current_path = Some("/music/track.wav".to_string());
+
+        let reconciled = service
+            .reconcile_path("/music/track.wav", "/music/renamed.wav")
+            .expect("reconcile succeeds");
+        assert!(reconciled, "renamed file is the playing file");
+        assert_eq!(service.current_path.as_deref(), Some("/music/renamed.wav"));
+    }
+
+    #[test]
+    fn reconcile_path_ignores_rename_of_other_file() {
+        let mut service = service();
+        service.current_path = Some("/music/track.wav".to_string());
+
+        let reconciled = service
+            .reconcile_path("/music/other.wav", "/music/other-renamed.wav")
+            .expect("reconcile succeeds");
+        assert!(!reconciled, "rename of another file is not reconciled");
+        assert_eq!(service.current_path.as_deref(), Some("/music/track.wav"));
+    }
+
+    #[test]
+    fn reconcile_path_returns_false_without_active_session() {
+        let mut service = service();
+
+        let reconciled = service
+            .reconcile_path("/music/track.wav", "/music/renamed.wav")
+            .expect("reconcile succeeds");
+        assert!(!reconciled, "no active session means no reconciliation");
+        assert!(service.current_path.is_none());
     }
 }

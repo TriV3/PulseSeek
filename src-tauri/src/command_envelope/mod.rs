@@ -11,6 +11,7 @@ use crate::folder_enumeration_service::{ActiveEnumerations, FolderEnumerationSer
 use crate::playback_events::PlaybackEventEmitter;
 use crate::playback_service::PlaybackService;
 use crate::recent_folders_service::RecentFoldersService;
+use crate::rename_service::RenameService;
 use crate::trash_service::TrashService;
 pub(crate) use types::*;
 
@@ -21,6 +22,7 @@ pub fn dispatch(
     device_service: &mut dyn AudioDeviceService,
     enum_service: &mut dyn FolderEnumerationService,
     trash_service: &dyn TrashService,
+    rename_service: &dyn RenameService,
     active: &ActiveEnumerations,
     recent_service: &dyn RecentFoldersService,
     events: &Arc<dyn PlaybackEventEmitter>,
@@ -50,16 +52,17 @@ pub fn dispatch(
         "list_devices" | "current_device" | "select_device" => {
             device::handle(&envelope.command, envelope.payload, service, device_service, events)
         },
-        "list_browser_roots" | "start_enumeration" | "cancel_enumeration" | "move_to_trash" => {
-            browsing::handle(
-                &envelope.command,
-                envelope.payload,
-                enum_service,
-                trash_service,
-                active,
-                events,
-            )
-        },
+        "list_browser_roots" | "start_enumeration" | "cancel_enumeration" | "move_to_trash"
+        | "rename_file" => browsing::handle(
+            &envelope.command,
+            envelope.payload,
+            enum_service,
+            trash_service,
+            rename_service,
+            service,
+            active,
+            events,
+        ),
         "list_recent_folders" | "record_recent_folder" | "clear_recent_folders" => {
             recent_folders::handle(&envelope.command, envelope.payload, recent_service)
         },
@@ -119,6 +122,7 @@ pub fn invoke_command(
     device_state: tauri::State<'_, std::sync::Mutex<Box<dyn AudioDeviceService>>>,
     enum_state: tauri::State<'_, std::sync::Mutex<Box<dyn FolderEnumerationService>>>,
     trash_state: tauri::State<'_, std::sync::Mutex<Box<dyn TrashService>>>,
+    rename_state: tauri::State<'_, std::sync::Mutex<Box<dyn RenameService>>>,
     active: tauri::State<'_, ActiveEnumerations>,
     recent_state: tauri::State<'_, std::sync::Mutex<Box<dyn RecentFoldersService>>>,
     events: tauri::State<'_, Arc<dyn PlaybackEventEmitter>>,
@@ -127,6 +131,7 @@ pub fn invoke_command(
     let mut device_service = device_state.lock().expect("audio device service lock poisoned");
     let mut enum_service = enum_state.lock().expect("enumeration service lock poisoned");
     let trash_service = trash_state.lock().expect("trash service lock poisoned");
+    let rename_service = rename_state.lock().expect("rename service lock poisoned");
     let recent_service = recent_state.lock().expect("recent folders service lock poisoned");
     dispatch(
         envelope,
@@ -134,6 +139,7 @@ pub fn invoke_command(
         &mut **device_service,
         &mut **enum_service,
         &**trash_service,
+        &**rename_service,
         &active,
         &**recent_service,
         &events,

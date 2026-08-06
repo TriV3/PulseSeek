@@ -232,6 +232,142 @@ describe("folderTreeReducer playable entries", () => {
     ]);
   });
 
+  it("renames an entry id and name in place", () => {
+    const state = {
+      ...INITIAL_FOLDER_TREE_STATE,
+      folders: {
+        [path]: {
+          expanded: true,
+          children: [
+            { id: "folder-a", name: "folder-a", kind: "folder" as const },
+            { id: "song.wav", name: "song.wav", kind: "playable" as const },
+          ],
+          isLoading: false,
+          error: null,
+          recursive: false,
+        },
+      },
+      playableEntries: {
+        [path]: [
+          { id: "song.wav", name: "song.wav", kind: "playable" as const },
+        ],
+      },
+    };
+
+    const next = folderTreeReducer(state, {
+      type: "RENAME_ENTRY",
+      path,
+      oldId: "song.wav",
+      newId: "renamed.wav",
+      newName: "renamed.wav",
+    });
+
+    expect(next.playableEntries[path]).toEqual([
+      { id: "renamed.wav", name: "renamed.wav", kind: "playable" },
+    ]);
+    expect(next.folders[path]?.children).toEqual([
+      { id: "folder-a", name: "folder-a", kind: "folder" },
+      { id: "renamed.wav", name: "renamed.wav", kind: "playable" },
+    ]);
+  });
+
+  it("keeps metadata when renaming an entry", () => {
+    const state = {
+      ...INITIAL_FOLDER_TREE_STATE,
+      playableEntries: {
+        [path]: [
+          {
+            id: "song.wav",
+            name: "song.wav",
+            kind: "playable" as const,
+            metadata: {
+              duration_ms: 1234,
+              size_bytes: 99,
+              modified_at_ms: null,
+              channels: null,
+              sample_rate: null,
+              bit_depth: null,
+              codec: null,
+            },
+          },
+        ],
+      },
+    };
+
+    const next = folderTreeReducer(state, {
+      type: "RENAME_ENTRY",
+      path,
+      oldId: "song.wav",
+      newId: "renamed.wav",
+      newName: "renamed.wav",
+    });
+
+    expect(next.playableEntries[path]?.[0]?.metadata).toEqual({
+      duration_ms: 1234,
+      size_bytes: 99,
+      modified_at_ms: null,
+      channels: null,
+      sample_rate: null,
+      bit_depth: null,
+      codec: null,
+    });
+  });
+
+  it("is a no-op when the folder is unknown", () => {
+    const next = folderTreeReducer(INITIAL_FOLDER_TREE_STATE, {
+      type: "RENAME_ENTRY",
+      path,
+      oldId: "song.wav",
+      newId: "renamed.wav",
+      newName: "renamed.wav",
+    });
+    expect(next).toBe(INITIAL_FOLDER_TREE_STATE);
+  });
+
+  it("rebuilds entries with the new name after an external rename", () => {
+    // An external rename (Finder) changes the stable entry id. The watcher
+    // triggers a fresh enumeration which resets the list and streams the
+    // renamed entry under its new id, so the visible name refreshes.
+    const state = {
+      ...INITIAL_FOLDER_TREE_STATE,
+      folders: {
+        [path]: {
+          expanded: true,
+          children: [],
+          isLoading: false,
+          error: null,
+          recursive: false,
+        },
+      },
+      playableEntries: {
+        [path]: [
+          { id: "/test/music/a.mp3", name: "a.mp3", kind: "playable" as const },
+        ],
+      },
+    };
+
+    const started = folderTreeReducer(state, {
+      type: "START_ENUMERATING",
+      path,
+      sessionId: "session-2",
+      recursive: false,
+    });
+    expect(started.playableEntries[path]).toEqual([]);
+
+    const rebuilt = folderTreeReducer(started, {
+      type: "ENUMERATION_CHUNK",
+      path,
+      entries: [
+        { id: "/test/music/b.mp3", name: "b.mp3", kind: "playable" as const },
+      ],
+      done: true,
+    });
+
+    expect(rebuilt.playableEntries[path]).toEqual([
+      { id: "/test/music/b.mp3", name: "b.mp3", kind: "playable" },
+    ]);
+  });
+
   it("marks the folder recursive when a recursive enumeration starts", () => {
     const state = folderTreeReducer(INITIAL_FOLDER_TREE_STATE, {
       type: "START_ENUMERATING",

@@ -165,6 +165,19 @@ pub struct MoveToTrashResponse {
     pub results: Vec<MoveToTrashItemResult>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RenameFileRequest {
+    pub path: String,
+    pub new_name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RenameFileResponse {
+    pub old_path: String,
+    pub new_path: String,
+    /// True when the renamed file is the currently playing file (FR-FM-009).
+    pub was_playing: bool,
+}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MoveToTrashItemResult {
     pub path: String,

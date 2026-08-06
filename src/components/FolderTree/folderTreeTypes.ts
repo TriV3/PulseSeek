@@ -85,7 +85,14 @@ export type FolderTreeAction =
     }
   | { type: "NAVIGATE_UP" }
   | { type: "CLEAR_ERROR" }
-  | { type: "REMOVE_ENTRIES"; path: string; entryIds: string[] };
+  | { type: "REMOVE_ENTRIES"; path: string; entryIds: string[] }
+  | {
+      type: "RENAME_ENTRY";
+      path: string;
+      oldId: string;
+      newId: string;
+      newName: string;
+    };
 
 export const INITIAL_FOLDER_TREE_STATE: FolderTreeState = {
   rootPath: null,

@@ -5,6 +5,7 @@ import {
   markFiles,
   matchesMarkFilter,
   selectMarkedEntryIds,
+  transferMarksByMetadata,
   unmarkFiles,
   type SessionMark,
 } from "./sessionMarks";
@@ -13,6 +14,16 @@ const playable = (id: string): BrowserEntry => ({
   id,
   name: id,
   kind: "playable",
+});
+
+const metadata = (sizeBytes: number, modifiedAtMs: number) => ({
+  duration_ms: null,
+  size_bytes: sizeBytes,
+  modified_at_ms: modifiedAtMs,
+  channels: null,
+  sample_rate: null,
+  bit_depth: null,
+  codec: null,
 });
 
 const folder = (id: string): BrowserEntry => ({
@@ -126,5 +137,133 @@ describe("selectMarkedEntryIds", () => {
 
   it("returns an empty list when nothing is marked", () => {
     expect(selectMarkedEntryIds([playable("a.mp3")], {})).toEqual([]);
+  });
+});
+
+describe("transferMarksByMetadata", () => {
+  it("transfers a mark to the unique renamed match in the same directory", () => {
+    const previous = [
+      {
+        ...playable("/music/a.mp3"),
+        metadata: metadata(2048, 1_700_000_000_000),
+      },
+    ];
+    const next = [
+      {
+        ...playable("/music/b.mp3"),
+        metadata: metadata(2048, 1_700_000_000_000),
+      },
+    ];
+    const marks = { "/music/a.mp3": "keep" } as const;
+
+    expect(transferMarksByMetadata(marks, previous, next)).toEqual({
+      "/music/b.mp3": "keep",
+    });
+  });
+
+  it("keeps the mark untouched when the entry still exists", () => {
+    const entry = {
+      ...playable("/music/a.mp3"),
+      metadata: metadata(2048, 1_700_000_000_000),
+    };
+    const marks = { "/music/a.mp3": "keep" } as const;
+
+    expect(transferMarksByMetadata(marks, [entry], [entry])).toBe(marks);
+  });
+
+  it("does not transfer when the renamed entry is missing metadata", () => {
+    const previous = [
+      {
+        ...playable("/music/a.mp3"),
+        metadata: metadata(2048, 1_700_000_000_000),
+      },
+    ];
+    const next = [playable("/music/b.mp3")];
+    const marks = { "/music/a.mp3": "keep" } as const;
+
+    expect(transferMarksByMetadata(marks, previous, next)).toBe(marks);
+  });
+
+  it("does not transfer across directories", () => {
+    const previous = [
+      {
+        ...playable("/music/a.mp3"),
+        metadata: metadata(2048, 1_700_000_000_000),
+      },
+    ];
+    const next = [
+      {
+        ...playable("/music/sub/b.mp3"),
+        metadata: metadata(2048, 1_700_000_000_000),
+      },
+    ];
+    const marks = { "/music/a.mp3": "keep" } as const;
+
+    expect(transferMarksByMetadata(marks, previous, next)).toBe(marks);
+  });
+
+  it("does not transfer when several entries share the identity", () => {
+    const previous = [
+      {
+        ...playable("/music/a.mp3"),
+        metadata: metadata(2048, 1_700_000_000_000),
+      },
+    ];
+    const next = [
+      {
+        ...playable("/music/b.mp3"),
+        metadata: metadata(2048, 1_700_000_000_000),
+      },
+      {
+        ...playable("/music/c.mp3"),
+        metadata: metadata(2048, 1_700_000_000_000),
+      },
+    ];
+    const marks = { "/music/a.mp3": "keep" } as const;
+
+    expect(transferMarksByMetadata(marks, previous, next)).toBe(marks);
+  });
+
+  it("does not transfer to an entry that already carries a mark", () => {
+    const previous = [
+      {
+        ...playable("/music/a.mp3"),
+        metadata: metadata(2048, 1_700_000_000_000),
+      },
+    ];
+    const next = [
+      {
+        ...playable("/music/b.mp3"),
+        metadata: metadata(2048, 1_700_000_000_000),
+      },
+    ];
+    const marks = {
+      "/music/a.mp3": "keep",
+      "/music/b.mp3": "favorite",
+    } as const;
+
+    expect(transferMarksByMetadata(marks, previous, next)).toBe(marks);
+  });
+
+  it("leaves marks for unrelated changes alone", () => {
+    const previous = [
+      {
+        ...playable("/music/a.mp3"),
+        metadata: metadata(2048, 1_700_000_000_000),
+      },
+    ];
+    const next = [
+      {
+        ...playable("/music/a.mp3"),
+        metadata: metadata(2048, 1_700_000_000_000),
+      },
+      {
+        ...playable("/music/new.wav"),
+        metadata: metadata(4096, 1_700_000_000_001),
+      },
+    ];
+    const marks = { "/music/a.mp3": "maybe" } as const;
+
+    expect(transferMarksByMetadata(marks, previous, next)).toBe(marks);
   });
 });

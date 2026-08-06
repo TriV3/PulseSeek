@@ -37,4 +37,25 @@ describe("useSessionMarks", () => {
     act(() => result.current.clear());
     expect(result.current.marks).toEqual({});
   });
+
+  it("moves a mark to a renamed id", () => {
+    const { result } = renderHook(() => useSessionMarks());
+    act(() => result.current.setMark(["a.mp3"], "favorite"));
+    act(() => result.current.reconcile("a.mp3", "a-renamed.mp3"));
+    expect(result.current.marks).toEqual({ "a-renamed.mp3": "favorite" });
+  });
+
+  it("leaves marks untouched when the old id is unknown", () => {
+    const { result } = renderHook(() => useSessionMarks());
+    act(() => result.current.setMark(["a.mp3"], "keep"));
+    act(() => result.current.reconcile("b.wav", "b-renamed.wav"));
+    expect(result.current.marks).toEqual({ "a.mp3": "keep" });
+  });
+
+  it("replaces the whole mark set after external reconciliation", () => {
+    const { result } = renderHook(() => useSessionMarks());
+    act(() => result.current.setMark(["a.mp3"], "keep"));
+    act(() => result.current.replace({ "b.mp3": "keep" }));
+    expect(result.current.marks).toEqual({ "b.mp3": "keep" });
+  });
 });

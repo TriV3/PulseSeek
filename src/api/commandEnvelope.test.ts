@@ -369,4 +369,49 @@ describe("recent folders", () => {
       CommandError,
     );
   });
+
+  it("renames a file and returns the new path and playing flag", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: true,
+      data: {
+        old_path: "/music/song.mp3",
+        new_path: "/music/renamed.mp3",
+        was_playing: true,
+      },
+    });
+
+    const { renameFile } = await import("./commandEnvelope");
+    const outcome = await renameFile("/music/song.mp3", "renamed.mp3");
+
+    expect(outcome).toEqual({
+      old_path: "/music/song.mp3",
+      new_path: "/music/renamed.mp3",
+      was_playing: true,
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: {
+        version: 1,
+        command: "rename_file",
+        payload: { path: "/music/song.mp3", new_name: "renamed.mp3" },
+      },
+    });
+  });
+
+  it("surfaces rename collision as CommandError", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: false,
+      error: {
+        category: "Conflict",
+        message: "PulseSeek could not apply that change.",
+        diagnostic_code: "file.operation",
+      },
+    });
+
+    const { renameFile, CommandError } = await import("./commandEnvelope");
+    await expect(renameFile("/music/song.mp3", "taken.mp3")).rejects.toThrow(
+      CommandError,
+    );
+  });
 });

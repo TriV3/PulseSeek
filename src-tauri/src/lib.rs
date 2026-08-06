@@ -12,6 +12,7 @@ pub mod playback_events;
 pub mod playback_service;
 pub mod player_preferences;
 pub mod recent_folders_service;
+pub mod rename_service;
 pub mod trash_service;
 pub mod waveform_service;
 
@@ -26,6 +27,7 @@ use tauri::Manager;
 use crate::player_preferences::{
     JsonPlayerPreferencesRepository, SharedPlayerPreferencesRepository,
 };
+use crate::rename_service::{NativeRenameService, RenameService};
 use crate::trash_service::{NativeTrashService, TrashService};
 use crate::waveform_service::{NativeWaveformService, WaveformService};
 
@@ -98,6 +100,15 @@ pub fn run() {
             // The file watcher uses the same port to invalidate stale rows.
             let mut watcher_cache: Option<Arc<dyn WaveformCachePort>> = None;
             let mut waveform_service: Option<Arc<dyn WaveformService>> = None;
+            // Rename service starts without a cache port and is replaced with
+            // the opened cache below, so a cache failure never prevents rename
+            // while a healthy cache lets PulseSeek invalidate the old row
+            // proactively (FR-FM-010).
+            let mut rename_service: std::sync::Mutex<Box<dyn RenameService>> =
+                std::sync::Mutex::new(Box::new(NativeRenameService::new(
+                    pulseseek_browser_fs::rename::NativeFileRename,
+                    None,
+                )));
             let mut recent_service: std::sync::Mutex<
                 Box<dyn recent_folders_service::RecentFoldersService>,
             > = std::sync::Mutex::new(Box::new(
@@ -134,6 +145,16 @@ pub fn run() {
                 }
             }
             app.manage(recent_service);
+
+            // Rename service with the opened cache so a PulseSeek rename
+            // proactively invalidates the old waveform row (FR-FM-010).
+            if let Some(cache_port) = watcher_cache.clone() {
+                rename_service = std::sync::Mutex::new(Box::new(NativeRenameService::new(
+                    pulseseek_browser_fs::rename::NativeFileRename,
+                    Some(cache_port),
+                )));
+            }
+            app.manage(rename_service);
 
             // Waveform service always exists: with a cache port when the
             // cache opened, without one when it did not. It is only reachable

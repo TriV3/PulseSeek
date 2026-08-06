@@ -1,3 +1,4 @@
+pub mod rename;
 pub mod trash;
 
 use std::collections::HashSet;

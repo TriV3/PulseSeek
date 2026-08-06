@@ -13,6 +13,10 @@ export interface UseSessionMarksResult {
   setMark: (ids: readonly string[], mark: SessionMark) => void;
   /** Removes the mark from every id. */
   unmark: (ids: readonly string[]) => void;
+  /** Moves a mark from an old entry id to a renamed id (FR-FM-004). */
+  reconcile: (oldId: string, newId: string) => void;
+  /** Replaces the whole mark set (external-change reconciliation). */
+  replace: (next: SessionMarks) => void;
   /** Clears every session mark. */
   clear: () => void;
 }
@@ -35,9 +39,24 @@ export function useSessionMarks(): UseSessionMarksResult {
     setMarks((current) => unmarkFiles(current, ids));
   }, []);
 
+  const reconcile = useCallback((oldId: string, newId: string) => {
+    setMarks((current) => {
+      if (!Object.prototype.hasOwnProperty.call(current, oldId)) return current;
+      const next = { ...current };
+      const mark = next[oldId];
+      delete next[oldId];
+      next[newId] = mark;
+      return next;
+    });
+  }, []);
+
+  const replace = useCallback((next: SessionMarks) => {
+    setMarks(next);
+  }, []);
+
   const clear = useCallback(() => {
     setMarks({});
   }, []);
 
-  return { marks, setMark, unmark, clear };
+  return { marks, setMark, unmark, reconcile, replace, clear };
 }

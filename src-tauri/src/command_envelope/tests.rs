@@ -10,6 +10,7 @@ use crate::folder_enumeration_service::{ActiveEnumerations, FakeFolderEnumeratio
 use crate::playback_events::{FakeEventEmitter, NoopEventEmitter};
 use crate::playback_service::FakePlaybackService;
 use crate::recent_folders_service::InMemoryRecentFoldersService;
+use crate::rename_service::{FakeRenameService, RenameOutcome};
 use crate::trash_service::FakeTrashService;
 
 fn noop_events() -> Arc<dyn PlaybackEventEmitter> {
@@ -38,6 +39,16 @@ fn noop_trash() -> FakeTrashService {
     FakeTrashService::new(Box::new(|_| vec![]))
 }
 
+fn noop_rename() -> FakeRenameService {
+    FakeRenameService::new(Box::new(|_, _| {
+        Err(ApplicationError::new(
+            ErrorCategory::Unavailable,
+            DiagnosticContext::new(DiagnosticCode::FileOperation),
+            std::io::Error::other("fake rename not configured"),
+        ))
+    }))
+}
+
 fn noop_recent() -> InMemoryRecentFoldersService {
     InMemoryRecentFoldersService::new()
 }
@@ -62,6 +73,7 @@ fn health_command_round_trip() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -90,6 +102,7 @@ fn unknown_version_rejected() {
             &mut noop_device(),
             &mut noop_enum(),
             &noop_trash(),
+            &noop_rename(),
             &noop_active(),
             &noop_recent(),
             &noop_events(),
@@ -119,6 +132,7 @@ fn unknown_command_rejected() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -147,6 +161,7 @@ fn invalid_payload_rejected() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -195,6 +210,7 @@ fn play_command_dispatches_to_service() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -222,6 +238,7 @@ fn play_command_invalid_payload_rejected() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -250,6 +267,7 @@ fn play_command_missing_path_rejected() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -276,6 +294,7 @@ fn set_playback_mode_dispatches_and_returns_confirmed_mode() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -301,6 +320,7 @@ fn set_playback_mode_rejects_unknown_mode() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -327,6 +347,7 @@ fn set_playback_mode_maps_service_failure() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -355,6 +376,7 @@ fn pause_command_dispatches_to_service() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -380,6 +402,7 @@ fn pause_command_invalid_payload_rejected() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -408,6 +431,7 @@ fn resume_command_dispatches_to_service() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -433,6 +457,7 @@ fn resume_command_invalid_payload_rejected() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -460,6 +485,7 @@ fn stop_command_dispatches_to_service() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -485,6 +511,7 @@ fn stop_command_invalid_payload_rejected() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -513,6 +540,7 @@ fn seek_command_dispatches_to_service() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -541,6 +569,7 @@ fn seek_command_invalid_payload_rejected() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -566,6 +595,7 @@ fn seek_command_missing_position_rejected() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -593,6 +623,7 @@ fn volume_command_dispatches_to_service() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -620,6 +651,7 @@ fn volume_command_muted_state_dispatches_to_service() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -646,6 +678,7 @@ fn volume_command_invalid_payload_rejected() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -671,6 +704,7 @@ fn volume_command_missing_fields_rejected() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -699,6 +733,7 @@ fn play_service_error_maps_to_boundary_error() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -727,6 +762,7 @@ fn pause_service_error_maps_to_boundary_error() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -754,6 +790,7 @@ fn resume_service_error_maps_to_boundary_error() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -781,6 +818,7 @@ fn stop_service_error_maps_to_boundary_error() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -808,6 +846,7 @@ fn seek_service_error_maps_to_boundary_error() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -835,6 +874,7 @@ fn volume_service_error_maps_to_boundary_error() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -864,6 +904,7 @@ fn play_emits_playing_state_event() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -894,6 +935,7 @@ fn play_emits_event_only_on_success() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -919,6 +961,7 @@ fn pause_emits_paused_state_event() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -948,6 +991,7 @@ fn resume_emits_playing_state_event() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -976,6 +1020,7 @@ fn stop_emits_stopped_state_event() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -1004,6 +1049,7 @@ fn seek_does_not_emit_state_event() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -1029,6 +1075,7 @@ fn volume_does_not_emit_state_event() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -1054,6 +1101,7 @@ fn state_event_has_versioned_envelope() {
         &mut noop_device(),
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -1082,6 +1130,7 @@ fn list_devices_command_returns_devices() {
         &mut device_service,
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1112,6 +1161,7 @@ fn list_devices_command_invalid_payload_rejected() {
         &mut device_service,
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1139,6 +1189,7 @@ fn list_devices_service_error_maps_to_boundary() {
         &mut device_service,
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1168,6 +1219,7 @@ fn current_device_command_returns_none_when_no_device() {
         &mut device_service,
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1195,6 +1247,7 @@ fn current_device_command_returns_device_when_set() {
         &mut device_service,
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1224,6 +1277,7 @@ fn current_device_service_error_maps_to_boundary() {
         &mut device_service,
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1250,6 +1304,7 @@ fn select_device_command_dispatches_to_service() {
         &mut device_service,
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1278,6 +1333,7 @@ fn select_device_command_invalid_payload_rejected() {
         &mut device_service,
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1305,6 +1361,7 @@ fn select_device_command_missing_id_rejected() {
         &mut device_service,
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1333,6 +1390,7 @@ fn select_device_service_error_maps_to_boundary() {
         &mut device_service,
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1361,6 +1419,7 @@ fn select_device_emits_device_lost_event() {
         &mut device_service,
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -1392,6 +1451,7 @@ fn select_device_does_not_emit_device_lost_when_not_lost() {
         &mut device_service,
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -1417,6 +1477,7 @@ fn unknown_device_command_rejected() {
         &mut device_service,
         &mut noop_enum(),
         &noop_trash(),
+        &noop_rename(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1447,6 +1508,7 @@ fn start_enumeration_returns_session_id() {
         &mut device_service,
         &mut enum_service,
         &noop_trash(),
+        &noop_rename(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -1486,6 +1548,7 @@ fn list_browser_roots_returns_typed_roots() {
         &mut devices,
         &mut enumeration,
         &noop_trash(),
+        &noop_rename(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -1516,6 +1579,7 @@ fn start_enumeration_defaults_batch_size() {
         &mut device_service,
         &mut enum_service,
         &noop_trash(),
+        &noop_rename(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -1543,6 +1607,7 @@ fn start_enumeration_passes_recursive_flag() {
         &mut device_service,
         &mut enum_service,
         &noop_trash(),
+        &noop_rename(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -1570,6 +1635,7 @@ fn start_enumeration_defaults_recursive_false() {
         &mut device_service,
         &mut enum_service,
         &noop_trash(),
+        &noop_rename(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -1597,6 +1663,7 @@ fn start_enumeration_invalid_payload_rejected() {
         &mut device_service,
         &mut enum_service,
         &noop_trash(),
+        &noop_rename(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -1625,6 +1692,7 @@ fn start_enumeration_missing_path_rejected() {
         &mut device_service,
         &mut enum_service,
         &noop_trash(),
+        &noop_rename(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -1654,6 +1722,7 @@ fn start_enumeration_service_error_maps_to_boundary() {
         &mut device_service,
         &mut enum_service,
         &noop_trash(),
+        &noop_rename(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -1683,6 +1752,7 @@ fn cancel_enumeration_cancels_session() {
         &mut device_service,
         &mut enum_service,
         &noop_trash(),
+        &noop_rename(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -1711,6 +1781,7 @@ fn cancel_enumeration_unknown_session_idempotent() {
         &mut device_service,
         &mut enum_service,
         &noop_trash(),
+        &noop_rename(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -1738,6 +1809,7 @@ fn cancel_enumeration_invalid_payload_rejected() {
         &mut device_service,
         &mut enum_service,
         &noop_trash(),
+        &noop_rename(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -1773,6 +1845,7 @@ fn move_to_trash_command_dispatches_and_returns_results() {
         &mut device_service,
         &mut enum_service,
         &trash_service,
+        &noop_rename(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -1817,6 +1890,7 @@ fn move_to_trash_reports_partial_failure() {
         &mut device_service,
         &mut enum_service,
         &trash_service,
+        &noop_rename(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -1851,6 +1925,7 @@ fn move_to_trash_invalid_payload_rejected() {
         &mut device_service,
         &mut enum_service,
         &trash_service,
+        &noop_rename(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -1882,6 +1957,7 @@ fn move_to_trash_empty_paths_returns_empty() {
         &mut device_service,
         &mut enum_service,
         &trash_service,
+        &noop_rename(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -1947,6 +2023,7 @@ fn recent_folder_dispatch(
         &mut device_service,
         &mut enum_service,
         &trash_service,
+        &noop_rename(),
         &active,
         recent_service,
         &noop_events(),
@@ -2049,4 +2126,149 @@ fn recent_folder_invalid_payload_rejected() {
     let error = response.error.unwrap();
     assert_eq!(error.category, "InvalidInput");
     assert_eq!(error.diagnostic_code, "command.payload");
+}
+
+// ── Rename file command tests ─────────────────────────────────────
+
+fn rename_file_dispatch(
+    payload: serde_json::Value,
+    playback: &mut FakePlaybackService,
+    rename: &dyn crate::rename_service::RenameService,
+) -> CommandResponse {
+    let mut device_service = FakeAudioDeviceService::new();
+    let mut enum_service = FakeFolderEnumerationService::new();
+    let active = ActiveEnumerations::new();
+    let trash_service = FakeTrashService::new(Box::new(|_| vec![]));
+    let envelope = CommandEnvelope {
+        version: CURRENT_COMMAND_VERSION,
+        command: "rename_file".to_string(),
+        payload,
+    };
+    dispatch(
+        envelope,
+        playback,
+        &mut device_service,
+        &mut enum_service,
+        &trash_service,
+        rename,
+        &active,
+        &noop_recent(),
+        &noop_events(),
+    )
+}
+
+#[test]
+fn rename_file_returns_new_path_and_reconciles_playing_file() {
+    let mut playback = FakePlaybackService::new();
+    playback.reconcile_path_result = Some(true);
+    let rename = FakeRenameService::new(Box::new(|path, name| {
+        assert_eq!(path, "/music/track.wav");
+        assert_eq!(name, "renamed.wav");
+        Ok(RenameOutcome {
+            old_path: "/music/track.wav".to_string(),
+            new_path: "/music/renamed.wav".to_string(),
+        })
+    }));
+
+    let response = rename_file_dispatch(
+        serde_json::json!({ "path": "/music/track.wav", "new_name": "renamed.wav" }),
+        &mut playback,
+        &rename,
+    );
+
+    assert!(response.ok, "rename should succeed");
+    let data: RenameFileResponse = serde_json::from_value(response.data.unwrap()).unwrap();
+    assert_eq!(data.old_path, "/music/track.wav");
+    assert_eq!(data.new_path, "/music/renamed.wav");
+    assert!(data.was_playing, "renamed file is the playing file");
+    assert_eq!(playback.reconcile_path_call_count, 1);
+    assert_eq!(playback.last_reconcile_old_path.as_deref(), Some("/music/track.wav"));
+    assert_eq!(playback.last_reconcile_new_path.as_deref(), Some("/music/renamed.wav"));
+}
+
+#[test]
+fn rename_file_reports_when_other_file_is_playing() {
+    let mut playback = FakePlaybackService::new();
+    playback.reconcile_path_result = Some(false);
+    let rename = FakeRenameService::new(Box::new(|_, _| {
+        Ok(RenameOutcome {
+            old_path: "/music/track.wav".to_string(),
+            new_path: "/music/renamed.wav".to_string(),
+        })
+    }));
+
+    let response = rename_file_dispatch(
+        serde_json::json!({ "path": "/music/track.wav", "new_name": "renamed.wav" }),
+        &mut playback,
+        &rename,
+    );
+
+    assert!(response.ok);
+    let data: RenameFileResponse = serde_json::from_value(response.data.unwrap()).unwrap();
+    assert!(!data.was_playing);
+}
+
+#[test]
+fn rename_file_service_error_maps_to_boundary() {
+    let mut playback = FakePlaybackService::new();
+    let rename = FakeRenameService::new(Box::new(|_, _| {
+        Err(ApplicationError::new(
+            ErrorCategory::Conflict,
+            DiagnosticContext::new(DiagnosticCode::FileOperation),
+            std::io::Error::new(std::io::ErrorKind::AlreadyExists, "collision"),
+        ))
+    }));
+
+    let response = rename_file_dispatch(
+        serde_json::json!({ "path": "/music/track.wav", "new_name": "existing.wav" }),
+        &mut playback,
+        &rename,
+    );
+
+    assert!(!response.ok);
+    let error = response.error.unwrap();
+    assert_eq!(error.category, "Conflict");
+    assert_eq!(error.diagnostic_code, "file.operation");
+    assert_eq!(playback.reconcile_path_call_count, 0, "no reconciliation after failure");
+}
+
+#[test]
+fn rename_file_playback_error_maps_to_boundary() {
+    let mut playback = FakePlaybackService::new();
+    playback.fail_with = Some(ErrorCategory::Unavailable);
+    let rename = FakeRenameService::new(Box::new(|_, _| {
+        Ok(RenameOutcome {
+            old_path: "/music/track.wav".to_string(),
+            new_path: "/music/renamed.wav".to_string(),
+        })
+    }));
+
+    let response = rename_file_dispatch(
+        serde_json::json!({ "path": "/music/track.wav", "new_name": "renamed.wav" }),
+        &mut playback,
+        &rename,
+    );
+
+    assert!(!response.ok);
+    let error = response.error.unwrap();
+    assert_eq!(error.category, "Unavailable");
+}
+
+#[test]
+fn rename_file_invalid_payload_rejected() {
+    let mut playback = FakePlaybackService::new();
+    let rename = FakeRenameService::new(Box::new(|_, _| {
+        Ok(RenameOutcome {
+            old_path: "/music/track.wav".to_string(),
+            new_path: "/music/renamed.wav".to_string(),
+        })
+    }));
+
+    let response = rename_file_dispatch(serde_json::json!("not_an_object"), &mut playback, &rename);
+
+    assert!(!response.ok);
+    let error = response.error.unwrap();
+    assert_eq!(error.category, "InvalidInput");
+    assert_eq!(error.diagnostic_code, "command.payload");
+    assert_eq!(playback.reconcile_path_call_count, 0, "no reconciliation on bad payload");
 }
