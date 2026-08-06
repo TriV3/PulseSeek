@@ -117,4 +117,31 @@ describe("usePlaybackSelection", () => {
     });
     expect(played).toBe(false);
   });
+
+  it("reconciles the playing entry id after a rename without losing status", async () => {
+    const { result } = renderHook(() => usePlaybackSelection());
+
+    await act(async () => {
+      await result.current.select({
+        id: "/music/old.wav",
+        name: "old.wav",
+        kind: "playable",
+      });
+    });
+    act(() => result.current.reconcile("/music/old.wav", "/music/new.wav"));
+
+    expect(result.current.playback).toMatchObject({
+      entryId: "/music/new.wav",
+      status: "playing",
+    });
+  });
+
+  it("ignores a rename that does not concern the playing file", () => {
+    const { result } = renderHook(() => usePlaybackSelection());
+
+    act(() => result.current.restore("/music/old.wav"));
+    act(() => result.current.reconcile("/music/other.wav", "/music/new.wav"));
+
+    expect(result.current.playback.entryId).toBe("/music/old.wav");
+  });
 });

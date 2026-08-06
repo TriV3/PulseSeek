@@ -1,4 +1,5 @@
 import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
+import { getParentPath } from "../FolderTree/folderTreeTypes";
 
 /** Session-only marks applied to a single file (FR-LS-006). */
 export type SessionMark = "keep" | "maybe" | "reject" | "favorite";
@@ -119,4 +120,62 @@ export function selectMarkedEntryIds(
       (entry) => entry.kind === "playable" && marks[entry.id] !== undefined,
     )
     .map((entry) => entry.id);
+}
+
+/**
+ * True when two entries are plausibly the same file after an external rename:
+ * same parent directory, same size, and same modified timestamp. Renames
+ * preserve both, while the parent check prevents a mark jumping across
+ * folders. Duration is deliberately not required because it can be missing
+ * for files that have not been decoded yet.
+ */
+function sameFileIdentity(a: BrowserEntry, b: BrowserEntry): boolean {
+  if (a.metadata?.size_bytes == null || a.metadata?.modified_at_ms == null) {
+    return false;
+  }
+  return (
+    a.metadata.size_bytes === b.metadata?.size_bytes &&
+    a.metadata.modified_at_ms === b.metadata?.modified_at_ms &&
+    getParentPath(a.id) === getParentPath(b.id)
+  );
+}
+
+/**
+ * Transfers marks whose entry id disappeared to a matching entry in the next
+ * list, following an external rename (FR-FM-010, FR-LS-007).
+ *
+ * An external rename changes the stable backend id (the path), so a marked
+ * id would otherwise be orphaned while the renamed row shows no mark. The
+ * transfer only applies when exactly one unmarked playable entry in the same
+ * directory has the same size and modified timestamp, which renames preserve
+ * and which makes coincidental matches practically impossible.
+ *
+ * Returns the input when nothing changed; never mutates its inputs.
+ */
+export function transferMarksByMetadata(
+  marks: SessionMarks,
+  previousEntries: readonly BrowserEntry[],
+  nextEntries: readonly BrowserEntry[],
+): SessionMarks {
+  const nextIds = new Set(nextEntries.map((entry) => entry.id));
+  let changed = false;
+  const result: Record<string, SessionMark> = { ...marks };
+
+  for (const [oldId, mark] of Object.entries(marks)) {
+    if (nextIds.has(oldId)) continue;
+    const oldEntry = previousEntries.find((entry) => entry.id === oldId);
+    if (!oldEntry) continue;
+    const matches = nextEntries.filter(
+      (entry) =>
+        entry.kind === "playable" &&
+        !Object.prototype.hasOwnProperty.call(result, entry.id) &&
+        sameFileIdentity(oldEntry, entry),
+    );
+    if (matches.length !== 1) continue;
+    delete result[oldId];
+    result[matches[0].id] = mark;
+    changed = true;
+  }
+
+  return changed ? result : marks;
 }

@@ -20,6 +20,7 @@ import {
   type MarkFilter,
 } from "./components/FileList/sessionMarks";
 import { usePlaybackSelection } from "./hooks/usePlaybackSelection";
+import { useMarkReconciliation } from "./hooks/useMarkReconciliation";
 import { usePlaybackTransport } from "./hooks/usePlaybackTransport";
 import { useSessionMarks } from "./hooks/useSessionMarks";
 import { PlayerTransport } from "./components/PlayerTransport/PlayerTransport";
@@ -56,6 +57,13 @@ function App() {
   const recentFolders = useRecentFolders();
   const { state } = folderTree;
   const playback = usePlaybackSelection();
+  useMarkReconciliation(
+    state.selectedPath,
+    state.status,
+    state.playableEntries,
+    sessionMarks.marks,
+    sessionMarks.replace,
+  );
   const playbackMode = usePlaybackMode();
   const audioDevices = useAudioDevices();
   const playerPreferences = usePlayerPreferences();
@@ -620,6 +628,24 @@ function App() {
                 onEntriesTrashed={(entryIds) => {
                   if (state.selectedPath) {
                     folderTree.removeEntries(state.selectedPath, entryIds);
+                  }
+                }}
+                onEntryRenamed={(oldId, newId, newName) => {
+                  if (state.selectedPath) {
+                    folderTree.renameEntry(
+                      state.selectedPath,
+                      oldId,
+                      newId,
+                      newName,
+                    );
+                  }
+                  playback.reconcile(oldId, newId);
+                  sessionMarks.reconcile(oldId, newId);
+                  if (
+                    playerPreferences.preferences.last_played_file_path ===
+                    oldId
+                  ) {
+                    playerPreferences.update({ last_played_file_path: newId });
                   }
                 }}
                 recursive={recursiveView}

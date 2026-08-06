@@ -70,5 +70,13 @@ export function usePlaybackSelection() {
     });
   }, []);
 
-  return { playback, select, restore };
+  const reconcile = useCallback((oldId: string, newId: string) => {
+    setPlayback((current) =>
+      current.entryId === oldId
+        ? { ...current, entryId: newId, generation: current.generation }
+        : current,
+    );
+  }, []);
+
+  return { playback, select, restore, reconcile };
 }

@@ -11,6 +11,7 @@ import {
   type FolderChunkPayload,
 } from "../api/playbackEvents";
 import type {
+  BrowserEntry,
   FolderTreeAction,
   FolderTreeState,
 } from "../components/FolderTree/folderTreeTypes";
@@ -295,6 +296,36 @@ export function folderTreeReducer(
       };
     }
 
+    case "RENAME_ENTRY": {
+      // A rename keeps the row (same file) but moves it to the new stable
+      // entry id, so the visible item and cache identity stay consistent
+      // (FR-FM-004, FR-FM-010). Folder children and playable entries both
+      // update; metadata carries over unchanged.
+      const { path, oldId, newId, newName } = action;
+      const folder = state.folders[path];
+      const playable = state.playableEntries[path];
+      if (!folder && !playable) return state;
+
+      const replaceEntry = (entry: BrowserEntry): BrowserEntry =>
+        entry.id === oldId ? { ...entry, id: newId, name: newName } : entry;
+
+      const folderChildren = folder
+        ? { [path]: { ...folder, children: folder.children.map(replaceEntry) } }
+        : {};
+      const playableEntries = playable
+        ? {
+            ...state.playableEntries,
+            [path]: playable.map(replaceEntry),
+          }
+        : state.playableEntries;
+
+      return {
+        ...state,
+        folders: { ...state.folders, ...folderChildren },
+        playableEntries,
+      };
+    }
+
     default:
       return state;
   }
@@ -329,6 +360,13 @@ export interface UseFolderTreeReturn {
   navigateUp: () => void;
   clearError: () => void;
   removeEntries: (path: string, entryIds: string[]) => void;
+  /** Replaces `oldId` with its renamed id and name inside `path`. */
+  renameEntry: (
+    path: string,
+    oldId: string,
+    newId: string,
+    newName: string,
+  ) => void;
   restoreContext: (selectedPath: string) => Promise<string>;
   setRecursive: (path: string, recursive: boolean) => void;
 }
@@ -527,6 +565,13 @@ export function useFolderTree(): UseFolderTreeReturn {
     dispatch({ type: "REMOVE_ENTRIES", path, entryIds });
   }, []);
 
+  const renameEntry = useCallback(
+    (path: string, oldId: string, newId: string, newName: string) => {
+      dispatch({ type: "RENAME_ENTRY", path, oldId, newId, newName });
+    },
+    [],
+  );
+
   const setRecursive = useCallback(
     (path: string, recursive: boolean) => {
       void enumeratePath(path, recursive);
@@ -595,6 +640,7 @@ export function useFolderTree(): UseFolderTreeReturn {
     navigateUp,
     clearError,
     removeEntries,
+    renameEntry,
     restoreContext,
     setRecursive,
   };

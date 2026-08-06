@@ -25,9 +25,11 @@ import {
 import { useSessionMarks } from "../../hooks/useSessionMarks";
 
 const mockMoveToTrash = vi.hoisted(() => vi.fn());
+const mockRenameFile = vi.hoisted(() => vi.fn());
 
 vi.mock("../../api/commandEnvelope", () => ({
   moveToTrash: mockMoveToTrash,
+  renameFile: mockRenameFile,
 }));
 
 // Mock TanStack Virtual to render all items synchronously (jsdom has no
@@ -2125,5 +2127,152 @@ describe("FileList — recursive view", () => {
     );
 
     expect(screen.getByText("one.wav")).toBeInTheDocument();
+  });
+});
+
+describe("FileList — rename", () => {
+  beforeEach(() => {
+    mockRenameFile.mockClear();
+  });
+
+  it("disables rename for folder rows", () => {
+    const entries: BrowserEntry[] = [
+      {
+        id: "/music/drum-kits",
+        name: "drum-kits",
+        kind: "folder",
+        metadata: null,
+      },
+    ];
+
+    render(
+      <FileList
+        entries={entries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("row", { name: /drum-kits/ }));
+    expect(screen.getByRole("button", { name: "Rename" })).toBeDisabled();
+  });
+
+  it("opens the rename dialog for the selected row", () => {
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("song1.mp3");
+    expect(screen.getByLabelText("New file name")).toHaveValue("song1.mp3");
+  });
+
+  it("cancels without calling the rename command", () => {
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(mockRenameFile).not.toHaveBeenCalled();
+  });
+
+  it("renames the confirmed row and reports the new identity", async () => {
+    mockRenameFile.mockResolvedValueOnce({
+      old_path: "song1.mp3",
+      new_path: "renamed.mp3",
+      was_playing: false,
+    });
+    const onEntryRenamed = vi.fn();
+    function Harness() {
+      const [entries, setEntries] = useState(sampleEntries);
+      return (
+        <FileList
+          entries={entries}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+          onEntryRenamed={(oldId, newId, newName) => {
+            onEntryRenamed(oldId, newId, newName);
+            setEntries((current) =>
+              current.map((entry) =>
+                entry.id === oldId
+                  ? { ...entry, id: newId, name: newName }
+                  : entry,
+              ),
+            );
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    fireEvent.change(screen.getByLabelText("New file name"), {
+      target: { value: "renamed.mp3" },
+    });
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Rename",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(onEntryRenamed).toHaveBeenCalledWith(
+        "song1.mp3",
+        "renamed.mp3",
+        "renamed.mp3",
+      );
+    });
+    expect(screen.queryByText("song1.mp3")).not.toBeInTheDocument();
+    expect(screen.getByText("renamed.mp3")).toBeInTheDocument();
+  });
+
+  it("keeps the row and shows the error after a failed rename", async () => {
+    mockRenameFile.mockRejectedValueOnce(
+      new Error("That name is already taken."),
+    );
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    fireEvent.change(screen.getByLabelText("New file name"), {
+      target: { value: "existing.mp3" },
+    });
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Rename",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "That name is already taken.",
+      );
+    });
+    expect(screen.getByText("song1.mp3")).toBeInTheDocument();
   });
 });

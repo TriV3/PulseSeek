@@ -34,6 +34,15 @@ pub trait PlaybackService: Send {
     /// Changes end-of-file playback mode.
     fn set_mode(&mut self, mode: PlaybackMode) -> Result<PlaybackMode, ApplicationError>;
 
+    /// Reconciles the tracked current path after an external rename.
+    ///
+    /// Returns `true` when `old_path` is the currently playing file and its
+    /// tracked path was updated to `new_path`; `false` when the rename does
+    /// not concern the active session (FR-FM-009, FR-FM-010). The already
+    /// open decoder keeps streaming the original inode on POSIX, so playback
+    /// itself is untouched.
+    fn reconcile_path(&mut self, old_path: &str, new_path: &str) -> Result<bool, ApplicationError>;
+
     /// Rebinds the active playback session to another output device while
     /// preserving its file, position, and playing/paused state.
     fn select_output_device(&mut self, device_id: &str) -> Result<(), ApplicationError>;
@@ -59,6 +68,14 @@ pub struct FakePlaybackService {
     pub last_volume_gain: Option<f64>,
     pub last_volume_muted: Option<bool>,
     pub last_output_device_id: Option<String>,
+    /// Number of `reconcile_path` calls.
+    pub reconcile_path_call_count: u64,
+    /// Last `old_path` passed to `reconcile_path`.
+    pub last_reconcile_old_path: Option<String>,
+    /// Last `new_path` passed to `reconcile_path`.
+    pub last_reconcile_new_path: Option<String>,
+    /// When set, `reconcile_path` returns this value instead of `false`.
+    pub reconcile_path_result: Option<bool>,
     /// When `Some`, all mutating methods return an error with this category.
     pub fail_with: Option<ErrorCategory>,
     /// When set, seek returns this position.
@@ -81,6 +98,10 @@ impl FakePlaybackService {
             last_volume_gain: None,
             last_volume_muted: None,
             last_output_device_id: None,
+            reconcile_path_call_count: 0,
+            last_reconcile_old_path: None,
+            last_reconcile_new_path: None,
+            reconcile_path_result: None,
             fail_with: None,
             seek_result: None,
             mode: PlaybackMode::OneShot,
@@ -139,6 +160,14 @@ impl PlaybackService for FakePlaybackService {
         self.check_fail()?;
         self.mode = mode;
         Ok(self.mode)
+    }
+
+    fn reconcile_path(&mut self, old_path: &str, new_path: &str) -> Result<bool, ApplicationError> {
+        self.reconcile_path_call_count += 1;
+        self.last_reconcile_old_path = Some(old_path.to_string());
+        self.last_reconcile_new_path = Some(new_path.to_string());
+        self.check_fail()?;
+        Ok(self.reconcile_path_result.unwrap_or(false))
     }
 
     fn select_output_device(&mut self, device_id: &str) -> Result<(), ApplicationError> {

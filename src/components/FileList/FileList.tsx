@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { moveToTrash } from "../../api/commandEnvelope";
+import { moveToTrash, renameFile } from "../../api/commandEnvelope";
 import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
 import { relativeEntryPath } from "../FolderTree/folderTreeTypes";
 import type { PlaybackSelectionStatus } from "../../hooks/usePlaybackSelection";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { ConfirmDialog } from "../ConfirmDialog/ConfirmDialog";
+import { RenameDialog } from "../RenameDialog/RenameDialog";
 import {
   DEFAULT_FILE_SORT,
   type FileSort,
@@ -24,6 +25,7 @@ import {
 } from "./sessionMarks";
 import "./FileList.css";
 import "../ConfirmDialog/ConfirmDialog.css";
+import "../RenameDialog/RenameDialog.css";
 
 const UNAVAILABLE = "—";
 
@@ -94,6 +96,8 @@ interface FileListProps {
   playbackError?: string | null;
   /** Called with entries successfully moved to the OS trash. */
   onEntriesTrashed?: (entryIds: string[]) => void;
+  /** Called after a successful rename so owners can reconcile state. */
+  onEntryRenamed?: (oldId: string, newId: string, newName: string) => void;
   /** Active sort; default name ascending when omitted. */
   sort?: FileSort;
   /** Called whenever the user changes the sort. */
@@ -143,6 +147,7 @@ export function FileList({
   playbackStatus = "idle",
   playbackError = null,
   onEntriesTrashed,
+  onEntryRenamed,
   sort = DEFAULT_FILE_SORT,
   onSortChange,
   searchQuery = "",
@@ -170,6 +175,11 @@ export function FileList({
     "idle",
   );
   const [trashError, setTrashError] = useState<string | null>(null);
+  const [renameTarget, setRenameTarget] = useState<BrowserEntry | null>(null);
+  const [renameStatus, setRenameStatus] = useState<
+    "idle" | "renaming" | "error"
+  >("idle");
+  const [renameError, setRenameError] = useState<string | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
 
   // Only folders and confirmed playable files may be listed. Unsupported or
@@ -241,6 +251,9 @@ export function FileList({
     setTrashTarget(null);
     setTrashStatus("idle");
     setTrashError(null);
+    setRenameTarget(null);
+    setRenameStatus("idle");
+    setRenameError(null);
   }, [selectedPath]);
 
   useEffect(() => {
@@ -405,6 +418,44 @@ export function FileList({
     }
   };
 
+  const requestRename = (entry: BrowserEntry) => {
+    setRenameError(null);
+    setRenameStatus("idle");
+    setRenameTarget(entry);
+  };
+
+  const confirmRename = async (newName: string) => {
+    if (!renameTarget || renameStatus === "renaming") return;
+    setRenameStatus("renaming");
+    setRenameError(null);
+    try {
+      const outcome = await renameFile(renameTarget.id, newName);
+      const oldId = renameTarget.id;
+      const newId = outcome.new_path;
+      onEntryRenamed?.(oldId, newId, newName);
+      setSelectedIds((current) => {
+        if (!current.has(oldId)) return current;
+        const next = new Set(current);
+        next.delete(oldId);
+        next.add(newId);
+        return next;
+      });
+      if (selectionAnchorId === oldId) {
+        setSelectionAnchorId(newId);
+      }
+      if (activeEntryId === oldId) {
+        setActiveEntryId(newId);
+      }
+      setRenameTarget(null);
+      setRenameStatus("idle");
+    } catch (error: unknown) {
+      setRenameStatus("error");
+      setRenameError(
+        error instanceof Error ? error.message : "Unable to rename file.",
+      );
+    }
+  };
+
   useKeyboardShortcuts({
     onMoveToTrash: () => {
       const selected = visibleEntries.find(
@@ -428,6 +479,13 @@ export function FileList({
     }
     return selectionAnchorId;
   }, [selectedIds, selectionAnchorId]);
+  // Rename targets files only (FR-FM-004); folder rows stay navigable and are
+  // never exposed to the rename action.
+  const primarySelectedEntry = useMemo(
+    () => visibleEntries.find((entry) => entry.id === primarySelectedId),
+    [visibleEntries, primarySelectedId],
+  );
+  const canRenamePrimary = primarySelectedEntry?.kind === "playable";
   const activeEntryIdForFolder = visibleEntries.some(
     (entry) => entry.id === activeEntryId,
   )
@@ -498,6 +556,16 @@ export function FileList({
           disabled={!primarySelectedId || trashStatus === "moving"}
         >
           Move to Trash
+        </button>
+        <button
+          type="button"
+          className="file-list-rename-button"
+          onClick={() => {
+            if (primarySelectedEntry) requestRename(primarySelectedEntry);
+          }}
+          disabled={!canRenamePrimary || renameStatus === "renaming"}
+        >
+          Rename
         </button>
         <button
           type="button"
@@ -901,6 +969,23 @@ export function FileList({
           if (trashStatus !== "moving") {
             setTrashTarget(null);
             setTrashError(null);
+          }
+        }}
+      />
+      <RenameDialog
+        key={renameTarget ? "open" : "closed"}
+        open={renameTarget !== null}
+        title="Rename File"
+        initialName={renameTarget?.name ?? ""}
+        busy={renameStatus === "renaming"}
+        error={renameError}
+        onConfirm={(newName) => {
+          void confirmRename(newName);
+        }}
+        onCancel={() => {
+          if (renameStatus !== "renaming") {
+            setRenameTarget(null);
+            setRenameError(null);
           }
         }}
       />
