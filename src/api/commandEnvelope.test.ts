@@ -293,6 +293,68 @@ describe("cancelMoveFiles", () => {
   });
 });
 
+describe("startCopyFiles", () => {
+  it("sends paths and target dir, returning the session id", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: true,
+      data: { session_id: "copy-3" },
+    });
+
+    const { startCopyFiles } = await import("./commandEnvelope");
+    const sessionId = await startCopyFiles(
+      ["/music/a.wav", "/music/b.wav"],
+      "/library",
+    );
+
+    expect(sessionId).toBe("copy-3");
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: {
+        version: 1,
+        command: "start_copy_files",
+        payload: {
+          paths: ["/music/a.wav", "/music/b.wav"],
+          target_dir: "/library",
+        },
+      },
+    });
+  });
+
+  it("propagates command errors for invalid targets", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: false,
+      error: {
+        category: "InvalidInput",
+        message: "PulseSeek received invalid input.",
+        diagnostic_code: "file.operation",
+      },
+    });
+
+    const { startCopyFiles, CommandError } = await import("./commandEnvelope");
+    await expect(startCopyFiles(["/music/a.wav"], "/missing")).rejects.toThrow(
+      CommandError,
+    );
+  });
+});
+
+describe("cancelCopyFiles", () => {
+  it("sends the session id", async () => {
+    mockInvoke.mockResolvedValueOnce({ version: 1, ok: true, data: {} });
+
+    const { cancelCopyFiles } = await import("./commandEnvelope");
+    await cancelCopyFiles("copy-3");
+
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: {
+        version: 1,
+        command: "cancel_copy_files",
+        payload: { session_id: "copy-3" },
+      },
+    });
+  });
+});
+
 describe("listBrowserRoots", () => {
   it("returns local and network-mounted roots", async () => {
     mockInvoke.mockResolvedValueOnce({

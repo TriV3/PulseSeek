@@ -5,14 +5,16 @@ use pulseseek_domain::error::ErrorContract;
 use serde_json::Value;
 
 use crate::command_envelope::types::{
-    CancelEnumerationRequest, CancelEnumerationResponse, CancelMoveFilesRequest,
-    CancelMoveFilesResponse, ListBrowserRootsRequest, ListBrowserRootsResponse,
-    MoveToTrashItemResult, MoveToTrashRequest, MoveToTrashResponse, PickFolderResponse,
-    RenameFileRequest, RenameFileResponse, StartEnumerationRequest, StartEnumerationResponse,
-    StartMoveFilesRequest, StartMoveFilesResponse,
+    CancelCopyFilesRequest, CancelCopyFilesResponse, CancelEnumerationRequest,
+    CancelEnumerationResponse, CancelMoveFilesRequest, CancelMoveFilesResponse,
+    ListBrowserRootsRequest, ListBrowserRootsResponse, MoveToTrashItemResult, MoveToTrashRequest,
+    MoveToTrashResponse, PickFolderResponse, RenameFileRequest, RenameFileResponse,
+    StartCopyFilesRequest, StartCopyFilesResponse, StartEnumerationRequest,
+    StartEnumerationResponse, StartMoveFilesRequest, StartMoveFilesResponse,
 };
 use crate::command_envelope::{from_application_error, CommandResponse};
 use crate::command_handlers::parse_payload;
+use crate::copy_service::CopyService;
 use crate::dialog_service::FolderPicker;
 use crate::folder_enumeration_service::{ActiveEnumerations, FolderEnumerationService};
 use crate::move_service::MoveService;
@@ -22,7 +24,8 @@ use crate::rename_service::RenameService;
 use crate::trash_service::TrashService;
 
 /// Handles browsing commands: start_enumeration, cancel_enumeration,
-/// move_to_trash, rename_file, start_move_files, and cancel_move_files.
+/// move_to_trash, rename_file, start_move_files, cancel_move_files,
+/// start_copy_files, and cancel_copy_files.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle(
     command: &str,
@@ -31,6 +34,7 @@ pub(crate) fn handle(
     trash_service: &dyn TrashService,
     rename_service: &dyn RenameService,
     move_service: &dyn MoveService,
+    copy_service: &dyn CopyService,
     playback: &mut dyn PlaybackService,
     active: &ActiveEnumerations,
     events: &Arc<dyn PlaybackEventEmitter>,
@@ -163,6 +167,27 @@ pub(crate) fn handle(
             };
             move_service.cancel_move(&request.session_id);
             CommandResponse::ok(serde_json::to_value(CancelMoveFilesResponse {}).unwrap())
+        },
+        "start_copy_files" => {
+            let request: StartCopyFilesRequest = match parse_payload("start_copy_files", payload) {
+                Ok(request) => request,
+                Err(response) => return response,
+            };
+            match copy_service.start_copy(request.paths, request.target_dir, Arc::clone(events)) {
+                Ok(session_id) => CommandResponse::ok(
+                    serde_json::to_value(StartCopyFilesResponse { session_id }).unwrap(),
+                ),
+                Err(error) => CommandResponse::err(from_application_error(&error)),
+            }
+        },
+        "cancel_copy_files" => {
+            let request: CancelCopyFilesRequest = match parse_payload("cancel_copy_files", payload)
+            {
+                Ok(request) => request,
+                Err(response) => return response,
+            };
+            copy_service.cancel_copy(&request.session_id);
+            CommandResponse::ok(serde_json::to_value(CancelCopyFilesResponse {}).unwrap())
         },
         _ => unreachable!("unhandled browsing command: {command}"),
     }

@@ -484,6 +484,51 @@ export async function cancelMoveFiles(sessionId: string): Promise<void> {
   } satisfies CancelMoveFilesRequest);
 }
 
+// ── Copy files types ───────────────────────────────────────────────────
+
+export interface StartCopyFilesRequest {
+  paths: string[];
+  target_dir: string;
+}
+
+export interface StartCopyFilesResponse {
+  session_id: string;
+}
+
+export interface CancelCopyFilesRequest {
+  session_id: string;
+}
+
+export type CancelCopyFilesResponse = Record<string, never>;
+
+/** Starts copying `paths` into `target_dir` (FR-FM-004, FR-FM-005).
+ *
+ * Returns a session id. Per-file progress arrives through the
+ * `browser:copy-progress` event; use `cancelCopyFiles` to stop the batch.
+ * Originals are never modified. Throws `CommandError` on invalid targets or
+ * selection.
+ */
+export async function startCopyFiles(
+  paths: string[],
+  targetDir: string,
+): Promise<string> {
+  const response = await invokeCommand<StartCopyFilesResponse>(
+    "start_copy_files",
+    {
+      paths,
+      target_dir: targetDir,
+    } satisfies StartCopyFilesRequest,
+  );
+  return response.session_id;
+}
+
+/** Requests cancellation of a running copy batch (no-op when finished). */
+export async function cancelCopyFiles(sessionId: string): Promise<void> {
+  await invokeCommand<CancelCopyFilesResponse>("cancel_copy_files", {
+    session_id: sessionId,
+  } satisfies CancelCopyFilesRequest);
+}
+
 // ── Recent folders types ───────────────────────────────────────────────
 
 export interface RecentFolderData {
