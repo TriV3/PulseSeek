@@ -30,6 +30,8 @@ const mockRenameFile = vi.hoisted(() => vi.fn());
 const mockStartMoveFiles = vi.hoisted(() => vi.fn());
 const mockCancelMoveFiles = vi.hoisted(() => vi.fn());
 const mockPickFolder = vi.hoisted(() => vi.fn());
+const mockRevealFile = vi.hoisted(() => vi.fn());
+const mockOpenWith = vi.hoisted(() => vi.fn());
 
 vi.mock("../../api/commandEnvelope", () => ({
   moveToTrash: mockMoveToTrash,
@@ -37,6 +39,8 @@ vi.mock("../../api/commandEnvelope", () => ({
   startMoveFiles: mockStartMoveFiles,
   cancelMoveFiles: mockCancelMoveFiles,
   pickFolder: mockPickFolder,
+  revealFile: mockRevealFile,
+  openWith: mockOpenWith,
 }));
 
 type EventHandler = (event: { payload: unknown }) => void;
@@ -2644,5 +2648,124 @@ describe("FileList — move", () => {
       );
     });
     expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+  });
+});
+
+describe("FileList — reveal and open-with", () => {
+  it("reveals the primary selected file", async () => {
+    mockRevealFile.mockResolvedValueOnce(undefined);
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
+
+    await waitFor(() => {
+      expect(mockRevealFile).toHaveBeenCalledWith("song1.mp3");
+    });
+  });
+
+  it("opens the primary selected file with the default application", async () => {
+    mockOpenWith.mockResolvedValueOnce(undefined);
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Open With…" }));
+
+    await waitFor(() => {
+      expect(mockOpenWith).toHaveBeenCalledWith("song1.mp3");
+    });
+  });
+
+  it("shows the error when reveal fails", async () => {
+    mockRevealFile.mockRejectedValueOnce(new Error("File is missing."));
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("File is missing.");
+    });
+  });
+
+  it("shows an error when open-with fails", async () => {
+    mockOpenWith.mockRejectedValueOnce(new Error("No default application."));
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Open With…" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "No default application.",
+      );
+    });
+  });
+
+  it("disables the actions without a primary selection", () => {
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Reveal" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Open With…" })).toBeDisabled();
+  });
+
+  it("clears a stale error when the primary selection changes", async () => {
+    mockRevealFile.mockRejectedValueOnce(new Error("File is missing."));
+    render(
+      <FileList
+        entries={[sampleEntries[0], sampleEntries[1]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("song1.mp3"));
+    fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("File is missing.");
+    });
+
+    fireEvent.click(screen.getByText("song2.wav"));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
   });
 });

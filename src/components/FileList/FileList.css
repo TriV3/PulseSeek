@@ -123,7 +123,8 @@
   outline-offset: 1px;
 }
 
-.file-list-trash-error {
+.file-list-trash-error,
+.file-list-external-error {
   color: var(--text-danger);
   font-size: 13px;
 }

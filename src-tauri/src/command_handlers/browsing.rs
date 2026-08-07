@@ -8,14 +8,16 @@ use crate::command_envelope::types::{
     CancelCopyFilesRequest, CancelCopyFilesResponse, CancelEnumerationRequest,
     CancelEnumerationResponse, CancelMoveFilesRequest, CancelMoveFilesResponse,
     ListBrowserRootsRequest, ListBrowserRootsResponse, MoveToTrashItemResult, MoveToTrashRequest,
-    MoveToTrashResponse, PickFolderResponse, RenameFileRequest, RenameFileResponse,
-    StartCopyFilesRequest, StartCopyFilesResponse, StartEnumerationRequest,
-    StartEnumerationResponse, StartMoveFilesRequest, StartMoveFilesResponse,
+    MoveToTrashResponse, OpenWithRequest, OpenWithResponse, PickFolderResponse, RenameFileRequest,
+    RenameFileResponse, RevealFileRequest, RevealFileResponse, StartCopyFilesRequest,
+    StartCopyFilesResponse, StartEnumerationRequest, StartEnumerationResponse,
+    StartMoveFilesRequest, StartMoveFilesResponse,
 };
 use crate::command_envelope::{from_application_error, CommandResponse};
 use crate::command_handlers::parse_payload;
 use crate::copy_service::CopyService;
 use crate::dialog_service::FolderPicker;
+use crate::external_service::ExternalService;
 use crate::folder_enumeration_service::{ActiveEnumerations, FolderEnumerationService};
 use crate::move_service::MoveService;
 use crate::playback_events::PlaybackEventEmitter;
@@ -25,7 +27,7 @@ use crate::trash_service::TrashService;
 
 /// Handles browsing commands: start_enumeration, cancel_enumeration,
 /// move_to_trash, rename_file, start_move_files, cancel_move_files,
-/// start_copy_files, and cancel_copy_files.
+/// start_copy_files, cancel_copy_files, reveal_file, and open_with.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle(
     command: &str,
@@ -35,6 +37,7 @@ pub(crate) fn handle(
     rename_service: &dyn RenameService,
     move_service: &dyn MoveService,
     copy_service: &dyn CopyService,
+    external_service: &dyn ExternalService,
     playback: &mut dyn PlaybackService,
     active: &ActiveEnumerations,
     events: &Arc<dyn PlaybackEventEmitter>,
@@ -188,6 +191,26 @@ pub(crate) fn handle(
             };
             copy_service.cancel_copy(&request.session_id);
             CommandResponse::ok(serde_json::to_value(CancelCopyFilesResponse {}).unwrap())
+        },
+        "reveal_file" => {
+            let request: RevealFileRequest = match parse_payload("reveal_file", payload) {
+                Ok(request) => request,
+                Err(response) => return response,
+            };
+            match external_service.reveal(request.path) {
+                Ok(()) => CommandResponse::ok(serde_json::to_value(RevealFileResponse {}).unwrap()),
+                Err(error) => CommandResponse::err(from_application_error(&error)),
+            }
+        },
+        "open_with" => {
+            let request: OpenWithRequest = match parse_payload("open_with", payload) {
+                Ok(request) => request,
+                Err(response) => return response,
+            };
+            match external_service.open_with(request.path) {
+                Ok(()) => CommandResponse::ok(serde_json::to_value(OpenWithResponse {}).unwrap()),
+                Err(error) => CommandResponse::err(from_application_error(&error)),
+            }
         },
         _ => unreachable!("unhandled browsing command: {command}"),
     }

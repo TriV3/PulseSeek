@@ -529,6 +529,43 @@ export async function cancelCopyFiles(sessionId: string): Promise<void> {
   } satisfies CancelCopyFilesRequest);
 }
 
+// ── External actions types ─────────────────────────────────────────────
+
+export interface RevealFileRequest {
+  path: string;
+}
+
+export type RevealFileResponse = Record<string, never>;
+
+export interface OpenWithRequest {
+  path: string;
+}
+
+export type OpenWithResponse = Record<string, never>;
+
+/** Reveals `path` in the operating system file manager (FR-FM-006).
+ *
+ * Throws `CommandError` when the file is missing or the platform cannot
+ * reveal it. The backend exposes no general process-launch capability.
+ */
+export async function revealFile(path: string): Promise<void> {
+  await invokeCommand<RevealFileResponse>("reveal_file", {
+    path,
+  } satisfies RevealFileRequest);
+}
+
+/** Opens `path` with the operating system default application (FR-FM-007).
+ *
+ * Throws `CommandError` when the file is missing, unreadable, or no default
+ * application exists. The backend exposes no general process-launch
+ * capability.
+ */
+export async function openWith(path: string): Promise<void> {
+  await invokeCommand<OpenWithResponse>("open_with", {
+    path,
+  } satisfies OpenWithRequest);
+}
+
 // ── Recent folders types ───────────────────────────────────────────────
 
 export interface RecentFolderData {
