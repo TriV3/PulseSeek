@@ -1,0 +1,99 @@
+.copy-dialog-message {
+  margin: 8px 20px 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.copy-dialog-target {
+  margin: 12px 20px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.copy-dialog-pick {
+  padding: 6px 10px;
+  font-size: 0.9rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--bg-button);
+  color: var(--text);
+}
+
+.copy-dialog-pick:focus {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.copy-dialog-target-path {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy-dialog-progress {
+  margin: 12px 20px 0;
+}
+
+.copy-dialog-progress-label {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-bottom: 4px;
+}
+
+.copy-dialog-progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line-strong);
+  overflow: hidden;
+}
+
+.copy-dialog-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms linear;
+}
+
+.copy-dialog-error {
+  margin: 8px 20px 0;
+  color: var(--text-danger);
+  font-size: 0.9rem;
+}
+
+.copy-dialog-summary {
+  margin: 12px 20px 0;
+  font-size: 0.9rem;
+}
+
+.copy-dialog-summary-ok {
+  color: var(--text);
+}
+
+.copy-dialog-summary-failed-title {
+  margin-top: 8px;
+  color: var(--text-danger);
+}
+
+.copy-dialog-summary-failed {
+  margin: 4px 0 0 18px;
+  color: var(--text-muted);
+}
+
+.copy-dialog-summary-failed li {
+  margin-top: 2px;
+}
+
+/* Moving is non-destructive, so the confirm action uses the accent color
+ * instead of the danger color shared by the trash confirmation. */
+.confirm-dialog-button--confirm.copy-dialog-confirm {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-color: var(--accent-strong);
+}
+
+.confirm-dialog-button--confirm.copy-dialog-confirm:hover {
+  background: var(--accent-strong);
+}

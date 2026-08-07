@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  cancelCopyFiles,
   cancelMoveFiles,
   moveToTrash,
   pickFolder,
   renameFile,
+  startCopyFiles,
   startMoveFiles,
 } from "../../api/commandEnvelope";
 import {
+  onCopyProgress,
   onMoveProgress,
+  type CopyProgressPayload,
   type MoveProgressPayload,
 } from "../../api/playbackEvents";
 import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
@@ -17,6 +21,11 @@ import type { PlaybackSelectionStatus } from "../../hooks/usePlaybackSelection";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { ConfirmDialog } from "../ConfirmDialog/ConfirmDialog";
 import { RenameDialog } from "../RenameDialog/RenameDialog";
+import {
+  CopyDialog,
+  type CopyProgress,
+  type CopySummary,
+} from "../CopyDialog/CopyDialog";
 import {
   MoveDialog,
   type MoveProgress,
@@ -48,6 +57,7 @@ import "./FileList.css";
 import "../ConfirmDialog/ConfirmDialog.css";
 import "../RenameDialog/RenameDialog.css";
 import "../MoveDialog/MoveDialog.css";
+import "../CopyDialog/CopyDialog.css";
 
 const UNAVAILABLE = "—";
 
@@ -222,6 +232,21 @@ export function FileList({
   const moveUnlistenRef = useRef<(() => void) | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
   const onEntriesMovedRef = useRef(onEntriesMoved);
+  // Copy flow state (FR-FM-004, FR-FM-005). Copying never modifies the
+  // source, so copied rows stay in the current view; the dialog only reports
+  // progress and the separate success/failure summary.
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copyTarget, setCopyTarget] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState<
+    "idle" | "moving" | "done" | "error"
+  >("idle");
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const [copySessionId, setCopySessionId] = useState<string | null>(null);
+  const [copyProgress, setCopyProgress] = useState<CopyProgress | null>(null);
+  const [copySummary, setCopySummary] = useState<CopySummary | null>(null);
+  const copySessionIdRef = useRef<string | null>(null);
+  const copyPendingRef = useRef<CopyProgressPayload | null>(null);
+  const copyUnlistenRef = useRef<(() => void) | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
 
   useEffect(() => {
@@ -642,6 +667,131 @@ export function FileList({
     }
   };
 
+  // ── Copy flow (FR-FM-004, FR-FM-005) ────────────────────────────────
+  //
+  // The user picks a target folder, then the batch runs on a backend worker.
+  // Per-file progress arrives through `browser:copy-progress`; when the batch
+  // finishes, successful and failed targets are reported separately. Copying
+  // never modifies the source, so copied rows stay in the current view.
+
+  const requestCopy = () => {
+    copySessionIdRef.current = null;
+    copyPendingRef.current = null;
+    copyUnlistenRef.current?.();
+    copyUnlistenRef.current = null;
+    setCopyError(null);
+    setCopyStatus("idle");
+    setCopyTarget(null);
+    setCopyProgress(null);
+    setCopySummary(null);
+    setCopySessionId(null);
+    setCopyOpen(true);
+  };
+
+  const pickCopyTarget = async () => {
+    if (copyStatus === "moving") return;
+    try {
+      const picked = await pickFolder();
+      if (picked) {
+        setCopyTarget(picked);
+        setCopyError(null);
+      }
+    } catch (error: unknown) {
+      setCopyError(
+        error instanceof Error ? error.message : "Unable to choose a folder.",
+      );
+    }
+  };
+
+  // Applies one copy-progress payload. Events can arrive before the start
+  // reply resolves (the worker emits as soon as the batch starts), so a
+  // pending payload is buffered and replayed once the session id is known.
+  const handleCopyProgress = (payload: CopyProgressPayload) => {
+    if (!copySessionIdRef.current) {
+      copyPendingRef.current = payload;
+      return;
+    }
+    if (payload.session_id !== copySessionIdRef.current) return;
+    copyPendingRef.current = null;
+    setCopyProgress({ completed: payload.completed, total: payload.total });
+    if (payload.done) {
+      const okCount = payload.results.filter((item) => item.ok).length;
+      const failed = payload.results.filter((item) => !item.ok);
+      setCopySummary({ okCount, failed });
+      setCopyStatus("done");
+      copySessionIdRef.current = null;
+      setCopySessionId(null);
+      copyUnlistenRef.current?.();
+      copyUnlistenRef.current = null;
+    }
+  };
+
+  const confirmCopy = async () => {
+    if (!copyTarget || copyStatus === "moving") return;
+    const selected = visibleEntries
+      .filter((entry) => entry.kind === "playable" && selectedIds.has(entry.id))
+      .map((entry) => entry.id);
+    if (selected.length === 0) return;
+    setCopyError(null);
+    setCopySummary(null);
+    setCopyProgress({ completed: 0, total: selected.length });
+    setCopyStatus("moving");
+    try {
+      // Subscribe before starting the batch: the worker can emit the final
+      // done event within the start_copy IPC round trip, so the listener must
+      // already exist before the backend begins.
+      copyPendingRef.current = null;
+      const unlisten = await onCopyProgress(handleCopyProgress);
+      copyUnlistenRef.current = unlisten;
+      const sessionId = await startCopyFiles(selected, copyTarget);
+      copySessionIdRef.current = sessionId;
+      setCopySessionId(sessionId);
+      // Replay an event that raced the start reply. The cast defeats
+      // control-flow narrowing from the null assignment above.
+      const pending = copyPendingRef.current as CopyProgressPayload | null;
+      if (pending && pending.session_id === sessionId) {
+        handleCopyProgress(pending);
+      }
+    } catch (error: unknown) {
+      copyUnlistenRef.current?.();
+      copyUnlistenRef.current = null;
+      copySessionIdRef.current = null;
+      copyPendingRef.current = null;
+      setCopyStatus("error");
+      setCopyProgress(null);
+      setCopyError(
+        error instanceof Error ? error.message : "Unable to start copy.",
+      );
+    }
+  };
+
+  // Releases the copy-progress listener if the component unmounts mid-batch.
+  useEffect(
+    () => () => {
+      copyUnlistenRef.current?.();
+    },
+    [],
+  );
+
+  const cancelCopy = () => {
+    if (copySessionId) {
+      // Ask the backend to stop; the remaining files report Cancelled and
+      // the batch still emits a done event so the summary stays accurate.
+      void cancelCopyFiles(copySessionId).catch(() => {
+        // Best-effort cancel.
+      });
+      return;
+    }
+    copyUnlistenRef.current?.();
+    copyUnlistenRef.current = null;
+    copySessionIdRef.current = null;
+    copyPendingRef.current = null;
+    if (copyStatus !== "moving") {
+      setCopyOpen(false);
+      setCopyStatus("idle");
+    }
+  };
+
   useKeyboardShortcuts({
     onMoveToTrash: () => {
       const selected = visibleEntries.find(
@@ -684,6 +834,7 @@ export function FileList({
     [visibleEntries, selectedIds],
   );
   const canMoveSelection = selectedPlayableIds.length > 0;
+  const canCopySelection = selectedPlayableIds.length > 0;
   const activeEntryIdForFolder = visibleEntries.some(
     (entry) => entry.id === activeEntryId,
   )
@@ -772,6 +923,14 @@ export function FileList({
           disabled={!canMoveSelection || moveStatus === "moving"}
         >
           Move…
+        </button>
+        <button
+          type="button"
+          className="file-list-copy-button"
+          onClick={requestCopy}
+          disabled={!canCopySelection || copyStatus === "moving"}
+        >
+          Copy…
         </button>
         <button
           type="button"
@@ -1211,6 +1370,23 @@ export function FileList({
           void confirmMove();
         }}
         onCancel={cancelMove}
+      />
+      <CopyDialog
+        open={copyOpen}
+        title="Copy Files"
+        fileNameCount={selectedPlayableIds.length}
+        targetDir={copyTarget}
+        busy={copyStatus === "moving"}
+        error={copyError}
+        progress={copyProgress}
+        summary={copyStatus === "done" ? copySummary : null}
+        onPickTarget={() => {
+          void pickCopyTarget();
+        }}
+        onConfirm={() => {
+          void confirmCopy();
+        }}
+        onCancel={cancelCopy}
       />
     </div>
   );

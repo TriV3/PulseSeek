@@ -211,10 +211,7 @@ fn move_worker_emits_progress_events_per_file() {
             serde_json::from_value(envelope.payload.clone()).expect("payload parses");
         if !payload.done {
             seen_intermediate = true;
-            assert!(
-                payload.results.is_empty(),
-                "intermediate event must omit results"
-            );
+            assert!(payload.results.is_empty(), "intermediate event must omit results");
         }
     }
     assert!(seen_intermediate, "an intermediate event must exist");

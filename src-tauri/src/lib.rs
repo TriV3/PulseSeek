@@ -1,6 +1,7 @@
 pub mod audio_device_service;
 pub mod command_envelope;
 mod command_handlers;
+pub mod copy_service;
 pub mod diagnostics;
 pub mod dialog_service;
 pub mod file_watcher_service;
@@ -194,6 +195,19 @@ pub fn run() {
                     }))),
                 ));
             app.manage(move_service);
+
+            // Copy service: runs each batch on its own worker thread and
+            // streams per-file progress events. Copying never modifies the
+            // source, so there is no playback reconcile or cache
+            // invalidation; the original keeps its waveform row and the new
+            // copy simply has no cached row yet.
+            let copy_service: std::sync::Mutex<Box<dyn copy_service::CopyService>> =
+                std::sync::Mutex::new(Box::new(
+                    copy_service::NativeCopyService::new(
+                        pulseseek_browser_fs::copy_file::NativeFileCopier::new(),
+                    ),
+                ));
+            app.manage(copy_service);
 
             // Waveform service always exists: with a cache port when the
             // cache opened, without one when it did not. It is only reachable

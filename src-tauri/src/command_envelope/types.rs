@@ -190,6 +190,25 @@ pub struct CancelMoveFilesRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CancelMoveFilesResponse {}
 
+#[derive(Debug, Deserialize)]
+pub struct StartCopyFilesRequest {
+    pub paths: Vec<String>,
+    pub target_dir: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StartCopyFilesResponse {
+    pub session_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CancelCopyFilesRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CancelCopyFilesResponse {}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RenameFileResponse {
     pub old_path: String,

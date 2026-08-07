@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  isCopyItemResultData,
+  isCopyProgressPayload,
   isFileChangePayload,
   isFolderChunkPayload,
   isMoveItemResultData,
   isMoveProgressPayload,
+  onCopyProgress,
   onMoveProgress,
 } from "./playbackEvents";
 
@@ -194,5 +197,84 @@ describe("onMoveProgress", () => {
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler).toHaveBeenCalledWith(validMovePayload);
+  });
+});
+
+const validCopyPayload = {
+  session_id: "copy-1",
+  completed: 2,
+  total: 2,
+  done: true,
+  results: [
+    { path: "/music/a.wav", new_path: "/library/a.wav", ok: true },
+    {
+      path: "/music/b.wav",
+      ok: false,
+      category: "Conflict",
+      message: "PulseSeek could not apply that change.",
+      diagnostic_code: "file.operation",
+    },
+  ],
+};
+
+describe("copy progress payload validation", () => {
+  it("accepts a valid progress payload", () => {
+    expect(isCopyProgressPayload(validCopyPayload)).toBe(true);
+  });
+
+  it("accepts an in-progress payload without results", () => {
+    expect(
+      isCopyProgressPayload({
+        session_id: "copy-1",
+        completed: 0,
+        total: 5,
+        done: false,
+        results: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects non-objects and malformed fields", () => {
+    expect(isCopyProgressPayload(null)).toBe(false);
+    expect(isCopyProgressPayload("nope")).toBe(false);
+    expect(isCopyProgressPayload({ ...validCopyPayload, session_id: 7 })).toBe(
+      false,
+    );
+    expect(isCopyProgressPayload({ ...validCopyPayload, done: "yes" })).toBe(
+      false,
+    );
+    expect(
+      isCopyProgressPayload({ ...validCopyPayload, results: [{ path: 1 }] }),
+    ).toBe(false);
+  });
+
+  it("validates item results individually", () => {
+    expect(isCopyItemResultData(validCopyPayload.results[0])).toBe(true);
+    expect(isCopyItemResultData(validCopyPayload.results[1])).toBe(true);
+    expect(isCopyItemResultData({ path: "/a.wav", ok: true })).toBe(true);
+    expect(isCopyItemResultData({ path: 1, ok: true })).toBe(false);
+    expect(isCopyItemResultData({ path: "/a.wav" })).toBe(false);
+  });
+});
+
+describe("onCopyProgress", () => {
+  it("registers a listener for browser:copy-progress", async () => {
+    const handler = vi.fn();
+    await onCopyProgress(handler);
+    expect(eventHandlers.has("browser:copy-progress")).toBe(true);
+  });
+
+  it("invokes the handler with valid payloads only", async () => {
+    const handler = vi.fn();
+    await onCopyProgress(handler);
+    const emit = eventHandlers.get("browser:copy-progress");
+    expect(emit).toBeDefined();
+
+    emit?.({ payload: validCopyPayload });
+    emit?.({ payload: { session_id: 1 } });
+    emit?.({ payload: null });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(validCopyPayload);
   });
 });
