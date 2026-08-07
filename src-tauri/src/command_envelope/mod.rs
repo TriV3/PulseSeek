@@ -8,6 +8,7 @@ use crate::audio_device_service::AudioDeviceService;
 pub use crate::command_handlers::browsing::handle_pick_folder;
 use crate::command_handlers::{browsing, device, parse_payload, playback, recent_folders};
 use crate::copy_service::CopyService;
+use crate::external_service::ExternalService;
 use crate::folder_enumeration_service::{ActiveEnumerations, FolderEnumerationService};
 use crate::move_service::MoveService;
 use crate::playback_events::PlaybackEventEmitter;
@@ -27,6 +28,7 @@ pub fn dispatch(
     rename_service: &dyn RenameService,
     move_service: &dyn MoveService,
     copy_service: &dyn CopyService,
+    external_service: &dyn ExternalService,
     active: &ActiveEnumerations,
     recent_service: &dyn RecentFoldersService,
     events: &Arc<dyn PlaybackEventEmitter>,
@@ -58,7 +60,7 @@ pub fn dispatch(
         },
         "list_browser_roots" | "start_enumeration" | "cancel_enumeration" | "move_to_trash"
         | "rename_file" | "start_move_files" | "cancel_move_files" | "start_copy_files"
-        | "cancel_copy_files" => browsing::handle(
+        | "cancel_copy_files" | "reveal_file" | "open_with" => browsing::handle(
             &envelope.command,
             envelope.payload,
             enum_service,
@@ -66,6 +68,7 @@ pub fn dispatch(
             rename_service,
             move_service,
             copy_service,
+            external_service,
             service,
             active,
             events,
@@ -132,6 +135,7 @@ pub fn invoke_command(
     rename_state: tauri::State<'_, std::sync::Mutex<Box<dyn RenameService>>>,
     move_state: tauri::State<'_, std::sync::Mutex<Box<dyn MoveService>>>,
     copy_state: tauri::State<'_, std::sync::Mutex<Box<dyn CopyService>>>,
+    external_state: tauri::State<'_, std::sync::Mutex<Box<dyn ExternalService>>>,
     active: tauri::State<'_, ActiveEnumerations>,
     recent_state: tauri::State<'_, std::sync::Mutex<Box<dyn RecentFoldersService>>>,
     events: tauri::State<'_, Arc<dyn PlaybackEventEmitter>>,
@@ -143,6 +147,7 @@ pub fn invoke_command(
     let rename_service = rename_state.lock().expect("rename service lock poisoned");
     let move_service = move_state.lock().expect("move service lock poisoned");
     let copy_service = copy_state.lock().expect("copy service lock poisoned");
+    let external_service = external_state.lock().expect("external service lock poisoned");
     let recent_service = recent_state.lock().expect("recent folders service lock poisoned");
     dispatch(
         envelope,
@@ -153,6 +158,7 @@ pub fn invoke_command(
         &**rename_service,
         &**move_service,
         &**copy_service,
+        &**external_service,
         &active,
         &**recent_service,
         &events,

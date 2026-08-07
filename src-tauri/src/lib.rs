@@ -4,6 +4,7 @@ mod command_handlers;
 pub mod copy_service;
 pub mod diagnostics;
 pub mod dialog_service;
+pub mod external_service;
 pub mod file_watcher_service;
 pub mod folder_enumeration_service;
 pub mod move_service;
@@ -72,6 +73,14 @@ pub fn run() {
         NativeTrashService::new(pulseseek_browser_fs::trash::NativeFileTrash),
     ));
 
+    // Native external-actions service backed by the browser-fs adapter. It
+    // reveals or opens a single file through the operating system and never
+    // exposes a general process-launch capability to the UI.
+    let external_service: std::sync::Mutex<Box<dyn external_service::ExternalService>> =
+        std::sync::Mutex::new(Box::new(external_service::NativeExternalService::new(
+            pulseseek_browser_fs::external_actions::NativeFileActions,
+        )));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(playback_service)
@@ -79,6 +88,7 @@ pub fn run() {
         .manage(enum_service)
         .manage(active_enumerations)
         .manage(trash_service)
+        .manage(external_service)
         .invoke_handler(tauri::generate_handler![
             diagnostics::report_error,
             command_envelope::invoke_command,

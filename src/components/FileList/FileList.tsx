@@ -4,8 +4,10 @@ import {
   cancelCopyFiles,
   cancelMoveFiles,
   moveToTrash,
+  openWith,
   pickFolder,
   renameFile,
+  revealFile,
   startCopyFiles,
   startMoveFiles,
 } from "../../api/commandEnvelope";
@@ -247,6 +249,10 @@ export function FileList({
   const copySessionIdRef = useRef<string | null>(null);
   const copyPendingRef = useRef<CopyProgressPayload | null>(null);
   const copyUnlistenRef = useRef<(() => void) | null>(null);
+  // External-action state (FR-FM-006, FR-FM-007). Reveal and open-with are
+  // single-file, fire-and-forget operations on the primary selected row.
+  const [externalBusy, setExternalBusy] = useState(false);
+  const [externalError, setExternalError] = useState<string | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
 
   useEffect(() => {
@@ -524,6 +530,27 @@ export function FileList({
       setRenameError(
         error instanceof Error ? error.message : "Unable to rename file.",
       );
+    }
+  };
+
+  // ── External actions (FR-FM-006, FR-FM-007) ─────────────────────────
+  //
+  // Reveal and open-with act on the primary selected playable row through
+  // narrow backend commands; React never receives a general launch
+  // capability.
+
+  const runExternalAction = async (action: (path: string) => Promise<void>) => {
+    if (!primarySelectedEntry || externalBusy) return;
+    setExternalBusy(true);
+    setExternalError(null);
+    try {
+      await action(primarySelectedEntry.id);
+    } catch (error: unknown) {
+      setExternalError(
+        error instanceof Error ? error.message : "Unable to complete action.",
+      );
+    } finally {
+      setExternalBusy(false);
     }
   };
 
@@ -822,6 +849,14 @@ export function FileList({
     [visibleEntries, primarySelectedId],
   );
   const canRenamePrimary = primarySelectedEntry?.kind === "playable";
+  // External actions (Reveal, Open With…) also target a single playable file,
+  // so they share the same eligibility without depending on rename semantics.
+  const hasPlayablePrimary = primarySelectedEntry?.kind === "playable";
+  // A stale external-action error must not outlive its target row: switching
+  // the primary selection clears the previous failure message.
+  useEffect(() => {
+    setExternalError(null);
+  }, [primarySelectedId]);
   // Move targets every selected playable file, so the action needs at least
   // one selected playable row and a batch that is not already running.
   const selectedPlayableIds = useMemo(
@@ -932,6 +967,31 @@ export function FileList({
         >
           Copy…
         </button>
+        <button
+          type="button"
+          className="file-list-reveal-button"
+          onClick={() => {
+            void runExternalAction(revealFile);
+          }}
+          disabled={!hasPlayablePrimary || externalBusy}
+        >
+          Reveal
+        </button>
+        <button
+          type="button"
+          className="file-list-open-with-button"
+          onClick={() => {
+            void runExternalAction(openWith);
+          }}
+          disabled={!hasPlayablePrimary || externalBusy}
+        >
+          Open With…
+        </button>
+        {externalError && (
+          <span className="file-list-external-error" role="alert">
+            {externalError}
+          </span>
+        )}
         <button
           type="button"
           className="file-list-recursive-toggle"

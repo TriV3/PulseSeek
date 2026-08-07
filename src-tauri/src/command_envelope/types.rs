@@ -209,6 +209,22 @@ pub struct CancelCopyFilesRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CancelCopyFilesResponse {}
 
+#[derive(Debug, Deserialize)]
+pub struct RevealFileRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RevealFileResponse {}
+
+#[derive(Debug, Deserialize)]
+pub struct OpenWithRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OpenWithResponse {}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RenameFileResponse {
     pub old_path: String,

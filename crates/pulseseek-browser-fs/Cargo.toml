@@ -7,6 +7,7 @@ license = "MPL-2.0"
 [dependencies]
 pulseseek-domain = { path = "../pulseseek-domain" }
 pulseseek-decoder-symphonia = { path = "../pulseseek-decoder-symphonia" }
+open = "5"
 trash = "3"
 
 [dev-dependencies]
