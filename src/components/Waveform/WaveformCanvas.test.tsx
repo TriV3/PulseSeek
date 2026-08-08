@@ -127,18 +127,28 @@ function emitPosition(positionMs: number, durationMs: number | null = 2000) {
 
 describe("WaveformCanvas", () => {
   it("draws the envelope once waveform data arrives", () => {
-    render(<WaveformCanvas waveform={LEVEL} durationMs={2000} />);
+    const { container } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={2000} />,
+    );
 
     expect(mockContext.ctx.clearRect).toHaveBeenCalled();
     // Grid line, min edge, and max edge.
     expect(mockContext.state.strokes).toBeGreaterThanOrEqual(3);
+    expect(container.querySelector("canvas")).toHaveClass(
+      "waveform-canvas-surface--revealing",
+    );
   });
 
   it("clears the canvas while no waveform is available", () => {
-    render(<WaveformCanvas waveform={null} durationMs={null} />);
+    const { container } = render(
+      <WaveformCanvas waveform={null} durationMs={null} />,
+    );
 
     expect(mockContext.ctx.clearRect).toHaveBeenCalled();
     expect(mockContext.state.strokes).toBe(0);
+    expect(container.querySelector("canvas")).not.toHaveClass(
+      "waveform-canvas-surface--revealing",
+    );
   });
 
   it("draws the playhead from position events without re-rendering", () => {
@@ -313,6 +323,7 @@ describe("WaveformCanvas", () => {
     stubCanvasRect(canvas, 100);
 
     fireEvent.pointerMove(canvas, { clientX: 75, pointerId: 1 });
+    flushRaf();
 
     expect(getByTestId("waveform-hover-time")).toHaveTextContent("0:01");
     expect(getByTestId("waveform-hover-time")).toHaveStyle({ left: "75px" });
@@ -337,10 +348,12 @@ describe("WaveformCanvas", () => {
     expect(getByTestId("waveform-current-time")).toHaveStyle({ left: "24px" });
 
     fireEvent.pointerMove(canvas, { clientX: 0, pointerId: 1 });
+    flushRaf();
     expect(getByTestId("waveform-hover-marker")).toHaveStyle({ left: "0px" });
     expect(getByTestId("waveform-hover-time")).toHaveStyle({ left: "24px" });
 
     fireEvent.pointerMove(canvas, { clientX: 100, pointerId: 1 });
+    flushRaf();
     expect(getByTestId("waveform-hover-marker")).toHaveStyle({ left: "100px" });
     expect(getByTestId("waveform-hover-time")).toHaveStyle({ left: "76px" });
   });

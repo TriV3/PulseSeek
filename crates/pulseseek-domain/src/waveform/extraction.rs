@@ -5,8 +5,28 @@ use crate::playback::position::{Duration, Position};
 use crate::waveform::levels::{Level, LevelIndex, MultiresolutionWaveform, MAX_LEVELS};
 use crate::waveform::peak::Peak;
 
-/// Default target bucket count for the finest overview level (per channel).
-pub const DEFAULT_TARGET_PEAK_COUNT: u64 = 1_000_000;
+/// Default target bucket count for the finest display overview (per channel).
+///
+/// The renderer requests roughly two buckets per CSS pixel. Keeping a bounded
+/// pyramid at 8,192 buckets covers a 4,096-pixel-wide canvas without decoding,
+/// reducing, and serializing detail the current renderer cannot display.
+/// Coarser levels still preserve the complete file overview.
+pub const DEFAULT_TARGET_PEAK_COUNT: u64 = 8_192;
+
+/// Number of buckets used for the first, sampled preview.
+pub const FAST_PREVIEW_PEAK_COUNT: u64 = 64;
+
+/// Maximum bucket count for a sampled cache-miss response.
+pub const MAX_SAMPLED_PREVIEW_PEAK_COUNT: u64 = 2_048;
+
+/// Maximum coarse seeks needed for any sampled preview.
+const SAMPLED_PREVIEW_MAX_SEEKS: u64 = 4;
+
+/// Contiguous frames decoded for each locally-derived preview bucket.
+const PREVIEW_FRAMES_PER_BUCKET: u64 = 256;
+
+/// Maximum allocation for a sampled preview window across every channel.
+const MAX_PREVIEW_WINDOW_SAMPLES: usize = 65_536;
 
 /// Interleaved samples read from the decoder in one batch.
 const READ_BATCH_SAMPLES: usize = 8192;
@@ -231,6 +251,95 @@ pub fn extract_overview(
         .collect();
     Ok(MultiresolutionWaveform::from_levels(channels, levels)
         .expect("extraction builds a valid waveform"))
+}
+
+/// Extracts a fast, approximate overview from a few evenly spaced windows.
+///
+/// Several adjacent buckets are derived from each contiguous read so the
+/// number of expensive decoder seeks stays bounded independently from the
+/// requested draw resolution. This intentionally does not read the complete
+/// source. It is suitable only for first paint; callers should replace it with
+/// [`extract_overview`] when the exact pyramid is available.
+pub fn extract_sampled_overview(
+    decoder: &mut dyn Decoder,
+    target_buckets: u64,
+    is_cancelled: &dyn Fn() -> bool,
+) -> Result<MultiresolutionWaveform, ExtractionError> {
+    let meta = decoder.metadata().map_err(ExtractionError::Decode)?;
+    let channels = meta.channels;
+    if channels == 0 || meta.sample_rate == 0 {
+        return Err(ExtractionError::UnsupportedSource);
+    }
+    let duration_ms = match meta.duration {
+        Duration::Known(position) if position.as_millis() > 0 => position.as_millis(),
+        _ => return Err(ExtractionError::UnsupportedSource),
+    };
+    let buckets = target_buckets.clamp(1, MAX_SAMPLED_PREVIEW_PEAK_COUNT);
+    let channel_count = channels as usize;
+    let total_frames = ((duration_ms as u128 * meta.sample_rate as u128) / 1000)
+        .max(1)
+        .min(u64::MAX as u128) as u64;
+    let samples_per_peak =
+        (total_frames as u128).div_ceil(buckets as u128).min(u64::MAX as u128) as u64;
+    let max_window_frames = (MAX_PREVIEW_WINDOW_SAMPLES / channel_count).max(1) as u64;
+    let seek_count = buckets.min(SAMPLED_PREVIEW_MAX_SEEKS);
+    let mut peaks = Vec::with_capacity(buckets as usize * channel_count);
+    let mut buffer = vec![0.0f32; max_window_frames as usize * channel_count];
+    let mut min = vec![f32::INFINITY; channel_count];
+    let mut max = vec![f32::NEG_INFINITY; channel_count];
+
+    for window in 0..seek_count {
+        if is_cancelled() {
+            return Err(ExtractionError::Cancelled);
+        }
+        let first_bucket = window * buckets / seek_count;
+        let next_bucket = (window + 1) * buckets / seek_count;
+        let local_buckets = next_bucket - first_bucket;
+        let region_start_frame =
+            (window as u128 * total_frames as u128 / seek_count as u128) as u64;
+        let region_end_frame =
+            ((window + 1) as u128 * total_frames as u128 / seek_count as u128) as u64;
+        let region_frames = region_end_frame.saturating_sub(region_start_frame).max(1);
+        let desired_window_frames = local_buckets.saturating_mul(PREVIEW_FRAMES_PER_BUCKET);
+        let window_frames = desired_window_frames.min(region_frames).min(max_window_frames).max(1);
+        let start_frame = region_start_frame + (region_frames - window_frames) / 2;
+        let start_ms = (start_frame as u128 * 1000 / meta.sample_rate as u128) as u64;
+        let target = meta
+            .duration
+            .seek_to(Position::from_millis(start_ms))
+            .expect("sample position stays within source duration");
+        decoder.seek_coarse(target).map_err(ExtractionError::Decode)?;
+        let window_samples = window_frames as usize * channel_count;
+        let samples =
+            decoder.read(&mut buffer[..window_samples]).map_err(ExtractionError::Decode)?;
+        let decoded_frames = samples / channel_count;
+
+        for local_bucket in 0..local_buckets as usize {
+            let start = local_bucket * decoded_frames / local_buckets as usize;
+            let end = (local_bucket + 1) * decoded_frames / local_buckets as usize;
+            if start == end {
+                peaks.extend((0..channel_count).map(|_| Peak::from_parts(0.0, 0.0)));
+                continue;
+            }
+            min.fill(f32::INFINITY);
+            max.fill(f32::NEG_INFINITY);
+            for frame in start..end {
+                for channel in 0..channel_count {
+                    let sample = buffer[frame * channel_count + channel];
+                    min[channel] = min[channel].min(sample);
+                    max[channel] = max[channel].max(sample);
+                }
+            }
+            for channel in 0..channel_count {
+                peaks.push(Peak::from_parts(min[channel], max[channel]));
+            }
+        }
+    }
+
+    let level =
+        Level { index: LevelIndex::new(0).expect("level zero is valid"), samples_per_peak, peaks };
+    Ok(MultiresolutionWaveform::from_levels(channels, vec![level])
+        .expect("sampled preview is structurally valid"))
 }
 
 /// Extracts peaks for a focused time window, supporting sample-level zoom.

@@ -39,7 +39,11 @@ fn entry(path: &str, name: &str) -> BrowserEntry {
 }
 
 fn folder_entry(path: &str, name: &str) -> BrowserEntry {
-    BrowserEntry::Folder(FolderEntry { id: EntryId::new(path), name: name.to_string() })
+    BrowserEntry::Folder(FolderEntry {
+        id: EntryId::new(path),
+        name: name.to_string(),
+        has_subfolders: None,
+    })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────

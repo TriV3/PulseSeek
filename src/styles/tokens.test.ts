@@ -50,6 +50,7 @@ const requiredTokens = [
   "text-brand",
   "text-danger",
   "text-on-accent",
+  "folder-active-path",
   "line",
   "line-strong",
   "line-soft",
@@ -262,6 +263,15 @@ describe("theme accessibility", () => {
     for (const theme of themeFiles) {
       assertContrast(theme, "text", "bg-canvas", 4.5);
     }
+  });
+
+  it("keeps the active audio path at AA contrast in every browser state", () => {
+    for (const theme of themeFiles) {
+      assertContrast(theme, "folder-active-path", "bg-subtle", 4.5);
+      assertContrast(theme, "folder-active-path", "bg-hover", 4.5);
+      assertContrast(theme, "folder-active-path", "bg-selected", 4.5);
+    }
+    expect(folderTreeCss).toContain("color: var(--folder-active-path)");
   });
 
   it("keeps High Contrast primary text at AAA contrast", () => {

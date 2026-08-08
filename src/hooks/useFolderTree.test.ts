@@ -130,6 +130,19 @@ describe("folderTreeReducer playable entries", () => {
     expect(complete.folders[path]?.isLoading).toBe(false);
   });
 
+  it("stays loading after the folder preview until file scanning is complete", () => {
+    const preview = folderTreeReducer(enumeratingState(), {
+      type: "ENUMERATION_CHUNK",
+      path,
+      entries: [],
+      foldersDone: true,
+      done: false,
+    });
+
+    expect(preview.folders[path]?.isLoading).toBe(true);
+    expect(preview.status).toBe("loading");
+  });
+
   it("replaces preview entries with metadata and removes rejected candidates", () => {
     const preview = folderTreeReducer(enumeratingState(), {
       type: "ENUMERATION_CHUNK",
@@ -184,6 +197,8 @@ describe("folderTreeReducer playable entries", () => {
       expanded: false,
       children: [],
       isLoading: false,
+      hasLoaded: false,
+      hasSubfolders: null,
       error: null,
       recursive: false,
     });

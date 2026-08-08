@@ -103,6 +103,9 @@ pub fn run() {
             command_handlers::waveform::get_waveform
         ])
         .setup(|app| {
+            let event_emitter: Arc<dyn playback_events::PlaybackEventEmitter> =
+                Arc::new(playback_events::TauriEventEmitter::new(app.handle().clone()));
+
             // Native drag-out needs the runtime handle so AppKit startup can
             // be deferred until WKWebView has finished its `dragstart` turn.
             let drag_out_service: std::sync::Mutex<
@@ -169,15 +172,20 @@ pub fn run() {
                         shortcut_service = std::sync::Mutex::new(Box::new(
                             NativeShortcutMappingsService::new(shortcut_port),
                         ));
-                        waveform_service =
-                            Some(Arc::new(NativeWaveformService::new(Some(waveform_port))));
+                        waveform_service = Some(Arc::new(
+                            NativeWaveformService::new(Some(waveform_port))
+                                .with_events(Arc::clone(&event_emitter)),
+                        ));
                     },
                     Err(error) => {
                         tracing::warn!(
                             error = %error,
                             "technical cache unavailable; continuing without cache"
                         );
-                        waveform_service = Some(Arc::new(NativeWaveformService::new(None)));
+                        waveform_service = Some(Arc::new(
+                            NativeWaveformService::new(None)
+                                .with_events(Arc::clone(&event_emitter)),
+                        ));
                     },
                 }
             }
@@ -246,12 +254,14 @@ pub fn run() {
             // cache opened, without one when it did not. It is only reachable
             // through the async `get_waveform` command.
             app.manage(
-                waveform_service.unwrap_or_else(|| Arc::new(NativeWaveformService::new(None))),
+                waveform_service.unwrap_or_else(|| {
+                    Arc::new(
+                        NativeWaveformService::new(None)
+                            .with_events(Arc::clone(&event_emitter)),
+                    )
+                }),
             );
 
-            // Real event emitter using Tauri's AppHandle.
-            let event_emitter: Arc<dyn playback_events::PlaybackEventEmitter> =
-                Arc::new(playback_events::TauriEventEmitter::new(app.handle().clone()));
             // Wire real events into the playback service before manage moves
             // the emitter into Tauri managed state.
             if let Ok(mut playback) = app

@@ -7,8 +7,10 @@ pub mod trash;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
 
-use pulseseek_decoder_symphonia::registry::DecoderRegistry;
+use pulseseek_decoder_symphonia::probe_stream_metadata;
 use pulseseek_domain::browser::entry::{
     AccessError, BrowserEntry, EntryId, FolderEntry, InaccessibleEntry, PlayableFileEntry,
     PlayableFileMetadata, UnsupportedFileEntry,
@@ -27,6 +29,11 @@ impl FolderReader for NativeFolderReader {
 }
 
 impl NativeFolderReader {
+    /// Maximum number of verified files delivered in one interactive update.
+    /// Small chunks make the first rows visible quickly without flooding the
+    /// frontend with one event per file.
+    const MAX_INTERACTIVE_BATCH_SIZE: usize = 16;
+
     /// Returns folder names and likely supported audio files without opening
     /// decoders. This keeps navigation responsive while verified metadata is
     /// collected in a second pass.
@@ -46,7 +53,11 @@ impl NativeFolderReader {
             let path_string = entry.path().to_string_lossy().to_string();
             let id = EntryId::new(&path_string);
             if file_type.is_dir() {
-                entries.push(BrowserEntry::Folder(FolderEntry { id, name }));
+                entries.push(BrowserEntry::Folder(FolderEntry {
+                    id,
+                    name,
+                    has_subfolders: directory_has_subfolder(&entry.path()),
+                }));
             } else if likely_supported_audio(&entry.path()) {
                 entries.push(BrowserEntry::PlayableFile(PlayableFileEntry {
                     id,
@@ -61,21 +72,23 @@ impl NativeFolderReader {
         Ok(entries)
     }
 
-    /// Streams folder names in small batches without opening files. Files are
-    /// intentionally omitted: only the decoder verification pass may expose
-    /// a playable file, so a non-audio file with an audio-looking extension
-    /// can never flash in the File List.
+    /// Streams folder names and extension-recognized audio candidates in small
+    /// batches without opening files. Candidate rows intentionally carry no
+    /// metadata; the parallel verification pass enriches valid files and emits
+    /// an unsupported tombstone for candidates that must be removed.
     pub fn stream_folder_preview(
         &self,
         path: &Path,
-        _show_unsupported: bool,
+        show_unsupported: bool,
         batch_size: usize,
-        is_cancelled: impl Fn() -> bool,
+        is_cancelled: impl Fn() -> bool + Sync,
         mut on_chunk: impl FnMut(&[BrowserEntry]),
     ) -> Result<(), FolderReadError> {
         let dir_reader =
             std::fs::read_dir(path).map_err(|e| FolderReadError::from_io_error(e, path))?;
-        let mut entries = Vec::with_capacity(batch_size);
+        let batch_size = batch_size.max(1);
+        let mut immediate = Vec::with_capacity(batch_size);
+        let mut folder_candidates = Vec::new();
         let mut emitted_entries = false;
 
         for entry in dir_reader {
@@ -85,25 +98,95 @@ impl NativeFolderReader {
             let entry = entry.map_err(|e| FolderReadError::from_io_error(e, path))?;
             let file_type =
                 entry.file_type().map_err(|e| FolderReadError::from_io_error(e, &entry.path()))?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            let child_path = entry.path();
+            let path_string = child_path.to_string_lossy().to_string();
             if file_type.is_dir() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                let path_string = entry.path().to_string_lossy().to_string();
-                entries.push(BrowserEntry::Folder(FolderEntry {
+                folder_candidates.push((child_path, name));
+            } else if likely_supported_audio(&child_path) {
+                immediate.push(BrowserEntry::PlayableFile(PlayableFileEntry {
+                    id: EntryId::new(&path_string),
+                    name,
+                    metadata: None,
+                }));
+            } else if show_unsupported {
+                immediate.push(BrowserEntry::UnsupportedFile(UnsupportedFileEntry {
                     id: EntryId::new(&path_string),
                     name,
                 }));
             }
-            if entries.len() == batch_size {
-                entries.sort();
-                on_chunk(&entries);
-                entries.clear();
+        }
+
+        immediate.sort();
+        for chunk in immediate.chunks(batch_size) {
+            if is_cancelled() {
+                return Ok(());
+            }
+            on_chunk(chunk);
+            emitted_entries = true;
+        }
+
+        if !folder_candidates.is_empty() && !is_cancelled() {
+            let available_workers =
+                std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+            let worker_count =
+                available_workers.saturating_sub(2).clamp(1, 6).min(folder_candidates.len());
+            let next_index = AtomicUsize::new(0);
+            let (sender, receiver) = mpsc::channel();
+            let interactive_batch_size = batch_size.min(Self::MAX_INTERACTIVE_BATCH_SIZE);
+            let mut next_batch_size = interactive_batch_size.min(4);
+            let mut pending = Vec::with_capacity(interactive_batch_size);
+
+            std::thread::scope(|scope| {
+                for _ in 0..worker_count {
+                    let sender = sender.clone();
+                    let folder_candidates = &folder_candidates;
+                    let next_index = &next_index;
+                    let is_cancelled = &is_cancelled;
+                    scope.spawn(move || loop {
+                        if is_cancelled() {
+                            break;
+                        }
+                        let index = next_index.fetch_add(1, Ordering::Relaxed);
+                        let Some((path, name)) = folder_candidates.get(index) else {
+                            break;
+                        };
+                        let folder = BrowserEntry::Folder(FolderEntry {
+                            id: EntryId::new(&path.to_string_lossy()),
+                            name: name.clone(),
+                            has_subfolders: directory_has_subfolder(path),
+                        });
+                        if sender.send(folder).is_err() {
+                            break;
+                        }
+                    });
+                }
+                drop(sender);
+
+                for entry in receiver {
+                    if is_cancelled() {
+                        break;
+                    }
+                    pending.push(entry);
+                    if pending.len() == next_batch_size {
+                        pending.sort();
+                        on_chunk(&pending);
+                        pending.clear();
+                        emitted_entries = true;
+                        next_batch_size = interactive_batch_size;
+                    }
+                }
+            });
+
+            if !is_cancelled() && !pending.is_empty() {
+                pending.sort();
+                on_chunk(&pending);
                 emitted_entries = true;
             }
         }
 
-        if !is_cancelled() && (!entries.is_empty() || !emitted_entries) {
-            entries.sort();
-            on_chunk(&entries);
+        if !is_cancelled() && !emitted_entries {
+            on_chunk(&[]);
         }
         Ok(())
     }
@@ -138,7 +221,11 @@ impl NativeFolderReader {
             let path_str = entry.path().to_string_lossy().to_string();
 
             let browser_entry = if file_type.is_dir() {
-                BrowserEntry::Folder(FolderEntry { id: EntryId::new(&path_str), name: name_str })
+                BrowserEntry::Folder(FolderEntry {
+                    id: EntryId::new(&path_str),
+                    name: name_str,
+                    has_subfolders: directory_has_subfolder(&entry.path()),
+                })
             } else {
                 match self.classify_child(&entry.path(), show_unsupported) {
                     Some(entry) => entry,
@@ -150,6 +237,119 @@ impl NativeFolderReader {
 
         entries.sort();
         Ok(entries)
+    }
+
+    /// Verifies direct child files concurrently and streams small result
+    /// batches as soon as workers finish. Directory discovery remains a
+    /// separate lightweight preview, while decoder probing and metadata I/O
+    /// use a bounded pool that reserves CPU capacity for playback.
+    pub fn stream_folder_files_parallel<C, E>(
+        &self,
+        path: &Path,
+        show_unsupported: bool,
+        batch_size: usize,
+        is_cancelled: C,
+        mut on_batch: E,
+    ) -> Result<(), FolderReadError>
+    where
+        C: Fn() -> bool + Sync,
+        E: FnMut(&[BrowserEntry]),
+    {
+        let dir_reader =
+            std::fs::read_dir(path).map_err(|e| FolderReadError::from_io_error(e, path))?;
+        let mut candidates = Vec::new();
+        let mut immediate = Vec::new();
+
+        for entry in dir_reader {
+            if is_cancelled() {
+                return Ok(());
+            }
+            let entry = entry.map_err(|e| FolderReadError::from_io_error(e, path))?;
+            let file_type =
+                entry.file_type().map_err(|e| FolderReadError::from_io_error(e, &entry.path()))?;
+            if file_type.is_dir() {
+                continue;
+            }
+
+            let child_path = entry.path();
+            if likely_supported_audio(&child_path) {
+                candidates.push(child_path);
+            } else if show_unsupported {
+                immediate.push(BrowserEntry::UnsupportedFile(UnsupportedFileEntry {
+                    id: EntryId::new(&child_path.to_string_lossy()),
+                    name: entry.file_name().to_string_lossy().to_string(),
+                }));
+            }
+        }
+
+        let interactive_batch_size = batch_size.clamp(1, Self::MAX_INTERACTIVE_BATCH_SIZE);
+        immediate.sort();
+        for chunk in immediate.chunks(interactive_batch_size) {
+            if is_cancelled() {
+                return Ok(());
+            }
+            on_batch(chunk);
+        }
+
+        if candidates.is_empty() || is_cancelled() {
+            return Ok(());
+        }
+
+        let available_workers =
+            std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+        // Keep two logical cores free for playback/UI while using enough
+        // parallel probes to finish large metadata batches interactively.
+        let worker_count = available_workers.saturating_sub(2).clamp(1, 6).min(candidates.len());
+        let next_index = AtomicUsize::new(0);
+        let (sender, receiver) = mpsc::channel();
+        let mut pending = Vec::with_capacity(interactive_batch_size);
+        let mut next_batch_size = interactive_batch_size.min(4);
+
+        std::thread::scope(|scope| {
+            for _ in 0..worker_count {
+                let sender = sender.clone();
+                let candidates = &candidates;
+                let next_index = &next_index;
+                let is_cancelled = &is_cancelled;
+                scope.spawn(move || loop {
+                    if is_cancelled() {
+                        break;
+                    }
+                    let index = next_index.fetch_add(1, Ordering::Relaxed);
+                    let Some(candidate) = candidates.get(index) else {
+                        break;
+                    };
+                    // Even when unsupported rows are hidden, rejected preview
+                    // candidates must cross the boundary as tombstones so the
+                    // frontend can remove their optimistic rows.
+                    if let Some(entry) = self.classify_child(candidate, true) {
+                        if sender.send(entry).is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+            drop(sender);
+
+            for entry in receiver {
+                if is_cancelled() {
+                    break;
+                }
+                pending.push(entry);
+                if pending.len() == next_batch_size {
+                    pending.sort();
+                    on_batch(&pending);
+                    pending.clear();
+                    next_batch_size = interactive_batch_size;
+                }
+            }
+        });
+
+        if !is_cancelled() && !pending.is_empty() {
+            pending.sort();
+            on_batch(&pending);
+        }
+        Ok(())
     }
 
     /// Recursively walks `path` and streams playable files (and, when
@@ -311,13 +511,15 @@ impl NativeFolderReader {
             } else {
                 None
             }
-        } else if let Ok(mut decoder) = DecoderRegistry::open(path) {
-            let stream_metadata = decoder.metadata().ok();
+        } else if let Ok(stream_metadata) = probe_stream_metadata(path) {
             let file_metadata = std::fs::metadata(path).ok();
             Some(BrowserEntry::PlayableFile(PlayableFileEntry {
                 id,
                 name,
-                metadata: Some(playable_file_metadata(stream_metadata, file_metadata.as_ref())),
+                metadata: Some(playable_file_metadata(
+                    Some(stream_metadata),
+                    file_metadata.as_ref(),
+                )),
             }))
         } else if show_unsupported {
             Some(BrowserEntry::UnsupportedFile(UnsupportedFileEntry { id, name }))
@@ -386,6 +588,20 @@ fn likely_supported_audio(path: &Path) -> bool {
     path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| {
         matches!(extension.to_ascii_lowercase().as_str(), "mp3" | "flac" | "wav" | "wave")
     })
+}
+
+/// Looks only far enough into `path` to determine whether an expand control is
+/// useful. Errors remain unknown so inaccessible folders stay expandable and
+/// can surface their normal access error when selected.
+fn directory_has_subfolder(path: &Path) -> Option<bool> {
+    let entries = std::fs::read_dir(path).ok()?;
+    for entry in entries {
+        let entry = entry.ok()?;
+        if entry.file_type().ok()?.is_dir() {
+            return Some(true);
+        }
+    }
+    Some(false)
 }
 
 fn playable_file_metadata(

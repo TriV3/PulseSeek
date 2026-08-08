@@ -8,6 +8,7 @@ import {
   positionMsForX,
   resolveTokens,
   type Canvas2D,
+  type EnvelopeGeometry,
   type WaveformStyle,
   type WaveformTokens,
 } from "./waveformRenderer";
@@ -67,7 +68,12 @@ export function WaveformCanvas({
   const durationRef = useRef<number | null>(durationMs);
   const widthRef = useRef(0);
   const heightRef = useRef(0);
-  const rafRef = useRef<number | null>(null);
+  const drawRafRef = useRef<number | null>(null);
+  const playheadRafRef = useRef<number | null>(null);
+  const hoverRafRef = useRef<number | null>(null);
+  const hoverClientXRef = useRef<number | null>(null);
+  const interactionRectRef = useRef<DOMRect | null>(null);
+  const geometryRef = useRef<CachedGeometry | null>(null);
   const refetchTimer = useRef<number | null>(null);
   const draggingRef = useRef(false);
   const dragTargetRef = useRef<number | null>(null);
@@ -157,16 +163,24 @@ export function WaveformCanvas({
 
     const { waveform, getTokens, style } = propsRef.current;
     const effectiveDurationMs = durationRef.current;
+    const waveformChanged = geometryRef.current?.source !== waveform;
+    if (
+      waveformChanged ||
+      geometryRef.current?.width !== width ||
+      geometryRef.current?.height !== height
+    ) {
+      const geometry = waveform
+        ? buildEnvelope(waveform, width, height, null, effectiveDurationMs)
+        : { channels: [], playheadX: null };
+      geometryRef.current = { ...geometry, source: waveform, width, height };
+    }
     const tokens = getTokens(canvas);
-    const geometry = waveform
-      ? buildEnvelope(waveform, width, height, null, effectiveDurationMs)
-      : { channels: [], playheadX: null };
     // The waveform itself is static between data updates. The progress marker
     // is a composited DOM layer so its movement remains smooth without
     // repainting the full envelope on every position event.
     drawEnvelope(
       ctx,
-      { ...geometry, playheadX: null },
+      { ...geometryRef.current, playheadX: null },
       tokens,
       width,
       height,
@@ -177,17 +191,17 @@ export function WaveformCanvas({
   }, [renderPlayhead]);
 
   const scheduleDraw = useCallback(() => {
-    if (rafRef.current !== null) return;
-    rafRef.current = window.requestAnimationFrame(() => {
-      rafRef.current = null;
+    if (drawRafRef.current !== null) return;
+    drawRafRef.current = window.requestAnimationFrame(() => {
+      drawRafRef.current = null;
       draw();
     });
   }, [draw]);
 
   const schedulePlayhead = useCallback(() => {
-    if (rafRef.current !== null) return;
-    rafRef.current = window.requestAnimationFrame(() => {
-      rafRef.current = null;
+    if (playheadRafRef.current !== null) return;
+    playheadRafRef.current = window.requestAnimationFrame(() => {
+      playheadRafRef.current = null;
       renderPlayhead();
     });
   }, [renderPlayhead]);
@@ -212,16 +226,26 @@ export function WaveformCanvas({
   const targetFromPointer = useCallback((clientX: number): number | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
-    const rect = canvas.getBoundingClientRect();
+    const cachedRect = interactionRectRef.current;
+    const rect =
+      cachedRect && cachedRect.width > 0
+        ? cachedRect
+        : canvas.getBoundingClientRect();
+    interactionRectRef.current = rect;
     return positionMsForX(clientX - rect.left, rect.width, durationRef.current);
   }, []);
 
   const updateHover = useCallback((clientX: number) => {
-    const canvas = canvasRef.current;
     const marker = hoverMarkerRef.current;
     const label = hoverTimeRef.current;
-    if (!canvas || !marker || !label) return;
-    const rect = canvas.getBoundingClientRect();
+    const canvas = canvasRef.current;
+    const cachedRect = interactionRectRef.current;
+    const rect =
+      cachedRect && cachedRect.width > 0
+        ? cachedRect
+        : canvas?.getBoundingClientRect();
+    if (!marker || !label || !rect) return;
+    interactionRectRef.current = rect;
     const target = positionMsForX(
       clientX - rect.left,
       rect.width,
@@ -239,6 +263,19 @@ export function WaveformCanvas({
     label.style.left = `${timeLabelX(x, rect.width)}px`;
     label.textContent = formatWaveformTime(target);
   }, []);
+
+  const scheduleHover = useCallback(
+    (clientX: number) => {
+      hoverClientXRef.current = clientX;
+      if (hoverRafRef.current !== null) return;
+      hoverRafRef.current = window.requestAnimationFrame(() => {
+        hoverRafRef.current = null;
+        const nextX = hoverClientXRef.current;
+        if (nextX !== null) updateHover(nextX);
+      });
+    },
+    [updateHover],
+  );
 
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -261,14 +298,14 @@ export function WaveformCanvas({
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
-      updateHover(event.clientX);
+      scheduleHover(event.clientX);
       if (!draggingRef.current) return;
       const target = targetFromPointer(event.clientX);
       if (target === null) return;
       dragTargetRef.current = target;
       previewSeek(target);
     },
-    [previewSeek, targetFromPointer, updateHover],
+    [previewSeek, scheduleHover, targetFromPointer],
   );
 
   const handlePointerLeave = useCallback(() => {
@@ -346,6 +383,13 @@ export function WaveformCanvas({
   }, [waveform, durationMs, restoredPositionMs, style, scheduleDraw]);
 
   useEffect(() => {
+    if (!waveform || widthRef.current <= 0) return;
+    propsRef.current.onRequestRefetch?.(
+      propsRef.current.targetPeaksForWidth(widthRef.current),
+    );
+  }, [waveform]);
+
+  useEffect(() => {
     if (lastResetRevisionRef.current === resetRevision) return;
     lastResetRevisionRef.current = resetRevision;
     receivedPositionEventRef.current = false;
@@ -392,6 +436,8 @@ export function WaveformCanvas({
     const measure = (width: number, height: number) => {
       widthRef.current = Math.round(width);
       heightRef.current = Math.round(height);
+      interactionRectRef.current = canvas.getBoundingClientRect();
+      geometryRef.current = null;
       canvas.width = Math.max(1, Math.round(width));
       canvas.height = Math.max(1, Math.round(height));
       // Draw immediately: the observer may fire before any rAF that was
@@ -435,9 +481,9 @@ export function WaveformCanvas({
   // make every later `scheduleDraw` skip, permanently freezing the playhead.
   useEffect(() => {
     return () => {
-      if (rafRef.current !== null) {
-        window.cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
+      for (const frame of [drawRafRef, playheadRafRef, hoverRafRef]) {
+        if (frame.current !== null) window.cancelAnimationFrame(frame.current);
+        frame.current = null;
       }
     };
   }, []);
@@ -446,7 +492,9 @@ export function WaveformCanvas({
     <div className="waveform-interaction">
       <canvas
         ref={canvasRef}
-        className="waveform-canvas-surface"
+        className={`waveform-canvas-surface${
+          waveform ? " waveform-canvas-surface--revealing" : ""
+        }`}
         role="slider"
         aria-label="Waveform seek"
         aria-valuemin={0}
@@ -501,4 +549,10 @@ function formatWaveformTime(positionMs: number): string {
   return hours > 0
     ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
     : `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+interface CachedGeometry extends EnvelopeGeometry {
+  source: WaveformLevel | null;
+  width: number;
+  height: number;
 }

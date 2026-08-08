@@ -28,6 +28,7 @@ export interface BrowserEntryData {
   id: string;
   name: string;
   kind: "folder" | "playable" | "unsupported" | "inaccessible";
+  has_subfolders?: boolean | null;
   metadata?: PlayableFileMetadataData | null;
 }
 
@@ -49,6 +50,10 @@ export interface FolderChunkPayload {
 }
 
 export interface FileChangePayload {
+  path: string;
+}
+
+export interface WaveformReadyPayload {
   path: string;
 }
 
@@ -156,6 +161,12 @@ export function isFileChangePayload(
   return isRecord(value) && typeof value.path === "string";
 }
 
+export function isWaveformReadyPayload(
+  value: unknown,
+): value is WaveformReadyPayload {
+  return isRecord(value) && typeof value.path === "string";
+}
+
 export function isFolderChunkPayload(
   value: unknown,
 ): value is FolderChunkPayload {
@@ -213,10 +224,15 @@ function isBrowserEntryData(value: unknown): value is BrowserEntryData {
     value.metadata === undefined ||
     value.metadata === null ||
     isPlayableFileMetadataData(value.metadata);
+  const validHasSubfolders =
+    value.has_subfolders === undefined ||
+    value.has_subfolders === null ||
+    typeof value.has_subfolders === "boolean";
   return (
     typeof value.id === "string" &&
     typeof value.name === "string" &&
     validKind &&
+    validHasSubfolders &&
     validMetadata
   );
 }
@@ -229,6 +245,7 @@ export const EVENT_COMPLETED = "playback:completed";
 export const EVENT_DEVICE_LOST = "audio:device-lost";
 export const EVENT_FOLDER_CHUNK = "browser:folder-chunk";
 export const EVENT_FILE_CHANGE = "browser:file-change";
+export const EVENT_WAVEFORM_READY = "waveform:ready";
 export const EVENT_MOVE_PROGRESS = "browser:move-progress";
 export const EVENT_COPY_PROGRESS = "browser:copy-progress";
 
@@ -263,6 +280,17 @@ export function onPosition(
 /** Listens for natural end-of-track completion. */
 export function onCompleted(handler: () => void): Promise<UnlistenFn> {
   return listen(EVENT_COMPLETED, () => handler());
+}
+
+/** Listens for completion of an exact waveform cache extraction. */
+export function onWaveformReady(
+  handler: (payload: WaveformReadyPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<WaveformReadyPayload>(EVENT_WAVEFORM_READY, (event) => {
+    if (isWaveformReadyPayload(event.payload)) {
+      handler(event.payload);
+    }
+  });
 }
 
 /**

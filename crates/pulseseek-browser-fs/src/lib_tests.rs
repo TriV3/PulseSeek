@@ -212,7 +212,7 @@ fn preview_returns_audio_names_without_decoding_content() {
 }
 
 #[test]
-fn streamed_preview_emits_only_folders_before_audio_validation() {
+fn streamed_preview_emits_folders_and_audio_candidates_without_metadata() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("Samples")).unwrap();
     std::fs::write(dir.path().join("first.mp3"), b"not decoded").unwrap();
@@ -231,11 +231,45 @@ fn streamed_preview_emits_only_folders_before_audio_validation() {
         )
         .unwrap();
 
-    assert_eq!(chunks.len(), 1);
+    assert_eq!(chunks.len(), 2);
     assert!(chunks.iter().all(|chunk| chunk.len() <= 2));
-    let names: Vec<&str> = chunks.iter().flatten().map(|entry| entry.name()).collect();
-    assert_eq!(names, vec!["Samples"]);
-    assert!(chunks.iter().flatten().all(|entry| matches!(entry, BrowserEntry::Folder(_))));
+    let mut names: Vec<&str> = chunks.iter().flatten().map(|entry| entry.name()).collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["Samples", "first.mp3", "second.wav"]);
+    assert!(chunks.iter().flatten().all(|entry| match entry {
+        BrowserEntry::Folder(_) => true,
+        BrowserEntry::PlayableFile(file) => file.metadata.is_none(),
+        _ => false,
+    }));
+}
+
+#[test]
+fn streamed_preview_marks_leaf_folders_before_they_are_rendered() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("Empty")).unwrap();
+    std::fs::create_dir_all(dir.path().join("Nested/Child")).unwrap();
+
+    let mut entries = Vec::new();
+    NativeFolderReader
+        .stream_folder_preview(
+            dir.path(),
+            false,
+            100,
+            || false,
+            |chunk| {
+                entries.extend_from_slice(chunk);
+            },
+        )
+        .unwrap();
+
+    let folder_flags: Vec<_> = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            BrowserEntry::Folder(folder) => Some((folder.name.as_str(), folder.has_subfolders)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(folder_flags, vec![("Empty", Some(false)), ("Nested", Some(true))]);
 }
 
 fn collect_recursive(

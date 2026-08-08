@@ -54,8 +54,34 @@ describe("application shell", () => {
     expect(
       screen.getByRole("toolbar", { name: "Playback controls" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Browser" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "File list" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Browser" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: "Recent folders" })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+    expect(screen.queryByRole("tab", { name: "File list" })).toBeNull();
+  });
+
+  it("shares the sidebar between keyboard-accessible browser tabs", () => {
+    render(<App />);
+
+    const browserTab = screen.getByRole("tab", { name: "Browser" });
+    const recentTab = screen.getByRole("tab", { name: "Recent folders" });
+    expect(screen.getByRole("tabpanel", { name: "Browser" })).toBeVisible();
+
+    fireEvent.click(recentTab);
+    expect(recentTab).toHaveAttribute("aria-selected", "true");
+    expect(
+      screen.getByRole("tabpanel", { name: "Recent folders" }),
+    ).toBeVisible();
+
+    fireEvent.keyDown(recentTab, { key: "ArrowLeft" });
+    expect(browserTab).toHaveFocus();
+    expect(browserTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Browser" })).toBeVisible();
   });
 
   it("exposes the waveform as a seek slider that is disabled without a file", () => {
@@ -417,6 +443,8 @@ describe("recent folders wiring", () => {
   it("shows an empty recent-folders state on first launch", async () => {
     render(<App />);
 
+    fireEvent.click(screen.getByRole("tab", { name: "Recent folders" }));
+
     await waitFor(() =>
       expect(screen.getByText("No recent folders yet.")).toBeInTheDocument(),
     );
@@ -429,6 +457,7 @@ describe("recent folders wiring", () => {
     fireEvent.click(screen.getByText("Computer", { exact: true }));
     await screen.findByText("Music", { exact: true });
     fireEvent.click(screen.getByText("Music", { exact: true }));
+    fireEvent.click(screen.getByRole("tab", { name: "Recent folders" }));
 
     // The selected folder appears in the recent-folders sidebar with its
     // path basename ("music", unlike the capitalized tree root label).

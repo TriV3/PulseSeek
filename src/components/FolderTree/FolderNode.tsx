@@ -15,6 +15,8 @@ interface FolderNodeProps {
   playableEntries: Record<string, Array<{ id: string }>>;
   /** Path of the currently selected item (for computing aria-selected). */
   selectedPath: string | null;
+  /** Full path of the selected audio file, used to highlight its ancestors. */
+  activeFilePath?: string | null;
   /** Called when the expand/collapse toggle is clicked. */
   onToggle: (path: string) => void;
   /** Called when the folder name is clicked (select). */
@@ -29,10 +31,15 @@ export function FolderNode({
   folders,
   playableEntries,
   selectedPath,
+  activeFilePath = null,
   onToggle,
   onSelect,
 }: FolderNodeProps) {
   const isSelected = path === selectedPath;
+  const isOnAudioPath = folderContainsFile(path, activeFilePath);
+  const canExpand =
+    state.hasSubfolders ??
+    (state.isLoading || state.hasLoaded !== true || state.children.length > 0);
 
   const handleToggle = useCallback(
     (e: React.MouseEvent) => {
@@ -44,50 +51,56 @@ export function FolderNode({
 
   const handleSelect = useCallback(() => {
     onSelect(path);
-    onToggle(path);
-  }, [path, onSelect, onToggle]);
+    if (canExpand) onToggle(path);
+  }, [canExpand, path, onSelect, onToggle]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         onSelect(path);
-        onToggle(path);
+        if (canExpand) onToggle(path);
       }
     },
-    [path, onSelect, onToggle],
+    [canExpand, path, onSelect, onToggle],
   );
 
   return (
     <li
       role="treeitem"
-      aria-expanded={state.expanded}
+      aria-expanded={canExpand ? state.expanded : undefined}
       aria-selected={isSelected}
       tabIndex={isSelected ? 0 : -1}
-      className={`folder-node${isSelected ? " selected" : ""}`}
+      className={`folder-node${isSelected ? " selected" : ""}${
+        isOnAudioPath ? " folder-node--audio-path" : ""
+      }`}
       data-depth={depth}
       data-folder-path={path}
       onKeyDown={handleKeyDown}
     >
       <div className="folder-node-row" onClick={handleSelect}>
         {/* Expand / collapse toggle */}
-        <button
-          type="button"
-          className="folder-toggle"
-          onClick={handleToggle}
-          aria-label={state.expanded ? "Collapse folder" : "Expand folder"}
-          tabIndex={-1}
-        >
-          {state.isLoading ? (
-            <span className="folder-spinner" aria-label="Loading" />
-          ) : (
-            <span
-              className={`folder-arrow${state.expanded ? " expanded" : ""}`}
-            >
-              &#9654;
-            </span>
-          )}
-        </button>
+        {canExpand ? (
+          <button
+            type="button"
+            className="folder-toggle"
+            onClick={handleToggle}
+            aria-label={state.expanded ? "Collapse folder" : "Expand folder"}
+            tabIndex={-1}
+          >
+            {state.isLoading ? (
+              <span className="folder-spinner" aria-label="Loading" />
+            ) : (
+              <span
+                className={`folder-arrow${state.expanded ? " expanded" : ""}`}
+              >
+                &#9654;
+              </span>
+            )}
+          </button>
+        ) : (
+          <span className="folder-toggle" aria-hidden="true" />
+        )}
 
         {/* Folder icon + name */}
         <span className="folder-icon" aria-hidden="true">
@@ -100,7 +113,7 @@ export function FolderNode({
       {state.error && <div className="folder-error">{state.error}</div>}
 
       {/* Children (subfolders) */}
-      {state.expanded && !state.error && (
+      {canExpand && state.expanded && !state.error && (
         <ul role="group" className="folder-children">
           {state.isLoading && state.children.length === 0 && (
             <li className="folder-empty">Loading&#8230;</li>
@@ -123,12 +136,14 @@ export function FolderNode({
                     expanded: false,
                     children: [],
                     isLoading: false,
+                    hasLoaded: false,
                     error: null,
                   }
                 }
                 folders={folders}
                 playableEntries={playableEntries}
                 selectedPath={selectedPath}
+                activeFilePath={activeFilePath}
                 onToggle={onToggle}
                 onSelect={onSelect}
               />
@@ -138,4 +153,15 @@ export function FolderNode({
       )}
     </li>
   );
+}
+
+/** True only when `folderPath` is a complete directory segment of the file path. */
+function folderContainsFile(
+  folderPath: string,
+  activeFilePath: string | null,
+): boolean {
+  if (!activeFilePath || folderPath === "computer://") return false;
+  const normalizedFolder = folderPath.replace(/\/+$/, "");
+  if (normalizedFolder === "") return activeFilePath.startsWith("/");
+  return activeFilePath.startsWith(`${normalizedFolder}/`);
 }

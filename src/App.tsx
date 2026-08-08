@@ -56,6 +56,9 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [formatFilter, setFormatFilter] = useState<AudioFileFormat[]>([]);
   const [markFilter, setMarkFilter] = useState<MarkFilter>("all");
+  const [sidebarView, setSidebarView] = useState<"browser" | "recent">(
+    "browser",
+  );
   const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
   const [focusSearchRevision, setFocusSearchRevision] = useState(0);
   const [folderPickerError, setFolderPickerError] = useState<string | null>(
@@ -85,6 +88,21 @@ function App() {
   const restoredFile = useRef(false);
   const restoredResume = useRef<{ entryId: string; positionMs: number } | null>(
     null,
+  );
+  const browserTabRef = useRef<HTMLButtonElement | null>(null);
+  const recentTabRef = useRef<HTMLButtonElement | null>(null);
+
+  const handleSidebarTabKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>) => {
+      let next: "browser" | "recent" | null = null;
+      if (event.key === "ArrowLeft" || event.key === "Home") next = "browser";
+      if (event.key === "ArrowRight" || event.key === "End") next = "recent";
+      if (!next) return;
+      event.preventDefault();
+      setSidebarView(next);
+      (next === "browser" ? browserTabRef : recentTabRef).current?.focus();
+    },
+    [],
   );
 
   const fileListFolder = state.folders[state.selectedPath ?? ""] ?? undefined;
@@ -577,63 +595,103 @@ function App() {
             </div>
           </div>
           <div
-            className="browser-tabs"
-            role="tablist"
-            aria-label="Workspace panels"
-          >
-            <button type="button" role="tab" aria-selected="true">
-              Browser
-            </button>
-            <button type="button" role="tab" aria-selected="true">
-              File list
-            </button>
-          </div>
-          <div
             className="browser-workspace"
             style={{ gridTemplateColumns: `${browserSize}% 7px 1fr` }}
           >
             <aside className="app-sidebar">
-              <FolderTree
-                {...folderTree}
-                toggleExpand={(path) => {
-                  const expanded = new Set(
-                    Object.entries(state.folders)
-                      .filter(([, folder]) => folder.expanded)
-                      .map(([folderPath]) => folderPath),
-                  );
-                  if (state.folders[path]?.expanded) expanded.delete(path);
-                  else expanded.add(path);
-                  playerPreferences.update({
-                    expanded_folder_paths: [...expanded],
-                  });
-                  folderTree.toggleExpand(path);
-                }}
-                selectFolder={(path) => {
-                  openFolder(path);
-                }}
-                navigateUp={() => {
-                  const selected = state.selectedPath;
-                  const trimmed = selected?.replace(/\/+$/, "") ?? "";
-                  const separator = trimmed.lastIndexOf("/");
-                  if (separator > 0) {
-                    const parent = trimmed.substring(0, separator);
-                    playerPreferences.update({ selected_folder_path: parent });
-                    recentFolders.record(parent);
-                  }
-                  folderTree.navigateUp();
-                }}
-              />
-              <RecentFolders
-                folders={recentFolders.folders}
-                isLoading={recentFolders.isLoading}
-                error={recentFolders.error}
-                onReopen={(path) => {
-                  openFolder(path, { expand: true });
-                }}
-                onClear={() => {
-                  void recentFolders.clear();
-                }}
-              />
+              <div
+                className="sidebar-tabs"
+                role="tablist"
+                aria-label="Browser views"
+              >
+                <button
+                  ref={browserTabRef}
+                  id="sidebar-tab-browser"
+                  type="button"
+                  role="tab"
+                  aria-controls="sidebar-panel-browser"
+                  aria-selected={sidebarView === "browser"}
+                  tabIndex={sidebarView === "browser" ? 0 : -1}
+                  onClick={() => setSidebarView("browser")}
+                  onKeyDown={handleSidebarTabKeyDown}
+                >
+                  Browser
+                </button>
+                <button
+                  ref={recentTabRef}
+                  id="sidebar-tab-recent"
+                  type="button"
+                  role="tab"
+                  aria-controls="sidebar-panel-recent"
+                  aria-selected={sidebarView === "recent"}
+                  tabIndex={sidebarView === "recent" ? 0 : -1}
+                  onClick={() => setSidebarView("recent")}
+                  onKeyDown={handleSidebarTabKeyDown}
+                >
+                  Recent folders
+                </button>
+              </div>
+              <div
+                id="sidebar-panel-browser"
+                className="sidebar-panel"
+                role="tabpanel"
+                aria-labelledby="sidebar-tab-browser"
+                hidden={sidebarView !== "browser"}
+              >
+                <FolderTree
+                  {...folderTree}
+                  activeFilePath={playback.playback.entryId}
+                  toggleExpand={(path) => {
+                    const expanded = new Set(
+                      Object.entries(state.folders)
+                        .filter(([, folder]) => folder.expanded)
+                        .map(([folderPath]) => folderPath),
+                    );
+                    if (state.folders[path]?.expanded) expanded.delete(path);
+                    else expanded.add(path);
+                    playerPreferences.update({
+                      expanded_folder_paths: [...expanded],
+                    });
+                    folderTree.toggleExpand(path);
+                  }}
+                  selectFolder={(path) => {
+                    openFolder(path);
+                  }}
+                  navigateUp={() => {
+                    const selected = state.selectedPath;
+                    const trimmed = selected?.replace(/\/+$/, "") ?? "";
+                    const separator = trimmed.lastIndexOf("/");
+                    if (separator > 0) {
+                      const parent = trimmed.substring(0, separator);
+                      playerPreferences.update({
+                        selected_folder_path: parent,
+                      });
+                      recentFolders.record(parent);
+                    }
+                    folderTree.navigateUp();
+                  }}
+                />
+              </div>
+              <div
+                id="sidebar-panel-recent"
+                className="sidebar-panel"
+                role="tabpanel"
+                aria-labelledby="sidebar-tab-recent"
+                hidden={sidebarView !== "recent"}
+              >
+                <RecentFolders
+                  folders={recentFolders.folders}
+                  isLoading={recentFolders.isLoading}
+                  error={recentFolders.error}
+                  onReopen={(path) => {
+                    setSidebarView("browser");
+                    openFolder(path, { expand: true });
+                  }}
+                  onClear={() => {
+                    void recentFolders.clear();
+                  }}
+                />
+              </div>
             </aside>
             <div
               className="splitter splitter--vertical"
@@ -661,6 +719,7 @@ function App() {
               }}
             />
             <section className="app-content">
+              <div className="file-list-heading">File list</div>
               <FileList
                 entries={sortedFileListEntries}
                 selectedPath={state.selectedPath}

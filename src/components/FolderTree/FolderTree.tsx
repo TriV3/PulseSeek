@@ -9,6 +9,8 @@ export interface FolderTreeProps {
   selectFolder: (path: string) => void;
   navigateUp: () => void;
   clearError: () => void;
+  /** Full path of the selected audio file, if any. */
+  activeFilePath?: string | null;
 }
 
 export function FolderTree({
@@ -17,6 +19,7 @@ export function FolderTree({
   selectFolder,
   navigateUp,
   clearError,
+  activeFilePath = null,
 }: FolderTreeProps) {
   const treeRef = useRef<HTMLDivElement | null>(null);
 
@@ -171,6 +174,7 @@ export function FolderTree({
           folders={state.folders}
           playableEntries={state.playableEntries}
           selectedPath={state.selectedPath}
+          activeFilePath={activeFilePath}
           onToggle={toggleExpand}
           onSelect={selectFolder}
         />

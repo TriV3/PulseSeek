@@ -2,11 +2,14 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { WaveformPanel } from "./WaveformPanel";
 import { getWaveform } from "../../api/waveform";
-import { onPosition } from "../../api/playbackEvents";
+import { onPosition, onWaveformReady } from "../../api/playbackEvents";
 import type { WaveformLevel } from "../../api/waveform";
 
 vi.mock("../../api/waveform", () => ({ getWaveform: vi.fn() }));
-vi.mock("../../api/playbackEvents", () => ({ onPosition: vi.fn() }));
+vi.mock("../../api/playbackEvents", () => ({
+  onPosition: vi.fn(),
+  onWaveformReady: vi.fn(),
+}));
 
 const LEVEL: WaveformLevel = {
   format_version: 1,
@@ -41,6 +44,7 @@ beforeEach(() => {
   observerInstance = null;
   vi.mocked(getWaveform).mockReset().mockResolvedValue(LEVEL);
   vi.mocked(onPosition).mockResolvedValue(() => {});
+  vi.mocked(onWaveformReady).mockResolvedValue(() => {});
   window.ResizeObserver =
     MockResizeObserver as unknown as typeof ResizeObserver;
 });

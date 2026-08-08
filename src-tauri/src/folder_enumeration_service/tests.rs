@@ -285,22 +285,75 @@ fn native_enumeration_omits_non_audio_files_by_default() {
         "audio files should still be emitted",
     );
     assert!(
-        entries.iter().all(|entry| entry.kind != "unsupported"),
-        "non-audio files must not be emitted without an explicit reveal request: {:?}",
-        entries.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(),
-    );
-    assert_eq!(
-        entries
-            .iter()
-            .filter(|entry| entry.kind == "playable")
-            .map(|entry| entry.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["real.wav"],
-        "only decoder-validated audio files may be marked playable",
+        entries.iter().all(|entry| {
+            !matches!(entry.name.as_str(), "setup.msi" | "disk.dmg" | "notes.txt")
+        }),
+        "files without a supported audio extension must stay hidden: {:?}",
+        entries.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>()
     );
     assert!(
-        entries.iter().all(|entry| entry.name != "misleading.wav"),
-        "a file that merely has an audio extension must not be listed before decoder validation",
+        entries.iter().any(|entry| {
+            entry.name == "real.wav" && entry.kind == "playable" && entry.metadata.is_none()
+        }),
+        "recognized audio names should be previewed before metadata is ready"
+    );
+    assert!(
+        entries.iter().any(|entry| {
+            entry.name == "real.wav" && entry.kind == "playable" && entry.metadata.is_some()
+        }),
+        "validated audio must replace its preview with metadata"
+    );
+    assert!(
+        entries.iter().any(|entry| entry.name == "misleading.wav" && entry.kind == "unsupported"),
+        "a rejected preview candidate must emit a removal tombstone"
+    );
+}
+
+#[test]
+fn native_enumeration_streams_large_folders_in_small_playable_batches() {
+    let dir = tempfile::tempdir().expect("create temp folder");
+    for index in 0..24 {
+        std::fs::write(
+            dir.path().join(format!("sample-{index:02}.wav")),
+            include_bytes!(
+                "../../../crates/pulseseek-decoder-symphonia/tests/fixtures/silent-stereo-44100.wav"
+            ),
+        )
+        .expect("write WAV fixture");
+    }
+    let events = Arc::new(FakeEventEmitter::new());
+    let active = ActiveEnumerations::new();
+    let mut service = NativeFolderEnumerationService::new();
+
+    service
+        .start_enumeration(
+            &dir.path().to_string_lossy(),
+            100,
+            false,
+            false,
+            &active,
+            events.clone() as Arc<dyn PlaybackEventEmitter>,
+        )
+        .expect("start enumeration");
+    wait_for_enumeration_done(&events);
+
+    let verified_chunks: Vec<_> = folder_chunk_payloads(&events)
+        .into_iter()
+        .filter(|chunk| {
+            chunk.entries.iter().any(|entry| entry.kind == "playable" && entry.metadata.is_some())
+        })
+        .collect();
+    assert!(
+        verified_chunks.len() > 1,
+        "verified files must be rendered progressively instead of waiting for the whole folder"
+    );
+    assert!(
+        verified_chunks.first().expect("first verified chunk").entries.len() <= 4,
+        "the first playable rows must be emitted with minimal latency"
+    );
+    assert!(
+        verified_chunks.iter().all(|chunk| chunk.entries.len() <= 16),
+        "interactive enumeration batches must stay small even when the requested batch is large"
     );
 }
 
@@ -403,11 +456,13 @@ fn browser_entry_to_data_converts_folder() {
     let entry = pulseseek_domain::browser::entry::BrowserEntry::Folder(FolderEntry {
         id: EntryId::new("/music/beats"),
         name: "beats".to_string(),
+        has_subfolders: Some(false),
     });
     let data = browser_entry_to_data(&entry);
     assert_eq!(data.id, "/music/beats");
     assert_eq!(data.name, "beats");
     assert_eq!(data.kind, "folder");
+    assert_eq!(data.has_subfolders, Some(false));
 }
 
 #[test]
