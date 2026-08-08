@@ -29,6 +29,12 @@ beforeEach(() => {
 });
 
 describe("application shell", () => {
+  it("suppresses the webview's native context menu", () => {
+    const { container } = render(<App />);
+
+    expect(fireEvent.contextMenu(container.querySelector("main")!)).toBe(false);
+  });
+
   it("renders the folder tree with an accessible heading", () => {
     render(<App />);
 

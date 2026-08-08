@@ -40,6 +40,7 @@ import {
   type MoveProgress,
   type MoveSummary,
 } from "../MoveDialog/MoveDialog";
+import { ContextMenu } from "../ContextMenu/ContextMenu";
 
 /** One successfully moved file: the source id and the destination id. */
 export interface MovedEntry {
@@ -203,6 +204,10 @@ interface FileListProps {
   onMarkFilterChange?: (filter: MarkFilter) => void;
   /** Called when a matched folder row is activated for navigation. */
   onSelectFolder?: (path: string) => void;
+  /** Reports bookmark state for folder search-result rows. */
+  isFolderBookmarked?: (path: string) => boolean;
+  /** Adds or removes a bookmark for a folder search-result row. */
+  onToggleFolderBookmark?: (path: string) => void;
   /** Whether the current folder is shown as a flat recursive file view. */
   recursive?: boolean;
   /** Called when the user toggles the recursive file view. */
@@ -245,6 +250,8 @@ export function FileList({
   markFilter = "all",
   onMarkFilterChange,
   onSelectFolder,
+  isFolderBookmarked,
+  onToggleFolderBookmark,
   recursive = false,
   onRecursiveChange,
   shortcutBindings,
@@ -309,6 +316,12 @@ export function FileList({
   // single-file, fire-and-forget operations on the primary selected row.
   const [externalBusy, setExternalBusy] = useState(false);
   const [externalError, setExternalError] = useState<string | null>(null);
+  const [contextTarget, setContextTarget] = useState<{
+    entry: BrowserEntry;
+    x: number;
+    y: number;
+    anchor: HTMLElement;
+  } | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const nativeDragMouseRef = useRef<{
     startX: number;
@@ -398,6 +411,7 @@ export function FileList({
     setRenameTarget(null);
     setRenameStatus("idle");
     setRenameError(null);
+    setContextTarget(null);
   }, [selectedPath]);
 
   useEffect(() => {
@@ -487,6 +501,52 @@ export function FileList({
       return;
     }
     selectEntry(entry);
+  };
+
+  const openContextMenu = (
+    event: React.MouseEvent<HTMLElement>,
+    entry: BrowserEntry,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    nativeDragMouseRef.current = null;
+    if (entry.kind === "playable") {
+      if (!selectedIds.has(entry.id)) setSelectedIds(new Set([entry.id]));
+      setSelectionAnchorId(entry.id);
+    }
+    setActiveEntryId(entry.id);
+    setContextTarget({
+      entry,
+      x: event.clientX,
+      y: event.clientY,
+      anchor: event.currentTarget,
+    });
+  };
+
+  const openContextMenuFromKeyboard = (
+    event: React.KeyboardEvent<HTMLElement>,
+    entry: BrowserEntry,
+  ): boolean => {
+    if (
+      event.key !== "ContextMenu" &&
+      !(event.shiftKey && event.key === "F10")
+    ) {
+      return false;
+    }
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (entry.kind === "playable") {
+      if (!selectedIds.has(entry.id)) setSelectedIds(new Set([entry.id]));
+      setSelectionAnchorId(entry.id);
+    }
+    setActiveEntryId(entry.id);
+    setContextTarget({
+      entry,
+      x: rect.left + 12,
+      y: rect.top + 12,
+      anchor: event.currentTarget,
+    });
+    return true;
   };
 
   // Shared grid keys: select all (Cmd/Ctrl+A) and range extension via
@@ -1343,7 +1403,9 @@ export function FileList({
                       transform: `translateY(${virtualRow.start}px)`,
                     }}
                     onClick={() => onSelectFolder?.(entry.id)}
+                    onContextMenu={(event) => openContextMenu(event, entry)}
                     onKeyDown={(event) => {
+                      if (openContextMenuFromKeyboard(event, entry)) return;
                       if (handleGridKeyDown(event, virtualRow.index)) {
                         return;
                       }
@@ -1433,7 +1495,9 @@ export function FileList({
                   onMouseUp={clearNativeDragMouse}
                   onMouseLeave={clearNativeDragMouse}
                   onClick={(event) => handlePlayableRowClick(event, entry)}
+                  onContextMenu={(event) => openContextMenu(event, entry)}
                   onKeyDown={(event) => {
+                    if (openContextMenuFromKeyboard(event, entry)) return;
                     if (handleGridKeyDown(event, virtualRow.index)) {
                       return;
                     }
@@ -1647,6 +1711,113 @@ export function FileList({
         }}
         onCancel={cancelCopy}
       />
+      {contextTarget?.entry.kind === "playable" ? (
+        <ContextMenu
+          label={`File actions for ${contextTarget.entry.name}`}
+          x={contextTarget.x}
+          y={contextTarget.y}
+          returnFocus={contextTarget.anchor}
+          onClose={() => setContextTarget(null)}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => onFileSelect?.(contextTarget.entry)}
+          >
+            Play
+          </button>
+          {SESSION_MARKS.map((mark) => (
+            <button
+              key={mark}
+              type="button"
+              role="menuitem"
+              className={`context-menu-mark--${mark}`}
+              onClick={() => applyMarkToSelection(mark)}
+            >
+              Mark {SESSION_MARK_LABELS[mark]}
+            </button>
+          ))}
+          <button type="button" role="menuitem" onClick={clearMarkOnSelection}>
+            Clear mark
+          </button>
+          <div className="context-menu-separator" role="separator" />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => requestRename(contextTarget.entry)}
+            disabled={renameStatus === "renaming"}
+          >
+            Rename
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={requestMove}
+            disabled={!canMoveSelection || moveStatus === "moving"}
+          >
+            Move…
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={requestCopy}
+            disabled={!canCopySelection || copyStatus === "moving"}
+          >
+            Copy…
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => void runExternalAction(revealFile)}
+            disabled={externalBusy}
+          >
+            Reveal
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => void runExternalAction(openWith)}
+            disabled={externalBusy}
+          >
+            Open With…
+          </button>
+          <div className="context-menu-separator" role="separator" />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => requestTrash(contextTarget.entry)}
+            disabled={trashStatus === "moving"}
+          >
+            Move to Trash
+          </button>
+        </ContextMenu>
+      ) : contextTarget ? (
+        <ContextMenu
+          label={`Folder actions for ${contextTarget.entry.name}`}
+          x={contextTarget.x}
+          y={contextTarget.y}
+          returnFocus={contextTarget.anchor}
+          onClose={() => setContextTarget(null)}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => onSelectFolder?.(contextTarget.entry.id)}
+          >
+            Open
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => onToggleFolderBookmark?.(contextTarget.entry.id)}
+            disabled={!onToggleFolderBookmark}
+          >
+            {isFolderBookmarked?.(contextTarget.entry.id)
+              ? "Remove folder bookmark"
+              : "Bookmark folder"}
+          </button>
+        </ContextMenu>
+      ) : null}
     </div>
   );
 }

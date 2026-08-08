@@ -471,7 +471,10 @@ function App() {
   );
 
   return (
-    <main className="app-shell">
+    <main
+      className="app-shell"
+      onContextMenu={(event) => event.preventDefault()}
+    >
       <h1 className="visually-hidden">PulseSeek</h1>
       <div
         className="app-layout"
@@ -842,6 +845,10 @@ function App() {
                 onMarkFilterChange={setMarkFilter}
                 onSelectFolder={(path) => {
                   openFolder(path, { expand: true });
+                }}
+                isFolderBookmarked={folderBookmarks.isBookmarked}
+                onToggleFolderBookmark={(path) => {
+                  void folderBookmarks.toggle(path);
                 }}
                 onEntriesTrashed={(entryIds) => {
                   if (state.selectedPath) {

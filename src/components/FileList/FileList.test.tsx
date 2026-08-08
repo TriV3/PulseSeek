@@ -498,6 +498,119 @@ describe("FileList — stable row identity", () => {
   });
 });
 
+describe("FileList — context menu", () => {
+  it("replaces the native menu with file and mark actions", () => {
+    const onMarkChange = vi.fn();
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        onMarkChange={onMarkChange}
+      />,
+    );
+
+    const row = screen.getByRole("row", { name: /song1\.mp3/ });
+    expect(fireEvent.contextMenu(row, { clientX: 40, clientY: 60 })).toBe(
+      false,
+    );
+
+    const menu = screen.getByRole("menu", {
+      name: "File actions for song1.mp3",
+    });
+    expect(within(menu).getByRole("menuitem", { name: "Play" })).toBeVisible();
+    expect(
+      within(menu).getByRole("menuitem", { name: "Mark Favorite" }),
+    ).toBeVisible();
+    expect(within(menu).getByRole("menuitem", { name: "Move…" })).toBeVisible();
+    expect(within(menu).getByRole("menuitem", { name: "Copy…" })).toBeVisible();
+    expect(
+      within(menu).getByRole("menuitem", { name: "Move to Trash" }),
+    ).toBeVisible();
+
+    fireEvent.click(
+      within(menu).getByRole("menuitem", { name: "Mark Favorite" }),
+    );
+    expect(onMarkChange).toHaveBeenCalledWith(
+      [sampleEntries[0].id],
+      "favorite",
+    );
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("targets an unselected right-clicked file without starting playback", () => {
+    const onFileSelect = vi.fn();
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        onFileSelect={onFileSelect}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("row", { name: /song1\.mp3/ }));
+    onFileSelect.mockClear();
+    fireEvent.contextMenu(screen.getByRole("row", { name: /song2\.wav/ }));
+
+    expect(onFileSelect).not.toHaveBeenCalled();
+    expect(screen.getByRole("row", { name: /song2\.wav/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to Trash" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("song2.wav");
+  });
+
+  it("makes a selected right-clicked file primary without losing the batch", () => {
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    const first = screen.getByRole("row", { name: /song1\.mp3/ });
+    const second = screen.getByRole("row", { name: /song2\.wav/ });
+    fireEvent.click(first);
+    fireEvent.click(second, { metaKey: true });
+    fireEvent.contextMenu(first);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    expect(
+      screen.getByRole("alertdialog", { name: "Rename File" }),
+    ).toHaveTextContent("song1.mp3");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    fireEvent.contextMenu(first);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move…" }));
+    expect(
+      screen.getByRole("alertdialog", { name: "Move Files" }),
+    ).toHaveTextContent("Move 2 files");
+  });
+
+  it("closes the file context menu with Escape", () => {
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    const row = screen.getByRole("row", { name: /song1\.mp3/ });
+    row.focus();
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+});
+
 describe("FileList — move to Trash", () => {
   it("opens confirmation for the selected row", () => {
     render(
