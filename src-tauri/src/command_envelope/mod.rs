@@ -6,7 +6,9 @@ use pulseseek_domain::error::{ApplicationError, ErrorContract};
 
 use crate::audio_device_service::AudioDeviceService;
 pub use crate::command_handlers::browsing::handle_pick_folder;
-use crate::command_handlers::{browsing, device, parse_payload, playback, recent_folders};
+use crate::command_handlers::{
+    browsing, device, parse_payload, playback, recent_folders, shortcuts,
+};
 use crate::copy_service::CopyService;
 use crate::drag_out_service::DragOutService;
 use crate::external_service::ExternalService;
@@ -16,6 +18,7 @@ use crate::playback_events::PlaybackEventEmitter;
 use crate::playback_service::PlaybackService;
 use crate::recent_folders_service::RecentFoldersService;
 use crate::rename_service::RenameService;
+use crate::shortcut_mappings_service::{InMemoryShortcutMappingsService, ShortcutMappingsService};
 use crate::trash_service::TrashService;
 pub(crate) use types::*;
 
@@ -33,6 +36,41 @@ pub fn dispatch(
     drag_out_service: &dyn DragOutService,
     active: &ActiveEnumerations,
     recent_service: &dyn RecentFoldersService,
+    events: &Arc<dyn PlaybackEventEmitter>,
+) -> CommandResponse {
+    dispatch_with_shortcuts(
+        envelope,
+        service,
+        device_service,
+        enum_service,
+        trash_service,
+        rename_service,
+        move_service,
+        copy_service,
+        external_service,
+        drag_out_service,
+        active,
+        recent_service,
+        &InMemoryShortcutMappingsService::new(),
+        events,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn dispatch_with_shortcuts(
+    envelope: CommandEnvelope,
+    service: &mut dyn PlaybackService,
+    device_service: &mut dyn AudioDeviceService,
+    enum_service: &mut dyn FolderEnumerationService,
+    trash_service: &dyn TrashService,
+    rename_service: &dyn RenameService,
+    move_service: &dyn MoveService,
+    copy_service: &dyn CopyService,
+    external_service: &dyn ExternalService,
+    drag_out_service: &dyn DragOutService,
+    active: &ActiveEnumerations,
+    recent_service: &dyn RecentFoldersService,
+    shortcut_service: &dyn ShortcutMappingsService,
     events: &Arc<dyn PlaybackEventEmitter>,
 ) -> CommandResponse {
     if envelope.version != CURRENT_COMMAND_VERSION {
@@ -78,6 +116,9 @@ pub fn dispatch(
         ),
         "list_recent_folders" | "record_recent_folder" | "clear_recent_folders" => {
             recent_folders::handle(&envelope.command, envelope.payload, recent_service)
+        },
+        "load_shortcuts" | "save_shortcuts" | "reset_shortcuts" => {
+            shortcuts::handle(&envelope.command, envelope.payload, shortcut_service)
         },
         _ => CommandResponse::err(BoundaryError {
             category: "Unsupported".to_string(),
@@ -142,6 +183,7 @@ pub fn invoke_command(
     drag_state: tauri::State<'_, std::sync::Mutex<Box<dyn DragOutService>>>,
     active: tauri::State<'_, ActiveEnumerations>,
     recent_state: tauri::State<'_, std::sync::Mutex<Box<dyn RecentFoldersService>>>,
+    shortcut_state: tauri::State<'_, std::sync::Mutex<Box<dyn ShortcutMappingsService>>>,
     events: tauri::State<'_, Arc<dyn PlaybackEventEmitter>>,
 ) -> CommandResponse {
     let mut service = state.lock().expect("playback service lock poisoned");
@@ -154,7 +196,8 @@ pub fn invoke_command(
     let external_service = external_state.lock().expect("external service lock poisoned");
     let drag_out_service = drag_state.lock().expect("drag-out service lock poisoned");
     let recent_service = recent_state.lock().expect("recent folders service lock poisoned");
-    dispatch(
+    let shortcut_service = shortcut_state.lock().expect("shortcut mappings service lock poisoned");
+    dispatch_with_shortcuts(
         envelope,
         &mut **service,
         &mut **device_service,
@@ -167,6 +210,7 @@ pub fn invoke_command(
         &**drag_out_service,
         &active,
         &**recent_service,
+        &**shortcut_service,
         &events,
     )
 }

@@ -369,6 +369,7 @@ export interface UseFolderTreeReturn {
   ) => void;
   restoreContext: (selectedPath: string) => Promise<string>;
   setRecursive: (path: string, recursive: boolean) => void;
+  refreshSelected: () => void;
 }
 
 export function useFolderTree(): UseFolderTreeReturn {
@@ -579,6 +580,13 @@ export function useFolderTree(): UseFolderTreeReturn {
     [enumeratePath],
   );
 
+  const refreshSelected = useCallback(() => {
+    const selected = stateRef.current.selectedPath;
+    if (!selected || selected === "computer://") return;
+    const recursive = stateRef.current.folders[selected]?.recursive ?? false;
+    void enumeratePath(selected, recursive);
+  }, [enumeratePath]);
+
   const restoreContext = useCallback((selectedPath: string) => {
     const paths = getRestorationPaths(selectedPath);
     dispatch({
@@ -643,5 +651,6 @@ export function useFolderTree(): UseFolderTreeReturn {
     renameEntry,
     restoreContext,
     setRecursive,
+    refreshSelected,
   };
 }

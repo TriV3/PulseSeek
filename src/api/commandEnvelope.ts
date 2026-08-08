@@ -1,4 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
+import {
+  getShortcutPlatform,
+  SHORTCUT_ACTIONS,
+  validateShortcutBindings,
+  type ShortcutActionId,
+  type ShortcutBindings,
+  type ShortcutChord,
+} from "../shortcuts/keyboardShortcuts";
 
 // ── Types mirroring the Rust command envelope ──────────────────────────
 
@@ -275,6 +283,128 @@ export async function setPlaybackMode(
     { mode } satisfies SetPlaybackModeRequest,
   );
   return response.mode;
+}
+
+// ── Shortcut mappings ─────────────────────────────────────────────────
+
+export interface ShortcutMappingData extends ShortcutChord {
+  action_id: ShortcutActionId;
+}
+
+interface ShortcutMappingsResponse {
+  mappings: ShortcutMappingData[];
+  unavailable_action_ids: ShortcutActionId[];
+}
+
+const SHORTCUT_ACTION_IDS = new Set<string>(
+  SHORTCUT_ACTIONS.map((action) => action.id),
+);
+const SHORTCUT_ACTIONS_BY_ID = new Map(
+  SHORTCUT_ACTIONS.map((action) => [action.id, action]),
+);
+
+function shortcutBindingsFromResponse(value: unknown): ShortcutBindings {
+  if (!value || typeof value !== "object") return invalidShortcutResponse();
+  const candidate = value as Record<string, unknown>;
+  if (
+    !Array.isArray(candidate.mappings) ||
+    !Array.isArray(candidate.unavailable_action_ids)
+  ) {
+    return invalidShortcutResponse();
+  }
+
+  const seen = new Set<string>();
+  const chords = new Set<string>();
+  const bindings = {} as ShortcutBindings;
+  for (const value of candidate.mappings) {
+    if (!value || typeof value !== "object") return invalidShortcutResponse();
+    const mapping = value as Record<string, unknown>;
+    if (
+      typeof mapping.action_id !== "string" ||
+      !SHORTCUT_ACTION_IDS.has(mapping.action_id) ||
+      !SHORTCUT_ACTIONS_BY_ID.get(mapping.action_id as ShortcutActionId)
+        ?.available ||
+      seen.has(mapping.action_id) ||
+      typeof mapping.key !== "string" ||
+      mapping.key.trim() === "" ||
+      typeof mapping.primary !== "boolean" ||
+      typeof mapping.shift !== "boolean" ||
+      typeof mapping.alt !== "boolean"
+    ) {
+      return invalidShortcutResponse();
+    }
+    const signature = `${mapping.primary}:${mapping.shift}:${mapping.alt}:${mapping.key.trim().toLocaleLowerCase()}`;
+    if (chords.has(signature)) return invalidShortcutResponse();
+    chords.add(signature);
+    seen.add(mapping.action_id);
+    bindings[mapping.action_id as ShortcutActionId] = {
+      key: mapping.key,
+      primary: mapping.primary,
+      shift: mapping.shift,
+      alt: mapping.alt,
+    };
+  }
+
+  for (const actionId of candidate.unavailable_action_ids) {
+    if (
+      typeof actionId !== "string" ||
+      !SHORTCUT_ACTION_IDS.has(actionId) ||
+      SHORTCUT_ACTIONS_BY_ID.get(actionId as ShortcutActionId)?.available !==
+        false ||
+      seen.has(actionId)
+    ) {
+      return invalidShortcutResponse();
+    }
+    seen.add(actionId);
+    bindings[actionId as ShortcutActionId] = null;
+  }
+  if (seen.size !== SHORTCUT_ACTIONS.length) return invalidShortcutResponse();
+  if (
+    Object.keys(validateShortcutBindings(bindings, getShortcutPlatform()))
+      .length > 0
+  ) {
+    return invalidShortcutResponse();
+  }
+  return bindings;
+}
+
+function invalidShortcutResponse(): never {
+  throw new Error("Invalid shortcut mappings response.");
+}
+
+function shortcutMappingsFromBindings(
+  bindings: ShortcutBindings,
+): ShortcutMappingData[] {
+  return SHORTCUT_ACTIONS.flatMap((action) => {
+    const binding = bindings[action.id];
+    return binding ? [{ action_id: action.id, ...binding }] : [];
+  });
+}
+
+export async function loadShortcuts(): Promise<ShortcutBindings> {
+  const response = await invokeCommand<ShortcutMappingsResponse>(
+    "load_shortcuts",
+    {},
+  );
+  return shortcutBindingsFromResponse(response);
+}
+
+export async function saveShortcuts(
+  bindings: ShortcutBindings,
+): Promise<ShortcutBindings> {
+  const response = await invokeCommand<ShortcutMappingsResponse>(
+    "save_shortcuts",
+    { mappings: shortcutMappingsFromBindings(bindings) },
+  );
+  return shortcutBindingsFromResponse(response);
+}
+
+export async function resetShortcuts(): Promise<ShortcutBindings> {
+  const response = await invokeCommand<ShortcutMappingsResponse>(
+    "reset_shortcuts",
+    {},
+  );
+  return shortcutBindingsFromResponse(response);
 }
 
 // ── Typed audio device command wrappers ────────────────────────────────

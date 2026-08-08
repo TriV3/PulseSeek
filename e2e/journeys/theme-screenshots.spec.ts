@@ -27,6 +27,7 @@ test.describe("theme screenshots", () => {
     ).toBeAttached();
 
     // Persisted preference defaults to system; pick Midnight Blue explicitly.
+    await page.getByLabel("Open application menu").click();
     await page.getByLabel("Theme").selectOption("midnight");
 
     // The active theme must be applied to the document without a restart.

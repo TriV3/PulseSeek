@@ -268,7 +268,7 @@ fn v1_to_v2_migration_preserves_meta_and_adds_waveform_table() {
     drop(v1);
 
     let cache = TechnicalCache::start(&path).expect("upgrade to schema v2");
-    assert_eq!(cache.status(), CacheStatus::Healthy { schema_version: 3 });
+    assert_eq!(cache.status(), CacheStatus::Healthy { schema_version: 4 });
 
     let source = identity("/music/track.wav", 1000, 100);
     let key = waveform_cache_key(&source);

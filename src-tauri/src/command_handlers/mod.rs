@@ -4,6 +4,7 @@ pub(crate) mod browsing;
 pub(crate) mod device;
 pub(crate) mod playback;
 pub(crate) mod recent_folders;
+pub(crate) mod shortcuts;
 pub(crate) mod waveform;
 
 use serde::de::DeserializeOwned;

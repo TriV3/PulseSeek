@@ -28,6 +28,8 @@ function createActions() {
     onSeekForward: vi.fn(),
     onToggleLoop: vi.fn(),
     onMoveToTrash: vi.fn(),
+    onFocusSearch: vi.fn(),
+    onMarkKeep: vi.fn(),
   };
 }
 
@@ -39,6 +41,7 @@ describe("useKeyboardShortcuts", () => {
   });
 
   afterEach(() => {
+    document.body.replaceChildren();
     Object.defineProperty(navigator, "platform", {
       configurable: true,
       value: "Linux",
@@ -108,7 +111,7 @@ describe("useKeyboardShortcuts", () => {
     expect(actions.onMoveToTrash).not.toHaveBeenCalled();
   });
 
-  it("leaves file-grid navigation and delete handling to the grid", () => {
+  it("leaves file-grid navigation to the grid", () => {
     const grid = document.createElement("div");
     grid.setAttribute("role", "grid");
     const row = document.createElement("div");
@@ -119,11 +122,77 @@ describe("useKeyboardShortcuts", () => {
     act(() => {
       press("ArrowLeft", {}, row);
       press("ArrowRight", {}, row);
-      press("Delete", {}, row);
     });
 
     expect(actions.onSeekBackward).not.toHaveBeenCalled();
     expect(actions.onSeekForward).not.toHaveBeenCalled();
-    expect(actions.onMoveToTrash).not.toHaveBeenCalled();
+  });
+
+  it("allows modified mark shortcuts while grid has focus", () => {
+    const grid = document.createElement("div");
+    grid.setAttribute("role", "grid");
+    const row = document.createElement("div");
+    grid.append(row);
+    document.body.append(grid);
+    renderHook(() => useKeyboardShortcuts(actions));
+
+    act(() => {
+      press("k", { ctrlKey: true, shiftKey: true }, row);
+    });
+
+    expect(actions.onMarkKeep).toHaveBeenCalledOnce();
+  });
+
+  it("ignores composing and already-handled events", () => {
+    renderHook(() => useKeyboardShortcuts(actions));
+
+    act(() => {
+      press(" ", { isComposing: true });
+      const event = new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "l",
+      });
+      event.preventDefault();
+      window.dispatchEvent(event);
+    });
+
+    expect(actions.onTogglePlayPause).not.toHaveBeenCalled();
+    expect(actions.onToggleLoop).not.toHaveBeenCalled();
+  });
+
+  it("suppresses widgets and modals", () => {
+    const button = document.createElement("button");
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    const child = document.createElement("div");
+    dialog.append(child);
+    document.body.append(button, dialog);
+    renderHook(() => useKeyboardShortcuts(actions));
+
+    act(() => {
+      press(" ", {}, button);
+      press(" ", {}, child);
+      press("f", { ctrlKey: true }, child);
+      press("l");
+    });
+
+    expect(actions.onTogglePlayPause).not.toHaveBeenCalled();
+    expect(actions.onTogglePlayPause).not.toHaveBeenCalled();
+    expect(actions.onFocusSearch).not.toHaveBeenCalled();
+  });
+
+  it("allows only focus-search in editable fields", () => {
+    const input = document.createElement("input");
+    document.body.append(input);
+    renderHook(() => useKeyboardShortcuts(actions));
+
+    act(() => {
+      press("f", { ctrlKey: true }, input);
+      press("l", {}, input);
+    });
+
+    expect(actions.onFocusSearch).toHaveBeenCalledOnce();
+    expect(actions.onToggleLoop).not.toHaveBeenCalled();
   });
 });

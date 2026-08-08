@@ -17,6 +17,7 @@ pub mod playback_service;
 pub mod player_preferences;
 pub mod recent_folders_service;
 pub mod rename_service;
+pub mod shortcut_mappings_service;
 pub mod trash_service;
 pub mod waveform_service;
 
@@ -32,6 +33,9 @@ use crate::player_preferences::{
     JsonPlayerPreferencesRepository, SharedPlayerPreferencesRepository,
 };
 use crate::rename_service::{NativeRenameService, RenameService};
+use crate::shortcut_mappings_service::{
+    InMemoryShortcutMappingsService, NativeShortcutMappingsService, ShortcutMappingsService,
+};
 use crate::trash_service::{NativeTrashService, TrashService};
 use crate::waveform_service::{NativeWaveformService, WaveformService};
 
@@ -139,6 +143,8 @@ pub fn run() {
             > = std::sync::Mutex::new(Box::new(
                 recent_folders_service::InMemoryRecentFoldersService::new(),
             ));
+            let mut shortcut_service: std::sync::Mutex<Box<dyn ShortcutMappingsService>> =
+                std::sync::Mutex::new(Box::new(InMemoryShortcutMappingsService::new()));
             if let Ok(config_dir) = app.path().app_config_dir() {
                 let cache_path = config_dir.join("app-cache.sqlite");
                 match pulseseek_cache::technical_cache::TechnicalCache::start(&cache_path) {
@@ -150,12 +156,18 @@ pub fn run() {
                         let meta_port: Arc<
                             dyn pulseseek_cache::technical_cache::TechnicalCachePort,
                         > = Arc::new(cache.clone());
+                        let shortcut_port: Arc<
+                            dyn pulseseek_cache::shortcut_mappings::ShortcutMappingsCachePort,
+                        > = Arc::new(cache.clone());
                         let waveform_port: Arc<dyn WaveformCachePort> = Arc::new(cache);
                         watcher_cache = Some(Arc::clone(&waveform_port));
                         tracing::info!(status = ?status, "technical cache ready");
                         app.manage(meta_port);
                         recent_service = std::sync::Mutex::new(Box::new(
                             recent_folders_service::NativeRecentFoldersService::new(recent_port),
+                        ));
+                        shortcut_service = std::sync::Mutex::new(Box::new(
+                            NativeShortcutMappingsService::new(shortcut_port),
                         ));
                         waveform_service =
                             Some(Arc::new(NativeWaveformService::new(Some(waveform_port))));
@@ -170,6 +182,7 @@ pub fn run() {
                 }
             }
             app.manage(recent_service);
+            app.manage(shortcut_service);
 
             // Rename service with the opened cache so a PulseSeek rename
             // proactively invalidates the old waveform row (FR-FM-010).

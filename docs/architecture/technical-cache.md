@@ -29,7 +29,13 @@ independent SQLite files described in ADR 0003.
   is monotonic per database so ordering is deterministic. Display names are
   basenames and the service never logs paths or embeds a path in an error
   message.
-  Remaining feature record tables (shortcuts, visualization settings) are
+- Schema version 4 (PR-080) adds
+  `shortcut_mappings(action TEXT PRIMARY KEY, key TEXT,
+  primary_modifier INTEGER, shift_modifier INTEGER, alt_modifier INTEGER)`.
+  One transaction replaces the complete available shortcut profile. A
+  case-insensitive unique chord constraint prevents conflicting mappings even if validation is
+  bypassed. Reset stores the canonical defaults.
+- Remaining feature record tables (visualization settings) are
   added by the PRs that own them through later migrations.
 - `migrations(version, applied_at_ms)` records the applied schema version.
   Migrations run in a transaction and are idempotent on repeat startup.
@@ -43,8 +49,9 @@ independent SQLite files described in ADR 0003.
   `CacheStatus::Degraded` and remains usable.
 - **Open failure** (permissions, missing directory): `start` returns an error,
   startup logs a warning, and the app continues without a cache. Recent-folder
-  commands then fall back to an in-memory, session-only history so the feature
-  keeps working without blocking startup.
+  and shortcut commands then fall back to in-memory, session-only state so
+  those features keep working without blocking startup. Shortcut defaults stay
+  active when loading fails.
 - **Destructive migration**: an existing database is copied to
   `<name>.backup-<version>.sqlite` before any pending migration; a failed
   migration rolls back to the previous version.

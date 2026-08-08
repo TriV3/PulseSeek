@@ -6,7 +6,11 @@ import {
   invokeCommand,
   loadPlayerPreferences,
   setPlaybackMode,
+  loadShortcuts,
+  resetShortcuts,
+  saveShortcuts,
 } from "./commandEnvelope";
+import { DEFAULT_SHORTCUTS } from "../shortcuts/keyboardShortcuts";
 
 const mockInvoke = vi.hoisted(() => vi.fn());
 
@@ -192,6 +196,111 @@ describe("setPlaybackMode", () => {
         payload: { mode: "random" },
       },
     });
+  });
+});
+
+describe("shortcut mappings boundary", () => {
+  const profile = {
+    mappings: Object.entries(DEFAULT_SHORTCUTS)
+      .filter((entry): entry is [string, NonNullable<(typeof entry)[1]>] =>
+        Boolean(entry[1]),
+      )
+      .map(([action_id, binding]) => ({ action_id, ...binding })),
+    unavailable_action_ids: ["set_ab_start", "set_ab_end", "toggle_ab_repeat"],
+  };
+
+  it("loads and converts every known backend mapping", async () => {
+    mockInvoke.mockResolvedValueOnce({ version: 1, ok: true, data: profile });
+
+    await expect(loadShortcuts()).resolves.toEqual(DEFAULT_SHORTCUTS);
+  });
+
+  it("saves only mappings and returns the confirmed profile", async () => {
+    const confirmed = {
+      ...profile,
+      mappings: profile.mappings.map((mapping) =>
+        mapping.action_id === "open_folder"
+          ? { ...mapping, key: "p" }
+          : mapping,
+      ),
+    };
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: true,
+      data: confirmed,
+    });
+
+    await expect(saveShortcuts(DEFAULT_SHORTCUTS)).resolves.toMatchObject({
+      open_folder: { key: "p" },
+      set_ab_start: null,
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: {
+        version: 1,
+        command: "save_shortcuts",
+        payload: { mappings: profile.mappings },
+      },
+    });
+  });
+
+  it("resets through the versioned command", async () => {
+    mockInvoke.mockResolvedValueOnce({ version: 1, ok: true, data: profile });
+
+    await expect(resetShortcuts()).resolves.toEqual(DEFAULT_SHORTCUTS);
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: { version: 1, command: "reset_shortcuts", payload: {} },
+    });
+  });
+
+  it.each([
+    undefined,
+    { mappings: [], unavailable_action_ids: [] },
+    {
+      ...profile,
+      mappings: [...profile.mappings, profile.mappings[0]],
+    },
+    {
+      ...profile,
+      mappings: profile.mappings.map((mapping, index) =>
+        index === 1
+          ? {
+              ...mapping,
+              key: profile.mappings[0].key,
+              primary: profile.mappings[0].primary,
+              shift: profile.mappings[0].shift,
+              alt: profile.mappings[0].alt,
+            }
+          : mapping,
+      ),
+    },
+    {
+      ...profile,
+      mappings: profile.mappings.map((mapping, index) =>
+        index === 0 ? { ...mapping, action_id: "future_action" } : mapping,
+      ),
+    },
+    {
+      ...profile,
+      unavailable_action_ids: ["set_ab_start", "set_ab_start"],
+    },
+    {
+      ...profile,
+      mappings: profile.mappings.map((mapping, index) =>
+        index === 0 ? { ...mapping, primary: "yes" } : mapping,
+      ),
+    },
+    {
+      ...profile,
+      mappings: profile.mappings.map((mapping, index) =>
+        index === 0 ? { ...mapping, key: "Control" } : mapping,
+      ),
+    },
+  ])("rejects malformed or duplicate runtime profiles", async (data) => {
+    mockInvoke.mockResolvedValueOnce({ version: 1, ok: true, data });
+
+    await expect(loadShortcuts()).rejects.toThrow(
+      "Invalid shortcut mappings response.",
+    );
   });
 });
 

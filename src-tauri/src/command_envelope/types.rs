@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::audio_device_service::DeviceInfoData;
+use crate::shortcut_mappings_service::ShortcutMappingData;
 
 pub const CURRENT_COMMAND_VERSION: u32 = 1;
 
@@ -273,6 +274,35 @@ pub struct ClearRecentFoldersRequest {}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ClearRecentFoldersResponse {}
+
+#[derive(Debug, Deserialize)]
+pub struct LoadShortcutsRequest {}
+
+#[derive(Debug, Serialize)]
+pub struct LoadShortcutsResponse {
+    pub mappings: Vec<ShortcutMappingData>,
+    pub unavailable_action_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SaveShortcutsRequest {
+    pub mappings: Vec<ShortcutMappingData>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SaveShortcutsResponse {
+    pub mappings: Vec<ShortcutMappingData>,
+    pub unavailable_action_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResetShortcutsRequest {}
+
+#[derive(Debug, Serialize)]
+pub struct ResetShortcutsResponse {
+    pub mappings: Vec<ShortcutMappingData>,
+    pub unavailable_action_ids: Vec<String>,
+}
 
 impl CommandResponse {
     pub fn ok(data: Value) -> Self {
