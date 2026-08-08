@@ -17,7 +17,6 @@ test.describe("High Contrast accessibility", () => {
       page.getByRole("heading", { level: 1, name: "PulseSeek" }),
     ).toBeAttached();
 
-    await page.getByText("Computer", { exact: true }).click();
     await expect(page.getByText("Music", { exact: true })).toBeVisible();
     await mockCommand("start_enumeration", { session_id: "session-1" });
     await page.getByText("Music", { exact: true }).click();
@@ -38,6 +37,7 @@ test.describe("High Contrast accessibility", () => {
       "data-theme",
       "high-contrast",
     );
+    await page.getByLabel("Open application menu").click();
 
     // ── 3. Deterministic token check ────────────────────────────────
     const resolved = await page.evaluate(() => {

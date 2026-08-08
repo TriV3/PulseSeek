@@ -7,6 +7,15 @@ use crate::playback_events::{
 };
 use pulseseek_domain::error::ErrorContract;
 
+fn options(
+    batch_size: usize,
+    show_unsupported: bool,
+    recursive: bool,
+    show_hidden: bool,
+) -> FolderEnumerationOptions {
+    FolderEnumerationOptions { batch_size, show_unsupported, recursive, show_hidden }
+}
+
 #[test]
 fn active_enumerations_register_and_cancel() {
     let active = ActiveEnumerations::new();
@@ -34,8 +43,9 @@ fn fake_service_starts_enumeration() {
     let active = ActiveEnumerations::new();
     let events = Arc::new(FakeEventEmitter::new()) as Arc<dyn PlaybackEventEmitter>;
 
-    let session_id =
-        service.start_enumeration("/music", 50, false, false, &active, events).unwrap();
+    let session_id = service
+        .start_enumeration("/music", options(50, false, false, false), &active, events)
+        .unwrap();
 
     assert_eq!(service.start_call_count, 1);
     assert_eq!(service.last_path, Some("/music".to_string()));
@@ -77,7 +87,12 @@ fn set_watcher_via_trait_starts_watching_on_enumeration() {
     let events =
         Arc::new(crate::playback_events::NoopEventEmitter) as Arc<dyn PlaybackEventEmitter>;
     service
-        .start_enumeration(&dir.path().to_string_lossy(), 50, false, false, &active, events)
+        .start_enumeration(
+            &dir.path().to_string_lossy(),
+            options(50, false, false, false),
+            &active,
+            events,
+        )
         .expect("enumeration starts");
 
     // The watch runs on a dedicated thread; wait for it to complete.
@@ -125,7 +140,7 @@ fn watcher_skips_filesystem_root() {
     let events =
         Arc::new(crate::playback_events::NoopEventEmitter) as Arc<dyn PlaybackEventEmitter>;
     service
-        .start_enumeration("/", 50, false, false, &active, events)
+        .start_enumeration("/", options(50, false, false, false), &active, events)
         .expect("root enumeration starts");
 
     std::thread::sleep(Duration::from_millis(200));
@@ -137,13 +152,25 @@ fn watcher_skips_filesystem_root() {
 }
 
 #[test]
+fn watcher_skips_home_root_and_keeps_ordinary_folders_watchable() {
+    assert!(should_skip_recursive_watch(std::path::MAIN_SEPARATOR_STR));
+    if let Some(home) = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }) {
+        assert!(should_skip_recursive_watch(&home.to_string_lossy()));
+    }
+
+    let ordinary = tempfile::tempdir().expect("ordinary folder");
+    assert!(!should_skip_recursive_watch(&ordinary.path().to_string_lossy()));
+}
+
+#[test]
 fn fake_service_fails_with_error() {
     let mut service = FakeFolderEnumerationService::new();
     service.fail_start = true;
     let active = ActiveEnumerations::new();
     let events = Arc::new(FakeEventEmitter::new()) as Arc<dyn PlaybackEventEmitter>;
 
-    let result = service.start_enumeration("/music", 50, false, false, &active, events);
+    let result =
+        service.start_enumeration("/music", options(50, false, false, false), &active, events);
 
     assert!(result.is_err());
     assert_eq!(result.unwrap_err().user_descriptor().category(), ErrorCategory::Unavailable);
@@ -155,7 +182,7 @@ fn fake_service_records_show_unsupported_preference() {
     let active = ActiveEnumerations::new();
     let events = Arc::new(FakeEventEmitter::new()) as Arc<dyn PlaybackEventEmitter>;
 
-    service.start_enumeration("/music", 50, true, false, &active, events).unwrap();
+    service.start_enumeration("/music", options(50, true, false, false), &active, events).unwrap();
 
     assert_eq!(service.last_show_unsupported, Some(true));
 }
@@ -166,7 +193,7 @@ fn fake_service_records_recursive_flag() {
     let active = ActiveEnumerations::new();
     let events = Arc::new(FakeEventEmitter::new()) as Arc<dyn PlaybackEventEmitter>;
 
-    service.start_enumeration("/music", 50, false, true, &active, events).unwrap();
+    service.start_enumeration("/music", options(50, false, true, false), &active, events).unwrap();
 
     assert_eq!(service.last_recursive, Some(true));
 }
@@ -180,6 +207,38 @@ fn native_service_lists_system_and_mounted_roots() {
     assert!(!roots.is_empty());
     assert!(roots.iter().all(|root| std::path::Path::new(&root.path).is_dir()));
     assert!(roots.iter().any(|root| root.path == std::path::MAIN_SEPARATOR.to_string()));
+    assert!(roots.iter().any(|root| root.kind == BrowserRootKind::Home && root.name == "Home"));
+    assert!(roots.iter().all(|root| matches!(
+        root.kind,
+        BrowserRootKind::System
+            | BrowserRootKind::Home
+            | BrowserRootKind::Physical
+            | BrowserRootKind::Network
+    )));
+}
+
+#[test]
+fn fake_service_records_show_hidden_preference() {
+    let mut service = FakeFolderEnumerationService::new();
+    let active = ActiveEnumerations::new();
+    let events = Arc::new(FakeEventEmitter::new()) as Arc<dyn PlaybackEventEmitter>;
+
+    service.start_enumeration("/music", options(50, false, false, true), &active, events).unwrap();
+
+    assert_eq!(service.last_show_hidden, Some(true));
+}
+
+#[test]
+fn macos_mount_output_identifies_network_volume_paths() {
+    let mounts = parse_network_mount_paths(
+        "//guest@studio._smb._tcp.local/Samples on /Volumes/Studio Samples (smbfs, nodev)\n\
+         server:/archive on /Volumes/Archive (nfs, nodev)\n\
+         /dev/disk4s1 on /Volumes/Portable (apfs, local, nodev)\n",
+    );
+
+    assert!(mounts.contains(std::path::Path::new("/Volumes/Studio Samples")));
+    assert!(mounts.contains(std::path::Path::new("/Volumes/Archive")));
+    assert!(!mounts.contains(std::path::Path::new("/Volumes/Portable")));
 }
 
 #[test]
@@ -190,7 +249,12 @@ fn native_service_rejects_a_missing_saved_folder_before_starting_a_worker() {
     let missing = tempfile::tempdir().unwrap().path().join("removed-folder");
 
     let error = service
-        .start_enumeration(&missing.to_string_lossy(), 50, false, false, &active, events)
+        .start_enumeration(
+            &missing.to_string_lossy(),
+            options(50, false, false, false),
+            &active,
+            events,
+        )
         .expect_err("missing saved folder must fail synchronously");
 
     assert_eq!(error.user_descriptor().category(), ErrorCategory::InvalidInput);
@@ -261,6 +325,36 @@ fn create_mixed_folder() -> tempfile::TempDir {
 }
 
 #[test]
+fn native_enumeration_hides_dot_directories_unless_requested() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    std::fs::create_dir(dir.path().join("visible")).expect("create visible folder");
+    std::fs::create_dir(dir.path().join(".hidden")).expect("create hidden folder");
+
+    let enumerate = |show_hidden| {
+        let events = Arc::new(FakeEventEmitter::new());
+        let active = ActiveEnumerations::new();
+        let mut service = NativeFolderEnumerationService::new();
+        service
+            .start_enumeration(
+                &dir.path().to_string_lossy(),
+                options(50, false, false, show_hidden),
+                &active,
+                events.clone() as Arc<dyn PlaybackEventEmitter>,
+            )
+            .expect("start enumeration");
+        wait_for_enumeration_done(&events);
+        folder_chunk_entries(&events)
+    };
+
+    let hidden_entries = enumerate(false);
+    assert!(hidden_entries.iter().any(|entry| entry.name == "visible"));
+    assert!(hidden_entries.iter().all(|entry| entry.name != ".hidden"));
+
+    let visible_entries = enumerate(true);
+    assert!(visible_entries.iter().any(|entry| entry.name == ".hidden"));
+}
+
+#[test]
 fn native_enumeration_omits_non_audio_files_by_default() {
     let dir = create_mixed_folder();
     let events = Arc::new(FakeEventEmitter::new());
@@ -270,9 +364,7 @@ fn native_enumeration_omits_non_audio_files_by_default() {
     service
         .start_enumeration(
             &dir.path().to_string_lossy(),
-            50,
-            false,
-            false,
+            options(50, false, false, false),
             &active,
             events.clone() as Arc<dyn PlaybackEventEmitter>,
         )
@@ -328,9 +420,7 @@ fn native_enumeration_streams_large_folders_in_small_playable_batches() {
     service
         .start_enumeration(
             &dir.path().to_string_lossy(),
-            100,
-            false,
-            false,
+            options(100, false, false, false),
             &active,
             events.clone() as Arc<dyn PlaybackEventEmitter>,
         )
@@ -367,9 +457,7 @@ fn native_enumeration_emits_unsupported_files_when_requested() {
     service
         .start_enumeration(
             &dir.path().to_string_lossy(),
-            50,
-            true,
-            false,
+            options(50, true, false, false),
             &active,
             events.clone() as Arc<dyn PlaybackEventEmitter>,
         )
@@ -415,9 +503,7 @@ fn native_service_recursive_emits_all_subtree_files() {
     service
         .start_enumeration(
             &dir.path().to_string_lossy(),
-            50,
-            false,
-            true,
+            options(50, false, true, false),
             &active,
             events.clone() as Arc<dyn PlaybackEventEmitter>,
         )

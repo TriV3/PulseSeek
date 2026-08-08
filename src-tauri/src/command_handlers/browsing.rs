@@ -19,6 +19,7 @@ use crate::copy_service::CopyService;
 use crate::dialog_service::FolderPicker;
 use crate::drag_out_service::DragOutService;
 use crate::external_service::ExternalService;
+use crate::folder_enumeration_service::FolderEnumerationOptions;
 use crate::folder_enumeration_service::{ActiveEnumerations, FolderEnumerationService};
 use crate::move_service::MoveService;
 use crate::playback_events::PlaybackEventEmitter;
@@ -51,11 +52,13 @@ pub(crate) fn handle(
                     Ok(request) => request,
                     Err(response) => return response,
                 };
-            match enum_service.list_roots() {
-                Ok(roots) => CommandResponse::ok(
-                    serde_json::to_value(ListBrowserRootsResponse { roots }).unwrap(),
+            match (enum_service.list_roots(), enum_service.list_libraries()) {
+                (Ok(roots), Ok(libraries)) => CommandResponse::ok(
+                    serde_json::to_value(ListBrowserRootsResponse { roots, libraries }).unwrap(),
                 ),
-                Err(error) => CommandResponse::err(from_application_error(&error)),
+                (Err(error), _) | (_, Err(error)) => {
+                    CommandResponse::err(from_application_error(&error))
+                },
             }
         },
         "start_enumeration" => {
@@ -67,9 +70,12 @@ pub(crate) fn handle(
             let batch_size = request.batch_size.unwrap_or(100) as usize;
             match enum_service.start_enumeration(
                 &request.path,
-                batch_size,
-                request.show_unsupported,
-                request.recursive,
+                FolderEnumerationOptions {
+                    batch_size,
+                    show_unsupported: request.show_unsupported,
+                    recursive: request.recursive,
+                    show_hidden: request.show_hidden,
+                },
                 active,
                 events.clone(),
             ) {

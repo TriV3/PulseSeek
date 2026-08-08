@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   collectFolderEntries,
+  getParentPath,
   INITIAL_FOLDER_TREE_STATE,
   relativeEntryPath,
 } from "../components/FolderTree/folderTreeTypes";
@@ -37,6 +38,68 @@ function enumeratingState() {
 }
 
 describe("folderTreeReducer playable entries", () => {
+  it("finds the filesystem root as the parent of a top-level folder", () => {
+    expect(getParentPath("/Users")).toBe("/");
+  });
+
+  it("selects and collapses the parent when navigating up", () => {
+    const parent = "/test/music";
+    const child = `${parent}/album`;
+    const state = folderTreeReducer(
+      {
+        ...INITIAL_FOLDER_TREE_STATE,
+        rootPath: "/",
+        selectedPath: child,
+        folders: {
+          [parent]: {
+            expanded: true,
+            children: [{ id: child, name: "album", kind: "folder" }],
+            isLoading: false,
+            hasLoaded: true,
+            error: null,
+            recursive: false,
+          },
+          [child]: {
+            expanded: true,
+            children: [],
+            isLoading: false,
+            hasLoaded: true,
+            error: null,
+            recursive: false,
+          },
+        },
+      },
+      { type: "NAVIGATE_UP" },
+    );
+
+    expect(state.selectedPath).toBe(parent);
+    expect(state.folders[parent]?.expanded).toBe(false);
+    expect(state.folders[parent]?.children).toHaveLength(1);
+  });
+
+  it("does not reopen a folder when its scan finishes after it was collapsed", () => {
+    const state = folderTreeReducer(
+      {
+        ...enumeratingState(),
+        folders: {
+          [path]: {
+            ...enumeratingState().folders[path]!,
+            expanded: false,
+          },
+        },
+      },
+      {
+        type: "ENUMERATION_CHUNK",
+        path,
+        entries: [],
+        foldersDone: true,
+        done: true,
+      },
+    );
+
+    expect(state.folders[path]?.expanded).toBe(false);
+  });
+
   it("never scans the synthetic Computer root during restoration", () => {
     expect(getRestorationPaths("/Users/me/Music")).toEqual([
       "/",
@@ -56,21 +119,27 @@ describe("folderTreeReducer playable entries", () => {
     ]);
   });
 
-  it("loads every system root into a collapsed Computer root", () => {
+  it("shows typed system roots immediately under Computer", () => {
     const state = folderTreeReducer(INITIAL_FOLDER_TREE_STATE, {
       type: "ROOTS_LOADED",
+      libraries: [],
       roots: [
-        { path: "/", name: "System" },
-        { path: "/Volumes/NAS", name: "NAS" },
+        { path: "/", name: "System", kind: "system" },
+        { path: "/Volumes/NAS", name: "NAS", kind: "network" },
       ],
     });
 
     expect(state.rootPath).toBe("computer://");
     expect(state.folders["computer://"]?.children).toEqual([
-      { id: "/", name: "System", kind: "folder" },
-      { id: "/Volumes/NAS", name: "NAS", kind: "folder" },
+      { id: "/", name: "System", kind: "folder", rootKind: "system" },
+      {
+        id: "/Volumes/NAS",
+        name: "NAS",
+        kind: "folder",
+        rootKind: "network",
+      },
     ]);
-    expect(state.folders["computer://"]?.expanded).toBe(false);
+    expect(state.folders["computer://"]?.expanded).toBe(true);
     expect(state.selectedPath).toBe("computer://");
     expect(state.folders["/"]?.expanded).toBe(false);
   });
@@ -78,7 +147,8 @@ describe("folderTreeReducer playable entries", () => {
   it("restores the selected folder and only the saved expanded paths", () => {
     const roots = folderTreeReducer(INITIAL_FOLDER_TREE_STATE, {
       type: "ROOTS_LOADED",
-      roots: [{ path: "/", name: "System" }],
+      libraries: [],
+      roots: [{ path: "/", name: "System", kind: "system" }],
     });
 
     const restored = folderTreeReducer(roots, {

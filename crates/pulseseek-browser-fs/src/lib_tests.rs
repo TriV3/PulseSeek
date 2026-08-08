@@ -223,6 +223,7 @@ fn streamed_preview_emits_folders_and_audio_candidates_without_metadata() {
         .stream_folder_preview(
             dir.path(),
             false,
+            false,
             2,
             || false,
             |entries| {
@@ -254,6 +255,7 @@ fn streamed_preview_marks_leaf_folders_before_they_are_rendered() {
         .stream_folder_preview(
             dir.path(),
             false,
+            false,
             100,
             || false,
             |chunk| {
@@ -272,6 +274,21 @@ fn streamed_preview_marks_leaf_folders_before_they_are_rendered() {
     assert_eq!(folder_flags, vec![("Empty", Some(false)), ("Nested", Some(true))]);
 }
 
+#[test]
+fn folder_preview_hides_dot_directories_unless_requested() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("Visible")).unwrap();
+    std::fs::create_dir(dir.path().join(".hidden")).unwrap();
+
+    let hidden = NativeFolderReader.read_folder_preview(dir.path(), false).unwrap();
+    assert!(hidden.iter().any(|entry| entry.name() == "Visible"));
+    assert!(hidden.iter().all(|entry| entry.name() != ".hidden"));
+
+    let shown =
+        NativeFolderReader.read_folder_preview_with_options(dir.path(), false, true).unwrap();
+    assert!(shown.iter().any(|entry| entry.name() == ".hidden"));
+}
+
 fn collect_recursive(
     reader: &NativeFolderReader,
     path: &Path,
@@ -279,13 +296,46 @@ fn collect_recursive(
     batch_size: usize,
     is_cancelled: impl Fn() -> bool,
 ) -> Vec<BrowserEntry> {
+    collect_recursive_with_hidden(reader, path, show_unsupported, false, batch_size, is_cancelled)
+}
+
+fn collect_recursive_with_hidden(
+    reader: &NativeFolderReader,
+    path: &Path,
+    show_unsupported: bool,
+    show_hidden: bool,
+    batch_size: usize,
+    is_cancelled: impl Fn() -> bool,
+) -> Vec<BrowserEntry> {
     let mut entries = Vec::new();
     reader
-        .stream_recursive_files(path, show_unsupported, batch_size, is_cancelled, |chunk| {
-            entries.extend(chunk.iter().cloned());
-        })
+        .stream_recursive_files(
+            path,
+            show_unsupported,
+            show_hidden,
+            batch_size,
+            is_cancelled,
+            |chunk| {
+                entries.extend(chunk.iter().cloned());
+            },
+        )
         .expect("recursive stream should succeed");
     entries
+}
+
+#[test]
+fn recursive_stream_skips_hidden_directories_unless_requested() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    create_wav(&dir.path().join("visible/visible.wav"));
+    create_wav(&dir.path().join(".hidden/hidden.wav"));
+
+    let hidden = collect_recursive(&NativeFolderReader, dir.path(), false, 100, || false);
+    assert!(hidden.iter().any(|entry| entry.name() == "visible.wav"));
+    assert!(hidden.iter().all(|entry| entry.name() != "hidden.wav"));
+
+    let shown =
+        collect_recursive_with_hidden(&NativeFolderReader, dir.path(), false, true, 100, || false);
+    assert!(shown.iter().any(|entry| entry.name() == "hidden.wav"));
 }
 
 #[test]
@@ -426,8 +476,7 @@ fn recursive_stream_continues_after_subdirectory_io_error() {
     NativeFolderReader
         .stream_recursive_files_with_reader(
             &root,
-            false,
-            100,
+            RecursiveReadOptions { show_unsupported: false, show_hidden: false, batch_size: 100 },
             || false,
             |chunk| entries.extend(chunk.iter().cloned()),
             reader,
@@ -463,6 +512,7 @@ fn recursive_stream_cancellation_stops_after_first_batch() {
         .stream_recursive_files(
             dir.path(),
             false,
+            false,
             3,
             || cancel_flag.load(std::sync::atomic::Ordering::Acquire),
             |_chunk| {
@@ -486,6 +536,7 @@ fn recursive_stream_batches_results() {
     NativeFolderReader
         .stream_recursive_files(
             dir.path(),
+            false,
             false,
             2,
             || false,
@@ -529,7 +580,7 @@ fn recursive_stream_empty_root_emits_nothing() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let mut batches = 0;
     NativeFolderReader
-        .stream_recursive_files(dir.path(), false, 100, || false, |_chunk| batches += 1)
+        .stream_recursive_files(dir.path(), false, false, 100, || false, |_chunk| batches += 1)
         .unwrap();
     assert_eq!(batches, 0);
 }
@@ -538,6 +589,7 @@ fn recursive_stream_empty_root_emits_nothing() {
 fn recursive_stream_root_missing_returns_error() {
     let result = NativeFolderReader.stream_recursive_files(
         Path::new("/nonexistent/recursive/path"),
+        false,
         false,
         100,
         || false,

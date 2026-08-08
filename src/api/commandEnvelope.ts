@@ -126,6 +126,7 @@ export interface PlayerPreferences {
   last_played_duration_ms: number | null;
   theme: ThemePreference;
   waveform_style: WaveformStyle;
+  show_hidden_folders: boolean;
 }
 
 interface PlayerPreferencesResponse {
@@ -164,7 +165,10 @@ function isPlayerPreferences(value: unknown): value is PlayerPreferences {
     ["system", "light", "dark", "midnight", "high-contrast"].includes(
       String(candidate.theme),
     ) &&
-    ["solid", "gradient", "outline"].includes(String(candidate.waveform_style))
+    ["solid", "gradient", "outline"].includes(
+      String(candidate.waveform_style),
+    ) &&
+    typeof candidate.show_hidden_folders === "boolean"
   );
 }
 
@@ -444,24 +448,78 @@ export interface StartEnumerationRequest {
   batch_size?: number;
   show_unsupported?: boolean;
   recursive?: boolean;
+  show_hidden?: boolean;
 }
+
+export type BrowserRootKind = "system" | "home" | "physical" | "network";
 
 export interface BrowserRoot {
   path: string;
   name: string;
+  kind: BrowserRootKind;
+}
+
+export type BrowserLibraryKind =
+  "documents" | "music" | "pictures" | "videos" | "downloads";
+
+export interface BrowserLibrary {
+  path: string;
+  name: string;
+  kind: BrowserLibraryKind;
+}
+
+export interface BrowserLocations {
+  roots: BrowserRoot[];
+  libraries: BrowserLibrary[];
 }
 
 export interface ListBrowserRootsResponse {
   roots: BrowserRoot[];
+  libraries: BrowserLibrary[];
+}
+
+function isBrowserLibrary(value: unknown): value is BrowserLibrary {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.path === "string" &&
+    typeof candidate.name === "string" &&
+    ["documents", "music", "pictures", "videos", "downloads"].includes(
+      String(candidate.kind),
+    )
+  );
+}
+
+function isBrowserRoot(value: unknown): value is BrowserRoot {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.path === "string" &&
+    candidate.path.length > 0 &&
+    typeof candidate.name === "string" &&
+    candidate.name.length > 0 &&
+    (candidate.kind === "system" ||
+      candidate.kind === "home" ||
+      candidate.kind === "physical" ||
+      candidate.kind === "network")
+  );
 }
 
 /** Lists local disks and network volumes currently mounted by the OS. */
-export async function listBrowserRoots(): Promise<BrowserRoot[]> {
+export async function listBrowserRoots(): Promise<BrowserLocations> {
   const response = await invokeCommand<ListBrowserRootsResponse>(
     "list_browser_roots",
     {},
   );
-  return response.roots;
+  if (
+    !Array.isArray(response?.roots) ||
+    !response.roots.every(isBrowserRoot) ||
+    !Array.isArray(response?.libraries) ||
+    !response.libraries.every(isBrowserLibrary)
+  ) {
+    throw new Error("Invalid browser roots response.");
+  }
+  return response;
 }
 
 export interface StartEnumerationResponse {
@@ -483,10 +541,16 @@ export async function startEnumeration(
   path: string,
   batch_size?: number,
   recursive = false,
+  show_hidden = false,
 ): Promise<string> {
   const response = await invokeCommand<StartEnumerationResponse>(
     "start_enumeration",
-    { path, batch_size, recursive } satisfies StartEnumerationRequest,
+    {
+      path,
+      batch_size,
+      recursive,
+      show_hidden,
+    } satisfies StartEnumerationRequest,
   );
   return response.session_id;
 }
@@ -759,4 +823,27 @@ export async function recordRecentFolder(path: string): Promise<void> {
 /** Removes the entire recent-folder history. */
 export async function clearRecentFolders(): Promise<void> {
   await invokeCommand<ClearRecentFoldersResponse>("clear_recent_folders", {});
+}
+
+export interface FolderBookmarkData {
+  path: string;
+  name: string;
+}
+
+export async function listFolderBookmarks(): Promise<FolderBookmarkData[]> {
+  const response = await invokeCommand<{ bookmarks: FolderBookmarkData[] }>(
+    "list_folder_bookmarks",
+    {},
+  );
+  return response.bookmarks;
+}
+
+export async function addFolderBookmark(path: string): Promise<void> {
+  await invokeCommand<Record<string, never>>("add_folder_bookmark", { path });
+}
+
+export async function removeFolderBookmark(path: string): Promise<void> {
+  await invokeCommand<Record<string, never>>("remove_folder_bookmark", {
+    path,
+  });
 }

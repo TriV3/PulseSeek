@@ -308,3 +308,80 @@ fn on_debounced_invalidates_modified_source() {
     );
     assert_eq!(events.event_count(), 1, "one refresh event is emitted");
 }
+
+#[test]
+fn on_debounced_ignores_access_only_batches() {
+    use notify_debouncer_full::notify::event::{AccessKind, EventAttributes};
+    use notify_debouncer_full::notify::{Event as NotifyEvent, EventKind};
+    use notify_debouncer_full::{DebounceEventResult, DebouncedEvent};
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let events = Arc::new(FakeEventEmitter::new());
+    let watched = std::sync::Mutex::new(Some(dir.path().to_path_buf()));
+    let notify_event = NotifyEvent {
+        kind: EventKind::Access(AccessKind::Read),
+        paths: vec![dir.path().to_path_buf()],
+        attrs: EventAttributes::default(),
+    };
+    let result: DebounceEventResult =
+        Ok(vec![DebouncedEvent { event: notify_event, time: Instant::now() }]);
+
+    on_debounced(result, &watched, &*events, None);
+
+    assert_eq!(events.event_count(), 0, "reading a folder must not refresh it");
+}
+
+#[test]
+fn on_debounced_ignores_events_queued_for_the_previous_folder() {
+    use notify_debouncer_full::notify::event::{CreateKind, EventAttributes};
+    use notify_debouncer_full::notify::{Event as NotifyEvent, EventKind};
+    use notify_debouncer_full::{DebounceEventResult, DebouncedEvent};
+
+    let current = tempfile::tempdir().expect("current folder");
+    let previous = tempfile::tempdir().expect("previous folder");
+    let events = Arc::new(FakeEventEmitter::new());
+    let watched = std::sync::Mutex::new(Some(current.path().to_path_buf()));
+    let result: DebounceEventResult = Ok(vec![DebouncedEvent {
+        event: NotifyEvent {
+            kind: EventKind::Create(CreateKind::File),
+            paths: vec![previous.path().join("stale.wav")],
+            attrs: EventAttributes::default(),
+        },
+        time: Instant::now(),
+    }]);
+
+    on_debounced(result, &watched, &*events, None);
+
+    assert_eq!(
+        events.event_count(),
+        0,
+        "a queued event from the previous watch must not refresh the newly selected folder"
+    );
+}
+
+#[test]
+fn on_debounced_ignores_changes_below_a_direct_child_folder() {
+    use notify_debouncer_full::notify::event::{DataChange, EventAttributes, ModifyKind};
+    use notify_debouncer_full::notify::{Event as NotifyEvent, EventKind};
+    use notify_debouncer_full::{DebounceEventResult, DebouncedEvent};
+
+    let current = tempfile::tempdir().expect("current folder");
+    let events = Arc::new(FakeEventEmitter::new());
+    let watched = std::sync::Mutex::new(Some(current.path().to_path_buf()));
+    let result: DebounceEventResult = Ok(vec![DebouncedEvent {
+        event: NotifyEvent {
+            kind: EventKind::Modify(ModifyKind::Data(DataChange::Any)),
+            paths: vec![current.path().join("nested").join("changing.log")],
+            attrs: EventAttributes::default(),
+        },
+        time: Instant::now(),
+    }]);
+
+    on_debounced(result, &watched, &*events, None);
+
+    assert_eq!(
+        events.event_count(),
+        0,
+        "changes below child folders do not affect the non-recursive browser view"
+    );
+}

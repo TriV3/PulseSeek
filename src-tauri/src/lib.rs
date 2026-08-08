@@ -159,6 +159,7 @@ pub fn run() {
                         let meta_port: Arc<
                             dyn pulseseek_cache::technical_cache::TechnicalCachePort,
                         > = Arc::new(cache.clone());
+                        let bookmark_meta_port = Arc::clone(&meta_port);
                         let shortcut_port: Arc<
                             dyn pulseseek_cache::shortcut_mappings::ShortcutMappingsCachePort,
                         > = Arc::new(cache.clone());
@@ -167,7 +168,10 @@ pub fn run() {
                         tracing::info!(status = ?status, "technical cache ready");
                         app.manage(meta_port);
                         recent_service = std::sync::Mutex::new(Box::new(
-                            recent_folders_service::NativeRecentFoldersService::new(recent_port),
+                            recent_folders_service::NativeRecentFoldersService::new(
+                                recent_port,
+                                Some(bookmark_meta_port),
+                            ),
                         ));
                         shortcut_service = std::sync::Mutex::new(Box::new(
                             NativeShortcutMappingsService::new(shortcut_port),

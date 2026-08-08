@@ -35,6 +35,14 @@
   --text-danger: #ff8080;
   --text-on-accent: #000000;
   --folder-active-path: #ffff00;
+  --folder-bookmark: #ff66ff;
+  --browser-icon-computer: #ffffff;
+  --browser-icon-system: #d9d9d9;
+  --browser-icon-home: #00ffff;
+  --browser-icon-physical: #ffb000;
+  --browser-icon-network: #00ffff;
+  --browser-icon-folder: #ffff00;
+  --browser-icon-library: #ff66ff;
 
   /* Borders */
   --line: #6a6a6a;

@@ -3,7 +3,12 @@ import { useFolderTree } from "./hooks/useFolderTree";
 import { FolderTree } from "./components/FolderTree/FolderTree";
 import { RecentFolders } from "./components/RecentFolders/RecentFolders";
 import { useRecentFolders } from "./hooks/useRecentFolders";
-import { collectFolderEntries } from "./components/FolderTree/folderTreeTypes";
+import { useFolderBookmarks } from "./hooks/useFolderBookmarks";
+import { Bookmarks } from "./components/Bookmarks/Bookmarks";
+import {
+  collectFolderEntries,
+  getParentPath,
+} from "./components/FolderTree/folderTreeTypes";
 import { FileList } from "./components/FileList/FileList";
 import {
   DEFAULT_FILE_SORT,
@@ -56,17 +61,21 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [formatFilter, setFormatFilter] = useState<AudioFileFormat[]>([]);
   const [markFilter, setMarkFilter] = useState<MarkFilter>("all");
-  const [sidebarView, setSidebarView] = useState<"browser" | "recent">(
-    "browser",
-  );
+  const [sidebarView, setSidebarView] = useState<
+    "browser" | "bookmarks" | "recent"
+  >("browser");
   const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
   const [focusSearchRevision, setFocusSearchRevision] = useState(0);
   const [folderPickerError, setFolderPickerError] = useState<string | null>(
     null,
   );
   const sessionMarks = useSessionMarks();
-  const folderTree = useFolderTree();
+  const playerPreferences = usePlayerPreferences();
+  const folderTree = useFolderTree(
+    playerPreferences.preferences.show_hidden_folders,
+  );
   const recentFolders = useRecentFolders();
+  const folderBookmarks = useFolderBookmarks();
   const { state } = folderTree;
   const playback = usePlaybackSelection();
   useMarkReconciliation(
@@ -78,7 +87,6 @@ function App() {
   );
   const playbackMode = usePlaybackMode();
   const audioDevices = useAudioDevices();
-  const playerPreferences = usePlayerPreferences();
   const shortcutMappings = useShortcutMappings();
   const updatePreferences = playerPreferences.update;
   useTheme(playerPreferences.preferences.theme);
@@ -91,18 +99,28 @@ function App() {
   );
   const browserTabRef = useRef<HTMLButtonElement | null>(null);
   const recentTabRef = useRef<HTMLButtonElement | null>(null);
+  const bookmarksTabRef = useRef<HTMLButtonElement | null>(null);
 
   const handleSidebarTabKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLButtonElement>) => {
-      let next: "browser" | "recent" | null = null;
-      if (event.key === "ArrowLeft" || event.key === "Home") next = "browser";
-      if (event.key === "ArrowRight" || event.key === "End") next = "recent";
+      const tabs = ["browser", "bookmarks", "recent"] as const;
+      const current = tabs.indexOf(sidebarView);
+      let next: (typeof tabs)[number] | null = null;
+      if (event.key === "Home") next = "browser";
+      if (event.key === "End") next = "recent";
+      if (event.key === "ArrowLeft")
+        next = tabs[(current + tabs.length - 1) % tabs.length];
+      if (event.key === "ArrowRight") next = tabs[(current + 1) % tabs.length];
       if (!next) return;
       event.preventDefault();
       setSidebarView(next);
-      (next === "browser" ? browserTabRef : recentTabRef).current?.focus();
+      ({
+        browser: browserTabRef,
+        bookmarks: bookmarksTabRef,
+        recent: recentTabRef,
+      })[next].current?.focus();
     },
-    [],
+    [sidebarView],
   );
 
   const fileListFolder = state.folders[state.selectedPath ?? ""] ?? undefined;
@@ -184,6 +202,15 @@ function App() {
       recentFolders.record(path);
       folderTree.selectFolder(path);
       if (options?.expand) folderTree.toggleExpand(path);
+    },
+    [folderTree, playerPreferences, recentFolders],
+  );
+
+  const reopenFolder = useCallback(
+    (path: string) => {
+      playerPreferences.update({ selected_folder_path: path });
+      recentFolders.record(path);
+      void folderTree.restoreContext(path);
     },
     [folderTree, playerPreferences, recentFolders],
   );
@@ -453,6 +480,7 @@ function App() {
         <WaveformPanel
           entryPath={selectedEntry?.id ?? null}
           entryName={selectedEntry?.name ?? "No file selected"}
+          metadata={selectedEntry?.metadata}
           durationMs={
             transport.durationMs ??
             selectedEntry?.metadata?.duration_ms ??
@@ -537,16 +565,33 @@ function App() {
               }}
             />
             <div className="transport-options">
-              <PlaybackModeSelector
-                mode={playbackMode.mode}
-                error={playbackMode.error}
-                onChange={async (mode) => {
-                  const confirmed = await playbackMode.selectMode(mode);
-                  if (confirmed) {
-                    playerPreferences.update({ playback_mode: confirmed });
-                  }
-                }}
-              />
+              <div className="transport-settings">
+                <PlaybackModeSelector
+                  mode={playbackMode.mode}
+                  error={playbackMode.error}
+                  onChange={async (mode) => {
+                    const confirmed = await playbackMode.selectMode(mode);
+                    if (confirmed) {
+                      playerPreferences.update({ playback_mode: confirmed });
+                    }
+                  }}
+                />
+                <WaveformStyleSelector
+                  style={playerPreferences.preferences.waveform_style}
+                  onChange={(waveform_style) => {
+                    playerPreferences.update({ waveform_style });
+                  }}
+                />
+                {shortcutMappings.isLoading && (
+                  <span role="status">Loading shortcuts…</span>
+                )}
+                {shortcutMappings.error && (
+                  <span role="alert">{shortcutMappings.error}</span>
+                )}
+                {folderPickerError && (
+                  <span role="alert">{folderPickerError}</span>
+                )}
+              </div>
               <details className="app-options-menu">
                 <summary aria-label="Open application menu">☰</summary>
                 <div className="app-options-menu-content">
@@ -568,30 +613,37 @@ function App() {
                       playerPreferences.update({ theme });
                     }}
                   />
+                  <div className="browser-hidden-option">
+                    <label htmlFor="show-hidden-folders">
+                      Show hidden folders
+                    </label>
+                    <input
+                      id="show-hidden-folders"
+                      type="checkbox"
+                      checked={
+                        playerPreferences.preferences.show_hidden_folders
+                      }
+                      onChange={(event) => {
+                        playerPreferences.update({
+                          show_hidden_folders: event.currentTarget.checked,
+                        });
+                      }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="shortcut-settings-button"
+                    onClick={(event) => {
+                      event.currentTarget
+                        .closest("details")
+                        ?.removeAttribute("open");
+                      setShortcutEditorOpen(true);
+                    }}
+                  >
+                    Keyboard shortcuts
+                  </button>
                 </div>
               </details>
-              <WaveformStyleSelector
-                style={playerPreferences.preferences.waveform_style}
-                onChange={(waveform_style) => {
-                  playerPreferences.update({ waveform_style });
-                }}
-              />
-              <button
-                type="button"
-                className="shortcut-settings-button"
-                onClick={() => setShortcutEditorOpen(true)}
-              >
-                Keyboard shortcuts
-              </button>
-              {shortcutMappings.isLoading && (
-                <span role="status">Loading shortcuts…</span>
-              )}
-              {shortcutMappings.error && (
-                <span role="alert">{shortcutMappings.error}</span>
-              )}
-              {folderPickerError && (
-                <span role="alert">{folderPickerError}</span>
-              )}
             </div>
           </div>
           <div
@@ -618,6 +670,19 @@ function App() {
                   Browser
                 </button>
                 <button
+                  ref={bookmarksTabRef}
+                  id="sidebar-tab-bookmarks"
+                  type="button"
+                  role="tab"
+                  aria-controls="sidebar-panel-bookmarks"
+                  aria-selected={sidebarView === "bookmarks"}
+                  tabIndex={sidebarView === "bookmarks" ? 0 : -1}
+                  onClick={() => setSidebarView("bookmarks")}
+                  onKeyDown={handleSidebarTabKeyDown}
+                >
+                  Bookmarks
+                </button>
+                <button
                   ref={recentTabRef}
                   id="sidebar-tab-recent"
                   type="button"
@@ -641,6 +706,13 @@ function App() {
                 <FolderTree
                   {...folderTree}
                   activeFilePath={playback.playback.entryId}
+                  isBookmarked={folderBookmarks.isBookmarked(
+                    state.selectedPath,
+                  )}
+                  isPathBookmarked={folderBookmarks.isBookmarked}
+                  toggleBookmark={(path) => {
+                    void folderBookmarks.toggle(path);
+                  }}
                   toggleExpand={(path) => {
                     const expanded = new Set(
                       Object.entries(state.folders)
@@ -658,17 +730,43 @@ function App() {
                     openFolder(path);
                   }}
                   navigateUp={() => {
-                    const selected = state.selectedPath;
-                    const trimmed = selected?.replace(/\/+$/, "") ?? "";
-                    const separator = trimmed.lastIndexOf("/");
-                    if (separator > 0) {
-                      const parent = trimmed.substring(0, separator);
+                    const parent = state.selectedPath
+                      ? getParentPath(state.selectedPath)
+                      : null;
+                    if (parent) {
+                      const expanded = Object.entries(state.folders)
+                        .filter(
+                          ([path, folder]) =>
+                            folder.expanded && path !== parent,
+                        )
+                        .map(([path]) => path);
                       playerPreferences.update({
                         selected_folder_path: parent,
+                        expanded_folder_paths: expanded,
                       });
                       recentFolders.record(parent);
                     }
                     folderTree.navigateUp();
+                  }}
+                />
+              </div>
+              <div
+                id="sidebar-panel-bookmarks"
+                className="sidebar-panel"
+                role="tabpanel"
+                aria-labelledby="sidebar-tab-bookmarks"
+                hidden={sidebarView !== "bookmarks"}
+              >
+                <Bookmarks
+                  bookmarks={folderBookmarks.bookmarks}
+                  isLoading={folderBookmarks.isLoading}
+                  error={folderBookmarks.error}
+                  onReopen={(path) => {
+                    setSidebarView("browser");
+                    reopenFolder(path);
+                  }}
+                  onRemove={(path) => {
+                    void folderBookmarks.toggle(path);
                   }}
                 />
               </div>
@@ -685,7 +783,7 @@ function App() {
                   error={recentFolders.error}
                   onReopen={(path) => {
                     setSidebarView("browser");
-                    openFolder(path, { expand: true });
+                    reopenFolder(path);
                   }}
                   onClear={() => {
                     void recentFolders.clear();

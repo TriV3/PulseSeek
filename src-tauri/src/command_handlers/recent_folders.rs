@@ -1,8 +1,10 @@
 use serde_json::Value;
 
 use crate::command_envelope::types::{
-    ClearRecentFoldersRequest, ClearRecentFoldersResponse, ListRecentFoldersRequest,
-    ListRecentFoldersResponse, RecordRecentFolderRequest, RecordRecentFolderResponse,
+    ChangeFolderBookmarkRequest, ChangeFolderBookmarkResponse, ClearRecentFoldersRequest,
+    ClearRecentFoldersResponse, ListFolderBookmarksRequest, ListFolderBookmarksResponse,
+    ListRecentFoldersRequest, ListRecentFoldersResponse, RecordRecentFolderRequest,
+    RecordRecentFolderResponse,
 };
 use crate::command_envelope::{from_application_error, CommandResponse};
 use crate::command_handlers::parse_payload;
@@ -51,6 +53,36 @@ pub(crate) fn handle(
             match service.clear_recent_folders() {
                 Ok(()) => CommandResponse::ok(
                     serde_json::to_value(ClearRecentFoldersResponse {}).unwrap(),
+                ),
+                Err(error) => CommandResponse::err(from_application_error(&error)),
+            }
+        },
+        "list_folder_bookmarks" => {
+            let _request: ListFolderBookmarksRequest =
+                match parse_payload("list_folder_bookmarks", payload) {
+                    Ok(request) => request,
+                    Err(response) => return response,
+                };
+            match service.list_bookmarks() {
+                Ok(bookmarks) => CommandResponse::ok(
+                    serde_json::to_value(ListFolderBookmarksResponse { bookmarks }).unwrap(),
+                ),
+                Err(error) => CommandResponse::err(from_application_error(&error)),
+            }
+        },
+        "add_folder_bookmark" | "remove_folder_bookmark" => {
+            let request: ChangeFolderBookmarkRequest = match parse_payload(command, payload) {
+                Ok(request) => request,
+                Err(response) => return response,
+            };
+            let result = if command == "add_folder_bookmark" {
+                service.add_bookmark(&request.path)
+            } else {
+                service.remove_bookmark(&request.path)
+            };
+            match result {
+                Ok(()) => CommandResponse::ok(
+                    serde_json::to_value(ChangeFolderBookmarkResponse {}).unwrap(),
                 ),
                 Err(error) => CommandResponse::err(from_application_error(&error)),
             }

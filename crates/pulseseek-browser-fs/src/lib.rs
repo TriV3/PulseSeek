@@ -22,6 +22,13 @@ use pulseseek_domain::playback::position::Duration;
 /// Native filesystem adapter for [`FolderReader`].
 pub struct NativeFolderReader;
 
+#[derive(Clone, Copy)]
+struct RecursiveReadOptions {
+    show_unsupported: bool,
+    show_hidden: bool,
+    batch_size: usize,
+}
+
 impl FolderReader for NativeFolderReader {
     fn read_folder(&self, path: &Path) -> Result<Vec<BrowserEntry>, FolderReadError> {
         self.read_folder_with_options(path, false)
@@ -42,6 +49,15 @@ impl NativeFolderReader {
         path: &Path,
         show_unsupported: bool,
     ) -> Result<Vec<BrowserEntry>, FolderReadError> {
+        self.read_folder_preview_with_options(path, show_unsupported, false)
+    }
+
+    pub fn read_folder_preview_with_options(
+        &self,
+        path: &Path,
+        show_unsupported: bool,
+        show_hidden: bool,
+    ) -> Result<Vec<BrowserEntry>, FolderReadError> {
         let dir_reader =
             std::fs::read_dir(path).map_err(|e| FolderReadError::from_io_error(e, path))?;
         let mut entries = Vec::new();
@@ -53,10 +69,13 @@ impl NativeFolderReader {
             let path_string = entry.path().to_string_lossy().to_string();
             let id = EntryId::new(&path_string);
             if file_type.is_dir() {
+                if !show_hidden && name.starts_with('.') {
+                    continue;
+                }
                 entries.push(BrowserEntry::Folder(FolderEntry {
                     id,
                     name,
-                    has_subfolders: directory_has_subfolder(&entry.path()),
+                    has_subfolders: directory_has_subfolder(&entry.path(), show_hidden),
                 }));
             } else if likely_supported_audio(&entry.path()) {
                 entries.push(BrowserEntry::PlayableFile(PlayableFileEntry {
@@ -80,6 +99,7 @@ impl NativeFolderReader {
         &self,
         path: &Path,
         show_unsupported: bool,
+        show_hidden: bool,
         batch_size: usize,
         is_cancelled: impl Fn() -> bool + Sync,
         mut on_chunk: impl FnMut(&[BrowserEntry]),
@@ -102,6 +122,9 @@ impl NativeFolderReader {
             let child_path = entry.path();
             let path_string = child_path.to_string_lossy().to_string();
             if file_type.is_dir() {
+                if !show_hidden && name.starts_with('.') {
+                    continue;
+                }
                 folder_candidates.push((child_path, name));
             } else if likely_supported_audio(&child_path) {
                 immediate.push(BrowserEntry::PlayableFile(PlayableFileEntry {
@@ -154,7 +177,7 @@ impl NativeFolderReader {
                         let folder = BrowserEntry::Folder(FolderEntry {
                             id: EntryId::new(&path.to_string_lossy()),
                             name: name.clone(),
-                            has_subfolders: directory_has_subfolder(path),
+                            has_subfolders: directory_has_subfolder(path, show_hidden),
                         });
                         if sender.send(folder).is_err() {
                             break;
@@ -221,10 +244,13 @@ impl NativeFolderReader {
             let path_str = entry.path().to_string_lossy().to_string();
 
             let browser_entry = if file_type.is_dir() {
+                if name_str.starts_with('.') {
+                    continue;
+                }
                 BrowserEntry::Folder(FolderEntry {
                     id: EntryId::new(&path_str),
                     name: name_str,
-                    has_subfolders: directory_has_subfolder(&entry.path()),
+                    has_subfolders: directory_has_subfolder(&entry.path(), false),
                 })
             } else {
                 match self.classify_child(&entry.path(), show_unsupported) {
@@ -364,14 +390,14 @@ impl NativeFolderReader {
         &self,
         path: &Path,
         show_unsupported: bool,
+        show_hidden: bool,
         batch_size: usize,
         is_cancelled: impl Fn() -> bool,
         on_batch: impl FnMut(&[BrowserEntry]),
     ) -> Result<(), FolderReadError> {
         self.stream_recursive_files_with_reader(
             path,
-            show_unsupported,
-            batch_size,
+            RecursiveReadOptions { show_unsupported, show_hidden, batch_size },
             is_cancelled,
             on_batch,
             default_read_children,
@@ -381,8 +407,7 @@ impl NativeFolderReader {
     fn stream_recursive_files_with_reader<F, C, E>(
         &self,
         root: &Path,
-        show_unsupported: bool,
-        batch_size: usize,
+        options: RecursiveReadOptions,
         is_cancelled: C,
         mut on_batch: E,
         mut read_children: F,
@@ -392,7 +417,7 @@ impl NativeFolderReader {
         C: Fn() -> bool,
         E: FnMut(&[BrowserEntry]),
     {
-        let batch_size = batch_size.max(1);
+        let batch_size = options.batch_size.max(1);
         let root_children =
             read_children(root).map_err(|error| FolderReadError::from_io_error(error, root))?;
 
@@ -421,8 +446,11 @@ impl NativeFolderReader {
                 return Ok(());
             }
             if is_directory(&child) {
+                if !options.show_hidden && file_name_string(&child.path).starts_with('.') {
+                    continue;
+                }
                 root_dirs.push(child.path);
-            } else if let Some(entry) = self.classify_child(&child.path, show_unsupported) {
+            } else if let Some(entry) = self.classify_child(&child.path, options.show_unsupported) {
                 root_files.push(entry);
             }
         }
@@ -464,8 +492,13 @@ impl NativeFolderReader {
                     break;
                 }
                 if is_directory(&child) {
+                    if !options.show_hidden && file_name_string(&child.path).starts_with('.') {
+                        continue;
+                    }
                     child_dirs.push(child.path);
-                } else if let Some(entry) = self.classify_child(&child.path, show_unsupported) {
+                } else if let Some(entry) =
+                    self.classify_child(&child.path, options.show_unsupported)
+                {
                     child_files.push(entry);
                 }
             }
@@ -593,11 +626,13 @@ fn likely_supported_audio(path: &Path) -> bool {
 /// Looks only far enough into `path` to determine whether an expand control is
 /// useful. Errors remain unknown so inaccessible folders stay expandable and
 /// can surface their normal access error when selected.
-fn directory_has_subfolder(path: &Path) -> Option<bool> {
+fn directory_has_subfolder(path: &Path, show_hidden: bool) -> Option<bool> {
     let entries = std::fs::read_dir(path).ok()?;
     for entry in entries {
         let entry = entry.ok()?;
-        if entry.file_type().ok()?.is_dir() {
+        if entry.file_type().ok()?.is_dir()
+            && (show_hidden || !entry.file_name().to_string_lossy().starts_with('.'))
+        {
             return Some(true);
         }
     }

@@ -1,5 +1,10 @@
 import { useCallback } from "react";
-import type { FolderState } from "./folderTreeTypes";
+import { FolderIcon, type FolderIconKind } from "./FolderIcon";
+import type {
+  BrowserLibraryKind,
+  BrowserRootKind,
+  FolderState,
+} from "./folderTreeTypes";
 
 interface FolderNodeProps {
   /** Full filesystem path of this folder. */
@@ -17,6 +22,11 @@ interface FolderNodeProps {
   selectedPath: string | null;
   /** Full path of the selected audio file, used to highlight its ancestors. */
   activeFilePath?: string | null;
+  /** Reports whether any rendered filesystem path is bookmarked. */
+  isPathBookmarked?: (path: string) => boolean;
+  /** Special icon for a system, physical, or network root. */
+  rootKind?: BrowserRootKind | "computer";
+  libraryKind?: BrowserLibraryKind;
   /** Called when the expand/collapse toggle is clicked. */
   onToggle: (path: string) => void;
   /** Called when the folder name is clicked (select). */
@@ -32,14 +42,19 @@ export function FolderNode({
   playableEntries,
   selectedPath,
   activeFilePath = null,
+  isPathBookmarked,
+  rootKind,
+  libraryKind,
   onToggle,
   onSelect,
 }: FolderNodeProps) {
   const isSelected = path === selectedPath;
   const isOnAudioPath = folderContainsFile(path, activeFilePath);
+  const isBookmarked = isPathBookmarked?.(path) ?? false;
   const canExpand =
     state.hasSubfolders ??
     (state.isLoading || state.hasLoaded !== true || state.children.length > 0);
+  const iconKind: FolderIconKind = libraryKind ?? rootKind ?? "folder";
 
   const handleToggle = useCallback(
     (e: React.MouseEvent) => {
@@ -73,7 +88,8 @@ export function FolderNode({
       tabIndex={isSelected ? 0 : -1}
       className={`folder-node${isSelected ? " selected" : ""}${
         isOnAudioPath ? " folder-node--audio-path" : ""
-      }`}
+      }${isBookmarked ? " folder-node--bookmarked" : ""}`}
+      data-bookmarked={isBookmarked || undefined}
       data-depth={depth}
       data-folder-path={path}
       onKeyDown={handleKeyDown}
@@ -103,9 +119,7 @@ export function FolderNode({
         )}
 
         {/* Folder icon + name */}
-        <span className="folder-icon" aria-hidden="true">
-          {state.expanded ? "\uD83D\uDCC2" : "\uD83D\uDCC1"}
-        </span>
+        <FolderIcon kind={iconKind} expanded={state.expanded} />
         <span className="folder-name">{name}</span>
       </div>
 
@@ -144,6 +158,9 @@ export function FolderNode({
                 playableEntries={playableEntries}
                 selectedPath={selectedPath}
                 activeFilePath={activeFilePath}
+                isPathBookmarked={isPathBookmarked}
+                rootKind={child.rootKind}
+                libraryKind={child.libraryKind}
                 onToggle={onToggle}
                 onSelect={onSelect}
               />

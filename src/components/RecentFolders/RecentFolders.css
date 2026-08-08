@@ -66,6 +66,28 @@
   display: block;
 }
 
+.bookmark-item {
+  display: flex;
+  align-items: center;
+}
+.bookmark-item .recent-folders-button {
+  flex: 1;
+  min-width: 0;
+}
+.bookmark-remove {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 7px;
+}
+.bookmark-remove:hover {
+  color: var(--text-danger);
+}
+.bookmark-remove:focus-visible {
+  outline: 2px solid var(--focus-ring);
+}
+
 .recent-folders-button {
   display: block;
   width: 100%;

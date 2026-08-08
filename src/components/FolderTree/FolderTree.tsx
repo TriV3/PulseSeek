@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FolderTreeState } from "./folderTreeTypes";
 import { FolderNode } from "./FolderNode";
 import "./FolderTree.css";
@@ -11,6 +11,9 @@ export interface FolderTreeProps {
   clearError: () => void;
   /** Full path of the selected audio file, if any. */
   activeFilePath?: string | null;
+  isBookmarked?: boolean;
+  isPathBookmarked?: (path: string) => boolean;
+  toggleBookmark?: (path: string) => void;
 }
 
 export function FolderTree({
@@ -20,8 +23,13 @@ export function FolderTree({
   navigateUp,
   clearError,
   activeFilePath = null,
+  isBookmarked = false,
+  isPathBookmarked,
+  toggleBookmark,
 }: FolderTreeProps) {
   const treeRef = useRef<HTMLDivElement | null>(null);
+  const [drivesExpanded, setDrivesExpanded] = useState(true);
+  const [librariesExpanded, setLibrariesExpanded] = useState(true);
 
   useEffect(() => {
     const selectedPath = state.selectedPath;
@@ -136,6 +144,20 @@ export function FolderTree({
         >
           Go Up
         </button>
+        <button
+          type="button"
+          className="bookmark-folder-btn"
+          disabled={!state.selectedPath || state.selectedPath === "computer://"}
+          aria-label={
+            isBookmarked ? "Remove folder bookmark" : "Bookmark folder"
+          }
+          aria-pressed={isBookmarked}
+          onClick={() =>
+            state.selectedPath && toggleBookmark?.(state.selectedPath)
+          }
+        >
+          {isBookmarked ? "★" : "☆"}
+        </button>
         <span className="current-path" title={state.rootPath}>
           {state.rootPath}
         </span>
@@ -160,25 +182,114 @@ export function FolderTree({
       )}
 
       {/* Tree */}
-      <ul className="folder-tree-root" role="group">
-        <FolderNode
-          path={state.rootPath}
-          name={
-            state.rootPath === "computer://"
-              ? "Computer"
-              : (state.rootPath.split("/").filter(Boolean).pop() ??
-                state.rootPath)
-          }
-          depth={0}
-          state={rootFolderState}
-          folders={state.folders}
-          playableEntries={state.playableEntries}
-          selectedPath={state.selectedPath}
-          activeFilePath={activeFilePath}
-          onToggle={toggleExpand}
-          onSelect={selectFolder}
-        />
-      </ul>
+      {state.rootPath === "computer://" ? (
+        <div className="folder-tree-sections">
+          <BrowserSection
+            label="Drives"
+            expanded={drivesExpanded}
+            onToggle={() => setDrivesExpanded((value) => !value)}
+          >
+            {rootFolderState.children.map((entry) => (
+              <FolderNode
+                key={entry.id}
+                path={entry.id}
+                name={entry.name}
+                depth={0}
+                state={state.folders[entry.id]}
+                folders={state.folders}
+                playableEntries={state.playableEntries}
+                selectedPath={state.selectedPath}
+                activeFilePath={activeFilePath}
+                isPathBookmarked={isPathBookmarked}
+                rootKind={entry.rootKind}
+                onToggle={toggleExpand}
+                onSelect={selectFolder}
+              />
+            ))}
+          </BrowserSection>
+          <BrowserSection
+            label="Libraries"
+            expanded={librariesExpanded}
+            onToggle={() => setLibrariesExpanded((value) => !value)}
+          >
+            {state.libraries.map((entry) => (
+              <FolderNode
+                key={entry.id}
+                path={entry.id}
+                name={entry.name}
+                depth={0}
+                state={state.folders[entry.id]}
+                folders={state.folders}
+                playableEntries={state.playableEntries}
+                selectedPath={state.selectedPath}
+                activeFilePath={activeFilePath}
+                isPathBookmarked={isPathBookmarked}
+                libraryKind={entry.libraryKind}
+                onToggle={toggleExpand}
+                onSelect={selectFolder}
+              />
+            ))}
+          </BrowserSection>
+        </div>
+      ) : (
+        <ul className="folder-tree-root" role="group">
+          <FolderNode
+            path={state.rootPath}
+            name={
+              state.rootPath === "computer://"
+                ? "Computer"
+                : (state.rootPath.split("/").filter(Boolean).pop() ??
+                  state.rootPath)
+            }
+            depth={0}
+            state={rootFolderState}
+            folders={state.folders}
+            playableEntries={state.playableEntries}
+            selectedPath={state.selectedPath}
+            activeFilePath={activeFilePath}
+            isPathBookmarked={isPathBookmarked}
+            rootKind={state.rootPath === "computer://" ? "computer" : undefined}
+            onToggle={toggleExpand}
+            onSelect={selectFolder}
+          />
+        </ul>
+      )}
     </div>
+  );
+}
+
+function BrowserSection({
+  label,
+  expanded,
+  onToggle,
+  children,
+}: {
+  label: string;
+  expanded: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="browser-section">
+      <button
+        type="button"
+        className="browser-section-header"
+        aria-expanded={expanded}
+        onClick={onToggle}
+      >
+        <span
+          className={`folder-arrow${expanded ? " expanded" : ""}`}
+          aria-hidden="true"
+        >
+          ▶
+        </span>
+        {label}
+      </button>
+      {expanded && (
+        <ul className="folder-tree-root" role="group">
+          {children}
+        </ul>
+      )}
+    </section>
   );
 }
