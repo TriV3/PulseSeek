@@ -101,6 +101,7 @@ impl PlaybackEngine {
                 seek_fade_out_frame: SEEK_RAMP_FRAMES,
                 seek_fade_out_origin: [0.0; MAX_CALLBACK_CHANNELS],
                 buffer_cleared_for_seek: false,
+                visualization_tap: None,
             },
         )
     }

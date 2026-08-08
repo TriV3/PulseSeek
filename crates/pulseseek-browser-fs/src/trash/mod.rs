@@ -11,14 +11,17 @@ pub struct NativeFileTrash;
 
 impl FileTrash for NativeFileTrash {
     fn move_to_trash(&self, paths: &[PathBuf]) -> Vec<TrashResult> {
-        paths
-            .iter()
-            .map(|path| match trash::delete(path) {
-                Ok(()) => (path.clone(), Ok(())),
-                Err(err) => (path.clone(), Err(map_trash_error(err, path))),
-            })
-            .collect()
+        move_each_to_trash(paths, |path| {
+            trash::delete(path).map_err(|err| map_trash_error(err, path))
+        })
     }
+}
+
+fn move_each_to_trash(
+    paths: &[PathBuf],
+    mut move_one: impl FnMut(&Path) -> Result<(), TrashError>,
+) -> Vec<TrashResult> {
+    paths.iter().map(|path| (path.clone(), move_one(path))).collect()
 }
 
 fn map_trash_error(err: trash::Error, path: &Path) -> TrashError {

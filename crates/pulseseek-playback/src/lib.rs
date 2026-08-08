@@ -4,12 +4,14 @@ mod control;
 mod engine;
 mod error;
 mod event;
+mod visualization;
 mod worker;
 
 pub use control::*;
 pub use engine::*;
 pub use error::*;
 pub use event::*;
+pub use visualization::*;
 pub use worker::*;
 
 /// Applies linear gain to one sample and hard-clips the result to audio range.

@@ -6,6 +6,7 @@ use ringbuf::HeapCons;
 
 use crate::apply_volume;
 use crate::engine::BufferedSample;
+use crate::visualization::VisualizationTap;
 
 /// Consumer half intended for use by a real-time audio callback.
 pub struct PlaybackConsumer {
@@ -18,6 +19,7 @@ pub struct PlaybackConsumer {
     pub(crate) seek_fade_out_frame: usize,
     pub(crate) seek_fade_out_origin: [f32; MAX_CALLBACK_CHANNELS],
     pub(crate) buffer_cleared_for_seek: bool,
+    pub(crate) visualization_tap: Option<VisualizationTap>,
 }
 
 pub(crate) const MAX_CALLBACK_CHANNELS: usize = 32;
@@ -378,7 +380,31 @@ impl PlaybackConsumer {
         for sample in buf.iter_mut() {
             *sample = apply_volume(*sample, gain);
         }
+        if written > 0 {
+            let frame_count = written / output_channels;
+            let position_frames = self
+                .control
+                .position_frames()
+                .saturating_sub(u64::try_from(frame_count).unwrap_or(u64::MAX));
+            if let Some(tap) = &mut self.visualization_tap {
+                tap.capture(&buf[..written], position_frames, output_channels);
+            }
+        }
         written
+    }
+
+    /// Installs a preconfigured visualization tap before this consumer enters
+    /// the audio callback.
+    pub fn set_visualization_tap(&mut self, tap: VisualizationTap) {
+        self.visualization_tap = Some(tap);
+    }
+
+    pub fn clear_visualization_tap(&mut self) {
+        self.visualization_tap = None;
+    }
+
+    pub fn visualization_dropped_frames(&self) -> Option<u64> {
+        self.visualization_tap.as_ref().map(VisualizationTap::dropped_frames)
     }
 
     /// Returns the number of frames currently available to the callback.
