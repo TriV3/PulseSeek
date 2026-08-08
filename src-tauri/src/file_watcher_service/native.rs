@@ -2,7 +2,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use notify_debouncer_full::notify::{Config, RecommendedWatcher, RecursiveMode};
+#[cfg(test)]
+use notify_debouncer_full::notify::PollWatcher as PlatformWatcher;
+#[cfg(not(test))]
+use notify_debouncer_full::notify::RecommendedWatcher as PlatformWatcher;
+use notify_debouncer_full::notify::{Config, RecursiveMode};
 use notify_debouncer_full::{new_debouncer_opt, DebounceEventResult, Debouncer, NoCache};
 use pulseseek_cache::waveform_cache::{waveform_cache_key, WaveformCachePort, WaveformIdentity};
 use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContext, ErrorCategory};
@@ -13,6 +17,9 @@ use super::FileWatcherService;
 
 /// Default debounce window used to coalesce filesystem events.
 pub const DEFAULT_DEBOUNCE_MS: u64 = 200;
+
+#[cfg(test)]
+const TEST_POLL_INTERVAL_MS: u64 = 20;
 
 /// Native file watcher backed by `notify-debouncer-full`.
 ///
@@ -31,7 +38,7 @@ pub const DEFAULT_DEBOUNCE_MS: u64 = 200;
 /// needs a coarse "something changed" signal, so rename stitching accuracy is
 /// not worth blocking enumeration.
 pub struct NativeFileWatcherService {
-    debouncer: Mutex<Debouncer<RecommendedWatcher, NoCache>>,
+    debouncer: Mutex<Debouncer<PlatformWatcher, NoCache>>,
     watched: Arc<Mutex<Option<PathBuf>>>,
 }
 
@@ -49,7 +56,7 @@ impl NativeFileWatcherService {
         let callback_watched = Arc::clone(&watched);
         let callback_events = Arc::clone(&events);
         let callback_cache = cache.clone();
-        let debouncer = new_debouncer_opt::<_, RecommendedWatcher, NoCache>(
+        let debouncer = new_debouncer_opt::<_, PlatformWatcher, NoCache>(
             Duration::from_millis(debounce_ms),
             None,
             move |result: DebounceEventResult| {
@@ -61,7 +68,7 @@ impl NativeFileWatcherService {
                 );
             },
             NoCache,
-            Config::default(),
+            watcher_config(),
         )
         .map_err(|error| {
             ApplicationError::new(
@@ -83,10 +90,36 @@ impl NativeFileWatcherService {
     }
 }
 
+fn watcher_config() -> Config {
+    #[cfg(test)]
+    {
+        // Sandboxed macOS test runners may not deliver FSEvents at all. The
+        // official polling backend still exercises real filesystem changes,
+        // debounce, invalidation, and lifecycle deterministically.
+        Config::default()
+            .with_poll_interval(Duration::from_millis(TEST_POLL_INTERVAL_MS))
+            .with_compare_contents(true)
+    }
+    #[cfg(not(test))]
+    {
+        Config::default()
+    }
+}
+
 impl FileWatcherService for NativeFileWatcherService {
     fn start_watching(&mut self, path: &str) -> Result<(), ApplicationError> {
         tracing::debug!(path = %path, "file watcher start_watching begin");
         let target = PathBuf::from(path);
+        if !target.is_dir() {
+            return Err(ApplicationError::new(
+                ErrorCategory::InvalidInput,
+                DiagnosticContext::new(DiagnosticCode::BrowserRead),
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "watch target is not an existing directory",
+                ),
+            ));
+        }
         let mut debouncer = self.debouncer.lock().expect("debouncer mutex poisoned");
         let mut watched = self.watched.lock().expect("watched mutex poisoned");
         if watched.as_ref() == Some(&target) {
