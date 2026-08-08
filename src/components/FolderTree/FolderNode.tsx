@@ -31,6 +31,16 @@ interface FolderNodeProps {
   onToggle: (path: string) => void;
   /** Called when the folder name is clicked (select). */
   onSelect: (path: string) => void;
+  /** Opens application folder actions at a pointer or keyboard anchor. */
+  onContextMenu?: (
+    path: string,
+    name: string,
+    state: FolderState,
+    canExpand: boolean,
+    x: number,
+    y: number,
+    anchor: HTMLElement,
+  ) => void;
 }
 
 export function FolderNode({
@@ -47,6 +57,7 @@ export function FolderNode({
   libraryKind,
   onToggle,
   onSelect,
+  onContextMenu,
 }: FolderNodeProps) {
   const isSelected = path === selectedPath;
   const isOnAudioPath = folderContainsFile(path, activeFilePath);
@@ -70,14 +81,28 @@ export function FolderNode({
   }, [canExpand, path, onSelect, onToggle]);
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+    (e: React.KeyboardEvent<HTMLLIElement>) => {
+      if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+        e.preventDefault();
+        const rect = e.currentTarget.getBoundingClientRect();
+        onContextMenu?.(
+          path,
+          name,
+          state,
+          canExpand,
+          rect.left + 12,
+          rect.top + 12,
+          e.currentTarget,
+        );
+        return;
+      }
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         onSelect(path);
         if (canExpand) onToggle(path);
       }
     },
-    [canExpand, path, onSelect, onToggle],
+    [canExpand, name, onContextMenu, path, state, onSelect, onToggle],
   );
 
   return (
@@ -93,6 +118,19 @@ export function FolderNode({
       data-depth={depth}
       data-folder-path={path}
       onKeyDown={handleKeyDown}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onContextMenu?.(
+          path,
+          name,
+          state,
+          canExpand,
+          event.clientX,
+          event.clientY,
+          event.currentTarget,
+        );
+      }}
     >
       <div className="folder-node-row" onClick={handleSelect}>
         {/* Expand / collapse toggle */}
@@ -163,6 +201,7 @@ export function FolderNode({
                 libraryKind={child.libraryKind}
                 onToggle={onToggle}
                 onSelect={onSelect}
+                onContextMenu={onContextMenu}
               />
             );
           })}

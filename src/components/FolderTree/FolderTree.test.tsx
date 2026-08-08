@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { FolderTree } from "./FolderTree";
 import type { FolderTreeState } from "./folderTreeTypes";
@@ -229,6 +229,73 @@ describe("FolderTree — bookmarks", () => {
     expect(screen.getByText("Music").closest("[role='treeitem']")).toHaveClass(
       "folder-node--bookmarked",
     );
+  });
+
+  it("replaces the native menu with folder actions", () => {
+    const props = createMockFolderTreeProps({
+      rootPath: "/music",
+      selectedPath: "/music",
+      folders: {
+        "/music": {
+          expanded: false,
+          children: [],
+          isLoading: false,
+          hasLoaded: true,
+          hasSubfolders: true,
+          error: null,
+          recursive: false,
+        },
+      },
+    });
+    const toggleBookmark = vi.fn();
+    render(<FolderTree {...props} toggleBookmark={toggleBookmark} />);
+
+    const folder = screen.getByRole("treeitem");
+    expect(fireEvent.contextMenu(folder, { clientX: 20, clientY: 30 })).toBe(
+      false,
+    );
+    const menu = screen.getByRole("menu", {
+      name: "Folder actions for music",
+    });
+    expect(within(menu).getByRole("menuitem", { name: "Open" })).toBeVisible();
+    expect(
+      within(menu).getByRole("menuitem", { name: "Expand folder" }),
+    ).toBeVisible();
+
+    fireEvent.click(
+      within(menu).getByRole("menuitem", { name: "Bookmark folder" }),
+    );
+    expect(toggleBookmark).toHaveBeenCalledWith("/music");
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("offers to remove an existing folder bookmark", () => {
+    const props = createMockFolderTreeProps({
+      rootPath: "/music",
+      selectedPath: "/music",
+      folders: {
+        "/music": {
+          expanded: false,
+          children: [],
+          isLoading: false,
+          hasLoaded: true,
+          error: null,
+          recursive: false,
+        },
+      },
+    });
+    render(
+      <FolderTree
+        {...props}
+        isPathBookmarked={(path) => path === "/music"}
+        toggleBookmark={vi.fn()}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("treeitem"));
+    expect(
+      screen.getByRole("menuitem", { name: "Remove folder bookmark" }),
+    ).toBeVisible();
   });
 });
 

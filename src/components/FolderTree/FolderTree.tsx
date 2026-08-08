@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FolderTreeState } from "./folderTreeTypes";
+import type { FolderState, FolderTreeState } from "./folderTreeTypes";
 import { FolderNode } from "./FolderNode";
+import { ContextMenu } from "../ContextMenu/ContextMenu";
 import "./FolderTree.css";
 
 export interface FolderTreeProps {
@@ -30,6 +31,39 @@ export function FolderTree({
   const treeRef = useRef<HTMLDivElement | null>(null);
   const [drivesExpanded, setDrivesExpanded] = useState(true);
   const [librariesExpanded, setLibrariesExpanded] = useState(true);
+  const [contextTarget, setContextTarget] = useState<{
+    path: string;
+    name: string;
+    expanded: boolean;
+    canExpand: boolean;
+    x: number;
+    y: number;
+    anchor: HTMLElement;
+  } | null>(null);
+
+  const openFolderContextMenu = useCallback(
+    (
+      path: string,
+      name: string,
+      folder: FolderState,
+      canExpand: boolean,
+      x: number,
+      y: number,
+      anchor: HTMLElement,
+    ) => {
+      selectFolder(path);
+      setContextTarget({
+        path,
+        name,
+        expanded: folder.expanded,
+        canExpand,
+        x,
+        y,
+        anchor,
+      });
+    },
+    [selectFolder],
+  );
 
   useEffect(() => {
     const selectedPath = state.selectedPath;
@@ -204,6 +238,7 @@ export function FolderTree({
                 rootKind={entry.rootKind}
                 onToggle={toggleExpand}
                 onSelect={selectFolder}
+                onContextMenu={openFolderContextMenu}
               />
             ))}
           </BrowserSection>
@@ -227,6 +262,7 @@ export function FolderTree({
                 libraryKind={entry.libraryKind}
                 onToggle={toggleExpand}
                 onSelect={selectFolder}
+                onContextMenu={openFolderContextMenu}
               />
             ))}
           </BrowserSection>
@@ -251,9 +287,48 @@ export function FolderTree({
             rootKind={state.rootPath === "computer://" ? "computer" : undefined}
             onToggle={toggleExpand}
             onSelect={selectFolder}
+            onContextMenu={openFolderContextMenu}
           />
         </ul>
       )}
+      {contextTarget ? (
+        <ContextMenu
+          label={`Folder actions for ${contextTarget.name}`}
+          x={contextTarget.x}
+          y={contextTarget.y}
+          returnFocus={contextTarget.anchor}
+          onClose={() => setContextTarget(null)}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => selectFolder(contextTarget.path)}
+          >
+            Open
+          </button>
+          {contextTarget.canExpand ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => toggleExpand(contextTarget.path)}
+            >
+              {contextTarget.expanded ? "Collapse folder" : "Expand folder"}
+            </button>
+          ) : null}
+          <div className="context-menu-separator" role="separator" />
+          <button
+            type="button"
+            role="menuitem"
+            disabled={contextTarget.path === "computer://" || !toggleBookmark}
+            onClick={() => toggleBookmark?.(contextTarget.path)}
+          >
+            {(isPathBookmarked?.(contextTarget.path) ??
+            (contextTarget.path === state.selectedPath && isBookmarked))
+              ? "Remove folder bookmark"
+              : "Bookmark folder"}
+          </button>
+        </ContextMenu>
+      ) : null}
     </div>
   );
 }
