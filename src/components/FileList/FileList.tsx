@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   cancelCopyFiles,
   cancelMoveFiles,
+  dragOut,
   moveToTrash,
   openWith,
   pickFolder,
@@ -62,6 +63,46 @@ import "../MoveDialog/MoveDialog.css";
 import "../CopyDialog/CopyDialog.css";
 
 const UNAVAILABLE = "—";
+const NATIVE_DRAG_THRESHOLD_PX = 5;
+
+/** True when running on macOS, where WKWebView cannot deliver file URLs to
+ * an external drag session and the native drag-out command is used instead.
+ */
+function isMacOSPlatform(): boolean {
+  const buildPlatform = import.meta.env.TAURI_ENV_PLATFORM?.toLowerCase();
+  if (buildPlatform) return buildPlatform === "darwin";
+  if (typeof navigator === "undefined") return false;
+  const platform = navigator.platform?.toLowerCase() ?? "";
+  const userAgent = navigator.userAgent.toLowerCase();
+  return platform.includes("mac") || userAgent.includes("macintosh");
+}
+
+/** Builds a percent-encoded `file://` URI for a drag payload entry id (a
+ * filesystem path). Each path segment is encoded so spaces, `#`, `?`, and
+ * non-ASCII characters survive the `text/uri-list` payload intact. */
+function fileUriForPath(path: string): string {
+  const normalized = path.replaceAll("\\", "/");
+  const unc = normalized.match(/^\/\/([^/]+)(\/.*)$/);
+  if (unc) {
+    const [, host, pathname] = unc;
+    const encodedPath = pathname
+      .split("/")
+      .map((segment) => encodeURIComponent(segment))
+      .join("/");
+    return `file://${encodeURIComponent(host)}${encodedPath}`;
+  }
+  const encoded = normalized
+    .split("/")
+    .map((segment, index) =>
+      index === 0 && /^[A-Za-z]:$/.test(segment)
+        ? segment
+        : encodeURIComponent(segment),
+    )
+    .join("/");
+  return /^[A-Za-z]:\//.test(normalized)
+    ? `file:///${encoded}`
+    : `file://${encoded}`;
+}
 
 function formatDuration(durationMs: number | null): string {
   if (durationMs === null) return UNAVAILABLE;
@@ -200,6 +241,7 @@ export function FileList({
   onRecursiveChange,
 }: FileListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const usesNativeDragOut = isMacOSPlatform();
   // Multi-selection stores stable backend entry ids (FR-LS-005) so rows keep
   // their selection across sort, search, and format-filter changes.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -254,6 +296,11 @@ export function FileList({
   const [externalBusy, setExternalBusy] = useState(false);
   const [externalError, setExternalError] = useState<string | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const nativeDragMouseRef = useRef<{
+    startX: number;
+    startY: number;
+    entryId: string;
+  } | null>(null);
 
   useEffect(() => {
     onEntriesMovedRef.current = onEntriesMoved;
@@ -552,6 +599,87 @@ export function FileList({
     } finally {
       setExternalBusy(false);
     }
+  };
+
+  // ── Drag-out (FR-FM-011) ────────────────────────────────────────────
+  //
+  // Dragging a playable row carries the whole selection when the row is part
+  // of it, otherwise just that row. Non-macOS webviews receive the file URLs
+  // through `text/uri-list`; macOS hands the paths to the native drag session
+  // because WKWebView cannot drag files out by itself.
+
+  const draggedPathsForEntry = (entry: BrowserEntry): string[] =>
+    selectedIds.has(entry.id) && selectedPlayableIds.length > 0
+      ? selectedPlayableIds
+      : [entry.id];
+
+  const startNativeDrag = (entry: BrowserEntry) => {
+    const draggedPaths = draggedPathsForEntry(entry);
+    if (draggedPaths.length === 0) return;
+    setExternalError(null);
+    setExternalBusy(true);
+    void dragOut(draggedPaths)
+      .catch((error: unknown) => {
+        setExternalError(
+          error instanceof Error ? error.message : "Unable to start drag.",
+        );
+      })
+      .finally(() => {
+        setExternalBusy(false);
+      });
+  };
+
+  const handleHtmlDragStart = (
+    event: React.DragEvent<HTMLDivElement>,
+    entry: BrowserEntry,
+  ) => {
+    if (entry.kind !== "playable") return;
+    const draggedPaths = draggedPathsForEntry(entry);
+    if (draggedPaths.length === 0) return;
+    event.dataTransfer.setData(
+      "text/uri-list",
+      draggedPaths.map((path) => fileUriForPath(path)).join("\n"),
+    );
+    event.dataTransfer.effectAllowed = "copy";
+  };
+
+  const handleNativeMouseDown = (
+    event: React.MouseEvent<HTMLDivElement>,
+    entry: BrowserEntry,
+  ) => {
+    if (!usesNativeDragOut || event.button !== 0) return;
+    nativeDragMouseRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      entryId: entry.id,
+    };
+  };
+
+  const handleNativeMouseMove = (
+    event: React.MouseEvent<HTMLDivElement>,
+    entry: BrowserEntry,
+  ) => {
+    const pending = nativeDragMouseRef.current;
+    if (!usesNativeDragOut || !pending || pending.entryId !== entry.id) {
+      return;
+    }
+    const distance = Math.hypot(
+      event.clientX - pending.startX,
+      event.clientY - pending.startY,
+    );
+    if (distance < NATIVE_DRAG_THRESHOLD_PX) return;
+
+    nativeDragMouseRef.current = null;
+    event.preventDefault();
+    startNativeDrag(entry);
+  };
+
+  const clearNativeDragMouse = () => {
+    nativeDragMouseRef.current = null;
+  };
+
+  const handleDragEnd = () => {
+    setExternalBusy(false);
   };
 
   // ── Move flow (FR-FM-004, FR-FM-005) ────────────────────────────────
@@ -1247,6 +1375,17 @@ export function FileList({
                     height: `${virtualRow.size}px`,
                     transform: `translateY(${virtualRow.start}px)`,
                   }}
+                  draggable={entry.kind === "playable" && !usesNativeDragOut}
+                  onDragStart={
+                    usesNativeDragOut
+                      ? undefined
+                      : (event) => handleHtmlDragStart(event, entry)
+                  }
+                  onDragEnd={handleDragEnd}
+                  onMouseDown={(event) => handleNativeMouseDown(event, entry)}
+                  onMouseMove={(event) => handleNativeMouseMove(event, entry)}
+                  onMouseUp={clearNativeDragMouse}
+                  onMouseLeave={clearNativeDragMouse}
                   onClick={(event) => handlePlayableRowClick(event, entry)}
                   onKeyDown={(event) => {
                     if (handleGridKeyDown(event, virtualRow.index)) {

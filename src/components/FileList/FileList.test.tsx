@@ -32,6 +32,7 @@ const mockCancelMoveFiles = vi.hoisted(() => vi.fn());
 const mockPickFolder = vi.hoisted(() => vi.fn());
 const mockRevealFile = vi.hoisted(() => vi.fn());
 const mockOpenWith = vi.hoisted(() => vi.fn());
+const mockDragOut = vi.hoisted(() => vi.fn());
 
 vi.mock("../../api/commandEnvelope", () => ({
   moveToTrash: mockMoveToTrash,
@@ -41,6 +42,7 @@ vi.mock("../../api/commandEnvelope", () => ({
   pickFolder: mockPickFolder,
   revealFile: mockRevealFile,
   openWith: mockOpenWith,
+  dragOut: mockDragOut,
 }));
 
 type EventHandler = (event: { payload: unknown }) => void;
@@ -2766,6 +2768,361 @@ describe("FileList — reveal and open-with", () => {
 
     await waitFor(() => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe("FileList — drag-out", () => {
+  beforeEach(() => {
+    mockDragOut.mockReset();
+    vi.unstubAllEnvs();
+  });
+
+  function makeDataTransfer() {
+    const data: Record<string, string> = {};
+    return {
+      setData: vi.fn((type: string, value: string) => {
+        data[type] = value;
+      }),
+      getData: (type: string) => data[type] ?? "",
+      effectAllowed: "",
+    };
+  }
+
+  function rowFor(name: string): Element {
+    const cell = screen.getByText(name);
+    const row = cell.closest('[role="row"]');
+    if (!row) throw new Error(`row for ${name} not found`);
+    return row;
+  }
+
+  function startNativeMouseDrag(name: string): void {
+    const row = rowFor(name);
+    fireEvent.mouseDown(row, {
+      button: 0,
+      buttons: 1,
+      clientX: 10,
+      clientY: 10,
+    });
+    fireEvent.mouseMove(row, {
+      buttons: 0,
+      clientX: 18,
+      clientY: 10,
+    });
+  }
+
+  function withPlatform(
+    platform: string,
+    run: () => Promise<void> | void,
+  ): Promise<void> {
+    const original = Object.getOwnPropertyDescriptor(navigator, "platform");
+    Object.defineProperty(navigator, "platform", {
+      value: platform,
+      configurable: true,
+    });
+    return Promise.resolve()
+      .then(run)
+      .finally(() => {
+        if (original) Object.defineProperty(navigator, "platform", original);
+        else delete (navigator as { platform?: string }).platform;
+      });
+  }
+
+  it("sets a text/uri-list payload for the dragged row", () => {
+    return withPlatform("Linux x86_64", () => {
+      render(
+        <FileList
+          entries={[sampleEntries[0]]}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+        />,
+      );
+      const dt = makeDataTransfer();
+      fireEvent.dragStart(rowFor("song1.mp3"), { dataTransfer: dt });
+      expect(dt.setData).toHaveBeenCalledWith(
+        "text/uri-list",
+        "file://song1.mp3",
+      );
+      expect(mockDragOut).not.toHaveBeenCalled();
+    });
+  });
+
+  it("converts an absolute Windows path to a valid file URI", () => {
+    return withPlatform("Win32", () => {
+      render(
+        <FileList
+          entries={[
+            {
+              id: "C:\\Music\\a b#1.wav",
+              name: "a b#1.wav",
+              kind: "playable",
+            },
+          ]}
+          selectedPath="C:\\Music"
+          isLoading={false}
+          error={null}
+        />,
+      );
+      const dt = makeDataTransfer();
+      fireEvent.dragStart(rowFor("a b#1.wav"), { dataTransfer: dt });
+      expect(dt.setData).toHaveBeenCalledWith(
+        "text/uri-list",
+        "file:///C:/Music/a%20b%231.wav",
+      );
+    });
+  });
+
+  it("converts a Windows UNC path to a valid file URI", () => {
+    return withPlatform("Win32", () => {
+      render(
+        <FileList
+          entries={[
+            {
+              id: "\\\\server\\share\\track.wav",
+              name: "track.wav",
+              kind: "playable",
+            },
+          ]}
+          selectedPath="\\\\server\\share"
+          isLoading={false}
+          error={null}
+        />,
+      );
+      const dt = makeDataTransfer();
+      fireEvent.dragStart(rowFor("track.wav"), { dataTransfer: dt });
+      expect(dt.setData).toHaveBeenCalledWith(
+        "text/uri-list",
+        "file://server/share/track.wav",
+      );
+    });
+  });
+
+  it("percent-encodes file URIs in the uri-list payload", () => {
+    return withPlatform("Linux x86_64", () => {
+      render(
+        <FileList
+          entries={[
+            { id: "/music/a b#1.wav", name: "a b#1.wav", kind: "playable" },
+          ]}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+        />,
+      );
+      const dt = makeDataTransfer();
+      fireEvent.dragStart(rowFor("a b#1.wav"), { dataTransfer: dt });
+      expect(dt.setData).toHaveBeenCalledWith(
+        "text/uri-list",
+        "file:///music/a%20b%231.wav",
+      );
+    });
+  });
+
+  it("drags the whole selection when the dragged row is selected", () => {
+    return withPlatform("Linux x86_64", () => {
+      render(
+        <FileList
+          entries={sampleEntries}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+        />,
+      );
+      fireEvent.click(screen.getByText("song1.mp3"));
+      fireEvent.click(screen.getByText("song2.wav"), { ctrlKey: true });
+      const dt = makeDataTransfer();
+      fireEvent.dragStart(rowFor("song1.mp3"), { dataTransfer: dt });
+      expect(dt.setData).toHaveBeenCalledWith(
+        "text/uri-list",
+        "file://song1.mp3\nfile://song2.wav",
+      );
+    });
+  });
+
+  it("drags only the dragged row when it is not part of the selection", () => {
+    return withPlatform("Linux x86_64", () => {
+      render(
+        <FileList
+          entries={sampleEntries}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+        />,
+      );
+      fireEvent.click(screen.getByText("song1.mp3"));
+      const dt = makeDataTransfer();
+      fireEvent.dragStart(rowFor("song2.wav"), { dataTransfer: dt });
+      expect(dt.setData).toHaveBeenCalledWith(
+        "text/uri-list",
+        "file://song2.wav",
+      );
+    });
+  });
+
+  it("invokes native drag-out on macOS without enabling HTML5 drag", async () => {
+    mockDragOut.mockResolvedValueOnce(undefined);
+    await withPlatform("MacIntel", () => {
+      render(
+        <FileList
+          entries={[sampleEntries[0]]}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+        />,
+      );
+      expect(rowFor("song1.mp3")).toHaveAttribute("draggable", "false");
+      startNativeMouseDrag("song1.mp3");
+      return waitFor(() => {
+        expect(mockDragOut).toHaveBeenCalledWith(["song1.mp3"]);
+      });
+    });
+  });
+
+  it("uses the Tauri build platform when the webview hides macOS", async () => {
+    vi.stubEnv("TAURI_ENV_PLATFORM", "darwin");
+    mockDragOut.mockResolvedValueOnce(undefined);
+    await withPlatform("Linux x86_64", () => {
+      render(
+        <FileList
+          entries={[sampleEntries[0]]}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+        />,
+      );
+      expect(rowFor("song1.mp3")).toHaveAttribute("draggable", "false");
+      startNativeMouseDrag("song1.mp3");
+      return waitFor(() => {
+        expect(mockDragOut).toHaveBeenCalledWith(["song1.mp3"]);
+      });
+    });
+  });
+
+  it("starts macOS drag-out from mouse movement without an HTML drag", async () => {
+    vi.stubEnv("TAURI_ENV_PLATFORM", "darwin");
+    mockDragOut.mockResolvedValueOnce(undefined);
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    const row = rowFor("song1.mp3");
+    expect(row).toHaveAttribute("draggable", "false");
+    startNativeMouseDrag("song1.mp3");
+
+    await waitFor(() => {
+      expect(mockDragOut).toHaveBeenCalledWith(["song1.mp3"]);
+    });
+  });
+
+  it("keeps a macOS click below the drag threshold as a normal click", () => {
+    vi.stubEnv("TAURI_ENV_PLATFORM", "darwin");
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    const row = rowFor("song1.mp3");
+    fireEvent.mouseDown(row, {
+      button: 0,
+      buttons: 1,
+      clientX: 10,
+      clientY: 10,
+    });
+    fireEvent.mouseMove(row, { buttons: 0, clientX: 13, clientY: 10 });
+    fireEvent.mouseUp(row, { button: 0, clientX: 13, clientY: 10 });
+
+    expect(mockDragOut).not.toHaveBeenCalled();
+  });
+
+  it("passes the whole selection to the native macOS drag session", async () => {
+    mockDragOut.mockResolvedValueOnce(undefined);
+    await withPlatform("MacIntel", () => {
+      render(
+        <FileList
+          entries={sampleEntries}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+        />,
+      );
+      fireEvent.click(screen.getByText("song1.mp3"));
+      fireEvent.click(screen.getByText("song2.wav"), { ctrlKey: true });
+      startNativeMouseDrag("song1.mp3");
+      return waitFor(() => {
+        expect(mockDragOut).toHaveBeenCalledWith(["song1.mp3", "song2.wav"]);
+      });
+    });
+  });
+
+  it("clears the busy flag after the native drag-out resolves", async () => {
+    mockDragOut.mockResolvedValueOnce(undefined);
+    await withPlatform("MacIntel", () => {
+      render(
+        <FileList
+          entries={[sampleEntries[0]]}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+        />,
+      );
+      fireEvent.click(screen.getByText("song1.mp3"));
+      startNativeMouseDrag("song1.mp3");
+      return waitFor(() => {
+        expect(mockDragOut).toHaveBeenCalled();
+        expect(screen.getByRole("button", { name: "Reveal" })).toBeEnabled();
+      });
+    });
+  });
+
+  it("allows another drag immediately after a cancelled native drag", async () => {
+    mockDragOut.mockRejectedValueOnce(new Error("Drag cancelled."));
+    mockDragOut.mockResolvedValueOnce(undefined);
+    await withPlatform("MacIntel", () => {
+      render(
+        <FileList
+          entries={[sampleEntries[0]]}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+        />,
+      );
+      startNativeMouseDrag("song1.mp3");
+      return waitFor(() => {
+        expect(screen.getByRole("alert")).toHaveTextContent("Drag cancelled.");
+      }).then(async () => {
+        startNativeMouseDrag("song1.mp3");
+        await waitFor(() => {
+          expect(mockDragOut).toHaveBeenCalledTimes(2);
+        });
+      });
+    });
+  });
+
+  it("shows an error when the native drag-out fails", async () => {
+    mockDragOut.mockRejectedValueOnce(new Error("File is missing."));
+    await withPlatform("MacIntel", () => {
+      render(
+        <FileList
+          entries={[sampleEntries[0]]}
+          selectedPath="/music"
+          isLoading={false}
+          error={null}
+        />,
+      );
+      startNativeMouseDrag("song1.mp3");
+      return waitFor(() => {
+        expect(screen.getByRole("alert")).toHaveTextContent("File is missing.");
+      });
     });
   });
 });

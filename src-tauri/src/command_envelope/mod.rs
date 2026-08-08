@@ -8,6 +8,7 @@ use crate::audio_device_service::AudioDeviceService;
 pub use crate::command_handlers::browsing::handle_pick_folder;
 use crate::command_handlers::{browsing, device, parse_payload, playback, recent_folders};
 use crate::copy_service::CopyService;
+use crate::drag_out_service::DragOutService;
 use crate::external_service::ExternalService;
 use crate::folder_enumeration_service::{ActiveEnumerations, FolderEnumerationService};
 use crate::move_service::MoveService;
@@ -29,6 +30,7 @@ pub fn dispatch(
     move_service: &dyn MoveService,
     copy_service: &dyn CopyService,
     external_service: &dyn ExternalService,
+    drag_out_service: &dyn DragOutService,
     active: &ActiveEnumerations,
     recent_service: &dyn RecentFoldersService,
     events: &Arc<dyn PlaybackEventEmitter>,
@@ -60,7 +62,7 @@ pub fn dispatch(
         },
         "list_browser_roots" | "start_enumeration" | "cancel_enumeration" | "move_to_trash"
         | "rename_file" | "start_move_files" | "cancel_move_files" | "start_copy_files"
-        | "cancel_copy_files" | "reveal_file" | "open_with" => browsing::handle(
+        | "cancel_copy_files" | "reveal_file" | "open_with" | "drag_out" => browsing::handle(
             &envelope.command,
             envelope.payload,
             enum_service,
@@ -69,6 +71,7 @@ pub fn dispatch(
             move_service,
             copy_service,
             external_service,
+            drag_out_service,
             service,
             active,
             events,
@@ -136,6 +139,7 @@ pub fn invoke_command(
     move_state: tauri::State<'_, std::sync::Mutex<Box<dyn MoveService>>>,
     copy_state: tauri::State<'_, std::sync::Mutex<Box<dyn CopyService>>>,
     external_state: tauri::State<'_, std::sync::Mutex<Box<dyn ExternalService>>>,
+    drag_state: tauri::State<'_, std::sync::Mutex<Box<dyn DragOutService>>>,
     active: tauri::State<'_, ActiveEnumerations>,
     recent_state: tauri::State<'_, std::sync::Mutex<Box<dyn RecentFoldersService>>>,
     events: tauri::State<'_, Arc<dyn PlaybackEventEmitter>>,
@@ -148,6 +152,7 @@ pub fn invoke_command(
     let move_service = move_state.lock().expect("move service lock poisoned");
     let copy_service = copy_state.lock().expect("copy service lock poisoned");
     let external_service = external_state.lock().expect("external service lock poisoned");
+    let drag_out_service = drag_state.lock().expect("drag-out service lock poisoned");
     let recent_service = recent_state.lock().expect("recent folders service lock poisoned");
     dispatch(
         envelope,
@@ -159,6 +164,7 @@ pub fn invoke_command(
         &**move_service,
         &**copy_service,
         &**external_service,
+        &**drag_out_service,
         &active,
         &**recent_service,
         &events,

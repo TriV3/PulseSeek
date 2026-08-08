@@ -566,6 +566,27 @@ export async function openWith(path: string): Promise<void> {
   } satisfies OpenWithRequest);
 }
 
+// ── Drag-out types ─────────────────────────────────────────────────────
+
+export interface DragOutRequest {
+  paths: string[];
+}
+
+export type DragOutResponse = Record<string, never>;
+
+/** Starts a drag session for `paths` into compatible applications
+ * (FR-FM-011).
+ *
+ * Throws `CommandError` when any target is missing or the platform has no
+ * drag-out adapter. The backend exposes no general process-launch or
+ * clipboard capability.
+ */
+export async function dragOut(paths: string[]): Promise<void> {
+  await invokeCommand<DragOutResponse>("drag_out", {
+    paths,
+  } satisfies DragOutRequest);
+}
+
 // ── Recent folders types ───────────────────────────────────────────────
 
 export interface RecentFolderData {
