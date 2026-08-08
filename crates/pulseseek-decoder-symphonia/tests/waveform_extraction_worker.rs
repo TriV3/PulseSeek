@@ -3,13 +3,20 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::mpsc;
 
+use pulseseek_decoder_symphonia::registry::DecoderRegistry;
 use pulseseek_decoder_symphonia::waveform::WaveformExtractionWorker;
 use pulseseek_domain::decoder::{DecodeError, Decoder, ProbeResult, StreamMetadata};
 use pulseseek_domain::playback::position::{Duration, Position, SeekTarget};
-use pulseseek_domain::waveform::extraction::{ExtractionError, ExtractionOptions, WindowRequest};
+use pulseseek_domain::waveform::extraction::{
+    extract_sampled_overview, ExtractionError, ExtractionOptions, WindowRequest,
+};
 use pulseseek_domain::waveform::peak::Peak;
 
 const SILENT_STEREO_WAV: &[u8] = include_bytes!("fixtures/silent-stereo-44100.wav");
+const SILENT_STEREO_FLAC: &[u8] = include_bytes!("fixtures/silent-stereo-44100.flac");
+const SILENT_STEREO_MP3: &[u8] = include_bytes!("fixtures/silent-stereo-44100.mp3");
+const SINE_STEREO_FLAC: &[u8] = include_bytes!("fixtures/sine-stereo-44100.flac");
+const SINE_STEREO_MP3: &[u8] = include_bytes!("fixtures/sine-stereo-44100.mp3");
 
 /// Write a PCM WAV file (16-bit) from f32 samples (interleaved).
 fn write_pcm_wav(path: &Path, channels: u16, sample_rate: u32, samples: &[f32]) {
@@ -95,6 +102,40 @@ fn worker_overview_silent_fixture_produces_zero_peaks() {
     for peak in &w.finest().peaks {
         assert_eq!(peak.min(), 0.0);
         assert_eq!(peak.max(), 0.0);
+    }
+}
+
+#[test]
+fn sampled_preview_supports_every_audio_player_format() {
+    let dir = tempfile::tempdir().unwrap();
+    for (name, bytes) in [
+        ("silent.wav", SILENT_STEREO_WAV),
+        ("silent.flac", SILENT_STEREO_FLAC),
+        ("silent.mp3", SILENT_STEREO_MP3),
+    ] {
+        let path = write_fixture(&dir, name, bytes);
+        let mut decoder = DecoderRegistry::open(&path).expect("decoder opens");
+        let waveform = extract_sampled_overview(&mut *decoder, 8, &|| false)
+            .expect("sampled preview succeeds");
+
+        assert_eq!(waveform.channels(), 2, "{name}");
+        assert_eq!(waveform.finest().peaks.len(), 16, "{name}");
+    }
+}
+
+#[test]
+fn sampled_preview_keeps_non_silent_compressed_audio_visible() {
+    let dir = tempfile::tempdir().unwrap();
+    for (name, bytes) in [("sine.flac", SINE_STEREO_FLAC), ("sine.mp3", SINE_STEREO_MP3)] {
+        let path = write_fixture(&dir, name, bytes);
+        let mut decoder = DecoderRegistry::open(&path).expect("decoder opens");
+        let waveform = extract_sampled_overview(&mut *decoder, 64, &|| false)
+            .expect("sampled preview succeeds");
+
+        assert!(
+            waveform.finest().peaks.iter().any(|peak| peak.min() < -0.01 || peak.max() > 0.01),
+            "{name} should not render as a flat line"
+        );
     }
 }
 

@@ -73,15 +73,7 @@ impl SymphoniaDecoder {
 
         let codec = track.codec_params.codec;
         let bit_depth = track.codec_params.bits_per_sample;
-        let codec_name = if is_pcm_codec(codec) {
-            "PCM"
-        } else if codec == symphonia::core::codecs::CODEC_TYPE_FLAC {
-            "FLAC"
-        } else if codec == symphonia::core::codecs::CODEC_TYPE_MP3 {
-            "MP3"
-        } else {
-            "Unknown"
-        };
+        let codec_name = codec_name(codec);
 
         let dec_opts = DecoderOptions { verify: true };
         let decoder =
@@ -113,6 +105,33 @@ impl SymphoniaDecoder {
             discard_until_ts: None,
         })
     }
+
+    fn seek_with_mode(
+        &mut self,
+        target: SeekTarget,
+        mode: SeekMode,
+        discard_until_required_ts: bool,
+    ) -> Result<Position, DecodeError> {
+        let total_ms = target.position().as_millis();
+        let seconds = total_ms / 1000;
+        let frac = (total_ms % 1000) as f64 / 1000.0;
+
+        let seeked_to = self
+            .format
+            .seek(
+                mode,
+                SeekTo::Time { time: Time { seconds, frac }, track_id: Some(self.track_id) },
+            )
+            .map_err(|e| {
+                DecodeError::new(DiagnosticContext::new(DiagnosticCode::BrowserRead), e)
+            })?;
+
+        self.pending_samples.clear();
+        self.decoder.reset();
+        self.discard_until_ts = discard_until_required_ts.then_some(seeked_to.required_ts);
+
+        Ok(target.position())
+    }
 }
 
 /// Returns true for known PCM codec types (range check).
@@ -131,6 +150,64 @@ fn is_pcm_codec(codec: symphonia::core::codecs::CodecType) -> bool {
         || codec == symphonia::core::codecs::CODEC_TYPE_PCM_F32LE_PLANAR
         || codec == symphonia::core::codecs::CODEC_TYPE_PCM_U8
         || codec == symphonia::core::codecs::CODEC_TYPE_PCM_S8
+}
+
+fn codec_name(codec: symphonia::core::codecs::CodecType) -> &'static str {
+    if is_pcm_codec(codec) {
+        "PCM"
+    } else if codec == symphonia::core::codecs::CODEC_TYPE_FLAC {
+        "FLAC"
+    } else if codec == symphonia::core::codecs::CODEC_TYPE_MP3 {
+        "MP3"
+    } else {
+        "Unknown"
+    }
+}
+
+/// Reads stream metadata through Symphonia's format probe without constructing
+/// an audio decoder or allocating decode buffers. The filename extension is a
+/// probe hint only; unsupported content is still rejected by its headers.
+pub fn probe_stream_metadata(path: impl AsRef<Path>) -> Result<StreamMetadata, DecodeError> {
+    let path = path.as_ref();
+    let file = std::fs::File::open(path).map_err(|error| {
+        DecodeError::new(DiagnosticContext::new(DiagnosticCode::BrowserRead), error)
+    })?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(extension) = path.extension().and_then(|extension| extension.to_str()) {
+        hint.with_extension(extension);
+    }
+    let probed = symphonia::default::get_probe()
+        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .map_err(|error| {
+            DecodeError::new(DiagnosticContext::new(DiagnosticCode::BrowserRead), error)
+        })?;
+    let track = probed
+        .format
+        .tracks()
+        .iter()
+        .find(|track| track.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
+        .ok_or_else(|| {
+            DecodeError::new(
+                DiagnosticContext::new(DiagnosticCode::BrowserRead),
+                std::io::Error::other("no audio track found"),
+            )
+        })?;
+    let params = &track.codec_params;
+    let sample_rate = params.sample_rate.unwrap_or(0);
+    let duration_ms = params
+        .n_frames
+        .zip(params.sample_rate)
+        .map(|(frames, rate)| (frames * 1000) / u64::from(rate))
+        .unwrap_or(0);
+
+    Ok(StreamMetadata {
+        sample_rate,
+        channels: params.channels.map(|channels| channels.count() as u16).unwrap_or(0),
+        duration: Duration::from_millis(duration_ms),
+        bit_depth: params.bits_per_sample,
+        codec: codec_name(params.codec),
+    })
 }
 
 impl Decoder for SymphoniaDecoder {
@@ -208,25 +285,11 @@ impl Decoder for SymphoniaDecoder {
     }
 
     fn seek(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
-        let total_ms = target.position().as_millis();
-        let seconds = total_ms / 1000;
-        let frac = (total_ms % 1000) as f64 / 1000.0;
+        self.seek_with_mode(target, SeekMode::Accurate, true)
+    }
 
-        let seeked_to = self
-            .format
-            .seek(
-                SeekMode::Accurate,
-                SeekTo::Time { time: Time { seconds, frac }, track_id: Some(self.track_id) },
-            )
-            .map_err(|e| {
-                DecodeError::new(DiagnosticContext::new(DiagnosticCode::BrowserRead), e)
-            })?;
-
-        self.pending_samples.clear();
-        self.decoder.reset();
-        self.discard_until_ts = Some(seeked_to.required_ts);
-
-        Ok(target.position())
+    fn seek_coarse(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
+        self.seek_with_mode(target, SeekMode::Coarse, false)
     }
 }
 
@@ -252,6 +315,9 @@ impl Decoder for WavDecoder {
     fn seek(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
         self.0.seek(target)
     }
+    fn seek_coarse(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
+        self.0.seek_coarse(target)
+    }
 }
 
 /// A Symphonia-based decoder for FLAC audio files.
@@ -276,6 +342,9 @@ impl Decoder for FlacDecoder {
     fn seek(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
         self.0.seek(target)
     }
+    fn seek_coarse(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
+        self.0.seek_coarse(target)
+    }
 }
 
 /// A Symphonia-based decoder for MP3 audio files.
@@ -299,6 +368,9 @@ impl Decoder for Mp3Decoder {
     }
     fn seek(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
         self.0.seek(target)
+    }
+    fn seek_coarse(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
+        self.0.seek_coarse(target)
     }
 }
 

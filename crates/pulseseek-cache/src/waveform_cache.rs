@@ -37,7 +37,7 @@ pub const WAVEFORM_FORMAT_VERSION: u32 = 1;
 ///
 /// Rows written by an older algorithm are never reused and are deleted on
 /// access.
-pub const WAVEFORM_ALGORITHM_VERSION: u32 = 1;
+pub const WAVEFORM_ALGORITHM_VERSION: u32 = 3;
 
 /// Version of the cache-key scheme.
 ///

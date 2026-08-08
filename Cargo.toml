@@ -1,3 +1,16 @@
 [workspace]
 resolver = "2"
 members = ["crates/pulseseek-audio-cpal", "crates/pulseseek-browser-fs", "crates/pulseseek-cache", "crates/pulseseek-decoder-symphonia", "crates/pulseseek-domain", "crates/pulseseek-playback", "src-tauri"]
+
+# Audio decoding and peak reduction are throughput-sensitive even when the app
+# is launched through `tauri dev`. Dependencies are built infrequently, so
+# optimizing them keeps interactive waveform performance close to production
+# without applying a slower optimized build to every workspace crate.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.pulseseek-domain]
+opt-level = 3
+
+[profile.dev.package.pulseseek-decoder-symphonia]
+opt-level = 3

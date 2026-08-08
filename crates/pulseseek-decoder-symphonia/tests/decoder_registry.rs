@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use pulseseek_decoder_symphonia::registry::DecoderRegistry;
+use pulseseek_decoder_symphonia::{probe_stream_metadata, registry::DecoderRegistry};
 
 fn write_fixture(dir: &tempfile::TempDir, name: &str, data: &[u8]) -> std::path::PathBuf {
     let path = dir.path().join(name);
@@ -84,4 +84,24 @@ fn registry_rejects_unsupported() {
 
     let result = DecoderRegistry::open(&path);
     assert!(result.is_err(), "unsupported file should be rejected");
+}
+
+#[test]
+fn lightweight_probe_reads_metadata_without_constructing_a_decoder() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_fixture(&dir, "test.mp3", MP3_FIXTURE);
+
+    let metadata = probe_stream_metadata(&path).expect("metadata probe");
+
+    assert_eq!(metadata.channels, 2);
+    assert_eq!(metadata.sample_rate, 44_100);
+    assert_eq!(metadata.codec, "MP3");
+}
+
+#[test]
+fn lightweight_probe_rejects_a_misleading_audio_extension() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_fixture(&dir, "corrupt.wav", b"not any audio file");
+
+    assert!(probe_stream_metadata(&path).is_err());
 }

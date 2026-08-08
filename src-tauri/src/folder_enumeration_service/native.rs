@@ -189,17 +189,13 @@ impl FolderEnumerationService for NativeFolderEnumerationService {
                     );
                 }
 
-                let result = reader.read_folder_with_options_cancellable(
+                let result = reader.stream_folder_files_parallel(
                     std::path::Path::new(&path),
                     show_unsupported,
+                    batch_size,
                     || cancelled.load(Ordering::Acquire) || events.is_disconnected(),
-                );
-                match result {
-                    Ok(entries) => {
-                        for chunk in entries.chunks(batch_size) {
-                            if cancelled.load(Ordering::Acquire) || events.is_disconnected() {
-                                break;
-                            }
+                    |chunk| {
+                        if !cancelled.load(Ordering::Acquire) && !events.is_disconnected() {
                             emit_folder_chunk_phase(
                                 &*events,
                                 &session_for_thread,
@@ -209,13 +205,13 @@ impl FolderEnumerationService for NativeFolderEnumerationService {
                             );
                         }
                     },
-                    Err(error) => {
-                        tracing::warn!(
-                            path = %path,
-                            error = %error,
-                            "folder enumeration failed, sending empty result",
-                        );
-                    },
+                );
+                if let Err(error) = result {
+                    tracing::warn!(
+                        path = %path,
+                        error = %error,
+                        "folder enumeration failed, sending empty result",
+                    );
                 }
                 // Always emit done=true so the frontend exits its loading
                 // state, even when enumeration failed or was cancelled.
@@ -304,6 +300,10 @@ pub fn browser_entry_to_data(
         id: entry.id().as_str().to_string(),
         name: entry.name().to_string(),
         kind: kind.to_string(),
+        has_subfolders: match entry {
+            pulseseek_domain::browser::entry::BrowserEntry::Folder(folder) => folder.has_subfolders,
+            _ => None,
+        },
         metadata: match entry {
             pulseseek_domain::browser::entry::BrowserEntry::PlayableFile(file) => {
                 file.metadata.as_ref().map(|metadata| PlayableFileMetadataData {

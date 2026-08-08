@@ -1,17 +1,22 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::UNIX_EPOCH;
 
 use pulseseek_cache::waveform_cache::{
     waveform_cache_key, WaveformCachePort, WaveformIdentity, WAVEFORM_FORMAT_VERSION,
 };
 use pulseseek_decoder_symphonia::registry::DecoderRegistry;
-use pulseseek_decoder_symphonia::waveform::WaveformExtractionWorker;
 use pulseseek_domain::decoder::{DecodeError, Decoder};
 use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContext, ErrorCategory};
-use pulseseek_domain::waveform::extraction::{ExtractionError, ExtractionOptions};
+use pulseseek_domain::waveform::extraction::{
+    extract_overview, extract_sampled_overview, ExtractionError, ExtractionOptions,
+};
 use pulseseek_domain::waveform::levels::MultiresolutionWaveform;
+
+use crate::playback_events::{PlaybackEventEmitter, WaveformReadyPayload, EVENT_WAVEFORM_READY};
 
 /// One resolution level of waveform data, ready for the renderer.
 ///
@@ -49,16 +54,24 @@ pub trait WaveformService: Send + Sync {
     fn get_level(&self, request: &WaveformRequest) -> Result<WaveformLevel, ApplicationError>;
 }
 
-/// Cache-first waveform service with on-demand extraction.
+/// Cache-first waveform service with progressive on-demand extraction.
 ///
-/// The service checks the technical cache with a versioned file identity, then
-/// extracts a multiresolution overview when the cache misses. Extraction runs
-/// on the extraction worker thread, never on an audio callback. A missing or
-/// failing cache degrades to extraction without storage so the Audio Player
-/// never depends on the cache.
+/// The service returns a bounded sampled overview immediately on a cache miss,
+/// then builds the exact multiresolution pyramid on a cancellable cache worker.
+/// Neither path runs on an audio callback. A missing or failing cache degrades
+/// to sampled rendering so the Audio Player never depends on the cache.
 pub struct NativeWaveformService {
     cache: Option<Arc<dyn WaveformCachePort>>,
     open_decoder: DecoderOpener,
+    active_extraction: Arc<Mutex<Option<ActiveExtraction>>>,
+    next_extraction_id: AtomicU64,
+    events: Option<Arc<dyn PlaybackEventEmitter>>,
+}
+
+struct ActiveExtraction {
+    id: u64,
+    cache_key: String,
+    cancelled: Arc<AtomicBool>,
 }
 
 impl NativeWaveformService {
@@ -72,7 +85,19 @@ impl NativeWaveformService {
         cache: Option<Arc<dyn WaveformCachePort>>,
         open_decoder: DecoderOpener,
     ) -> Self {
-        Self { cache, open_decoder }
+        Self {
+            cache,
+            open_decoder,
+            active_extraction: Arc::new(Mutex::new(None)),
+            next_extraction_id: AtomicU64::new(1),
+            events: None,
+        }
+    }
+
+    /// Emits an event after the exact pyramid has been stored successfully.
+    pub fn with_events(mut self, events: Arc<dyn PlaybackEventEmitter>) -> Self {
+        self.events = Some(events);
+        self
     }
 
     fn load_cached(&self, identity: &WaveformIdentity) -> Option<MultiresolutionWaveform> {
@@ -88,13 +113,117 @@ impl NativeWaveformService {
         }
     }
 
-    fn extract(&self, path: &Path) -> Result<MultiresolutionWaveform, ApplicationError> {
-        let decoder = (self.open_decoder)(path).map_err(from_decode_error)?;
-        let worker = WaveformExtractionWorker::start_overview(
-            decoder,
-            ExtractionOptions::default_overview(),
-        );
-        worker.wait().map_err(from_extraction_error)
+    fn extract_fast_preview(
+        &self,
+        path: &Path,
+        target_peaks: u64,
+    ) -> Result<MultiresolutionWaveform, ApplicationError> {
+        let mut decoder = (self.open_decoder)(path).map_err(from_decode_error)?;
+        extract_sampled_overview(&mut *decoder, target_peaks, &|| false)
+            .map_err(from_extraction_error)
+    }
+
+    fn start_background_extraction(&self, path: PathBuf, identity: WaveformIdentity) {
+        let Some(cache) = self.cache.clone() else {
+            return;
+        };
+        let cache_key = waveform_cache_key(&identity);
+        let Some((id, cancelled)) = self.begin_extraction(cache_key.clone()) else {
+            return;
+        };
+        let open_decoder = Arc::clone(&self.open_decoder);
+        let active_extraction = Arc::clone(&self.active_extraction);
+        let cancelled_for_worker = Arc::clone(&cancelled);
+        let events = self.events.clone();
+
+        let worker = thread::Builder::new()
+            .name("pulseseek-waveform-cache".to_string())
+            .spawn(move || {
+                let result = open_decoder(&path)
+                    .map_err(ExtractionError::Decode)
+                    .and_then(|mut decoder| {
+                        extract_overview(
+                            &mut *decoder,
+                            &ExtractionOptions::default_overview(),
+                            &|| cancelled_for_worker.load(Ordering::Acquire),
+                        )
+                    });
+                match result {
+                    Ok(waveform) if !cancelled_for_worker.load(Ordering::Acquire) => {
+                        match cache.store_waveform(&cache_key, &identity, &waveform) {
+                            Ok(()) => {
+                                if let Some(events) = events {
+                                    let payload = WaveformReadyPayload {
+                                        path: path.to_string_lossy().to_string(),
+                                    };
+                                    if events
+                                        .emit(
+                                            EVENT_WAVEFORM_READY,
+                                            serde_json::to_value(payload)
+                                                .expect("waveform ready payload"),
+                                        )
+                                        .is_err()
+                                    {
+                                        tracing::debug!(
+                                            "waveform ready event could not be delivered"
+                                        );
+                                    }
+                                }
+                            },
+                            Err(error) => {
+                                tracing::warn!(error = %error, "waveform cache write failed; continuing");
+                            },
+                        }
+                    },
+                    Ok(_) | Err(ExtractionError::Cancelled) => {},
+                    Err(error) => {
+                        tracing::warn!(error = %error, "background waveform extraction failed");
+                    },
+                }
+                Self::finish_extraction_state(&active_extraction, id);
+            });
+
+        if let Err(error) = worker {
+            cancelled.store(true, Ordering::Release);
+            self.finish_extraction(id);
+            tracing::warn!(error = %error, "waveform cache worker could not start");
+        }
+    }
+
+    fn begin_extraction(&self, cache_key: String) -> Option<(u64, Arc<AtomicBool>)> {
+        let id = self.next_extraction_id.fetch_add(1, Ordering::Relaxed);
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut active = self.active_extraction.lock().unwrap_or_else(|error| error.into_inner());
+        if active.as_ref().is_some_and(|extraction| extraction.cache_key == cache_key) {
+            return None;
+        }
+        if let Some(previous) =
+            active.replace(ActiveExtraction { id, cache_key, cancelled: Arc::clone(&cancelled) })
+        {
+            previous.cancelled.store(true, Ordering::Release);
+        }
+        Some((id, cancelled))
+    }
+
+    fn cancel_active_extraction_for_other(&self, cache_key: &str) {
+        let mut active = self.active_extraction.lock().unwrap_or_else(|error| error.into_inner());
+        if active.as_ref().is_some_and(|extraction| extraction.cache_key == cache_key) {
+            return;
+        }
+        if let Some(previous) = active.take() {
+            previous.cancelled.store(true, Ordering::Release);
+        }
+    }
+
+    fn finish_extraction(&self, id: u64) {
+        Self::finish_extraction_state(&self.active_extraction, id);
+    }
+
+    fn finish_extraction_state(active_extraction: &Mutex<Option<ActiveExtraction>>, id: u64) {
+        let mut active = active_extraction.lock().unwrap_or_else(|error| error.into_inner());
+        if active.as_ref().is_some_and(|extraction| extraction.id == id) {
+            active.take();
+        }
     }
 }
 
@@ -133,22 +262,17 @@ impl WaveformService for NativeWaveformService {
             })?,
         );
 
-        let waveform = match self.load_cached(&identity) {
-            Some(waveform) => waveform,
-            None => {
-                let waveform = self.extract(&request.path)?;
-                if let Some(cache) = &self.cache {
-                    if let Err(error) =
-                        cache.store_waveform(&waveform_cache_key(&identity), &identity, &waveform)
-                    {
-                        tracing::warn!(error = %error, "waveform cache write failed; continuing");
-                    }
-                }
-                waveform
-            },
-        };
+        let cache_key = waveform_cache_key(&identity);
+        self.cancel_active_extraction_for_other(&cache_key);
 
-        Ok(level_from_waveform(&waveform, request.target_peaks))
+        if let Some(waveform) = self.load_cached(&identity) {
+            return Ok(level_from_waveform(&waveform, request.target_peaks));
+        }
+
+        let preview = self.extract_fast_preview(&request.path, request.target_peaks)?;
+        let level = level_from_waveform(&preview, request.target_peaks);
+        self.start_background_extraction(request.path.clone(), identity);
+        Ok(level)
     }
 }
 
@@ -202,6 +326,8 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
+    use std::thread;
+    use std::time::Duration as StdDuration;
     use std::time::UNIX_EPOCH;
 
     use pulseseek_cache::waveform_cache::{
@@ -212,8 +338,13 @@ mod tests {
         DiagnosticCode, DiagnosticContext, ErrorCategory, ErrorContract,
     };
     use pulseseek_domain::playback::position::{Duration, Position, SeekTarget};
+    use pulseseek_domain::waveform::extraction::{
+        FAST_PREVIEW_PEAK_COUNT, MAX_SAMPLED_PREVIEW_PEAK_COUNT,
+    };
     use pulseseek_domain::waveform::levels::{Level, LevelIndex, MultiresolutionWaveform};
     use pulseseek_domain::waveform::peak::Peak;
+
+    use crate::playback_events::{FakeEventEmitter, EVENT_WAVEFORM_READY};
 
     use super::{DecoderOpener, NativeWaveformService, WaveformRequest, WaveformService};
 
@@ -225,6 +356,9 @@ mod tests {
         sample_rate: u32,
         duration: Duration,
         read_error: bool,
+        read_counter: Option<Arc<AtomicUsize>>,
+        read_delay: StdDuration,
+        coarse_seek_used: bool,
     }
 
     impl FakeDecoder {
@@ -236,11 +370,20 @@ mod tests {
                 sample_rate,
                 duration: Duration::from_millis(duration_ms),
                 read_error: false,
+                read_counter: None,
+                read_delay: StdDuration::ZERO,
+                coarse_seek_used: false,
             }
         }
 
         fn failing(mut self) -> Self {
             self.read_error = true;
+            self
+        }
+
+        fn with_slow_reads(mut self, counter: Arc<AtomicUsize>) -> Self {
+            self.read_counter = Some(counter);
+            self.read_delay = StdDuration::from_millis(2);
             self
         }
     }
@@ -261,6 +404,12 @@ mod tests {
         }
 
         fn read(&mut self, buf: &mut [f32]) -> Result<usize, DecodeError> {
+            if !self.coarse_seek_used {
+                if let Some(counter) = &self.read_counter {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    thread::sleep(self.read_delay);
+                }
+            }
             if self.read_error {
                 return Err(DecodeError::new(
                     DiagnosticContext::new(DiagnosticCode::BrowserRead),
@@ -275,6 +424,14 @@ mod tests {
         }
 
         fn seek(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
+            self.coarse_seek_used = false;
+            let frame = target.position().as_millis() * self.sample_rate as u64 / 1000;
+            self.position = (frame * self.channels as u64) as usize;
+            Ok(Position::from_millis(target.position().as_millis()))
+        }
+
+        fn seek_coarse(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
+            self.coarse_seek_used = true;
             let frame = target.position().as_millis() * self.sample_rate as u64 / 1000;
             self.position = (frame * self.channels as u64) as usize;
             Ok(Position::from_millis(target.position().as_millis()))
@@ -400,6 +557,15 @@ mod tests {
         })
     }
 
+    fn slow_opener(reads: Arc<AtomicUsize>) -> DecoderOpener {
+        Arc::new(move |_path: &Path| {
+            Ok(Box::new(
+                FakeDecoder::new(vec![0.0; 1_000_000], 1, 1000, 1_000_000)
+                    .with_slow_reads(Arc::clone(&reads)),
+            ))
+        })
+    }
+
     #[test]
     fn cache_hit_returns_stored_level_without_extraction() {
         let dir = tempfile::tempdir().unwrap();
@@ -437,14 +603,128 @@ mod tests {
             .get_level(&WaveformRequest { path, target_peaks: 4 })
             .expect("extraction succeeds");
 
-        assert_eq!(calls.load(Ordering::SeqCst), 1, "exactly one extraction");
+        assert!(calls.load(Ordering::SeqCst) >= 1, "preview decoder opened");
         assert_eq!(level.channels, 1);
-        assert_eq!(level.samples_per_peak, 128, "coarsest level that fits 4 buckets");
+        assert_eq!(level.samples_per_peak, 50, "sampled level spans the complete timeline");
         assert_eq!(level.min.len(), 4, "one bucket per target peak");
 
         let key = waveform_cache_key(&identity);
-        let stored = cache_arc.load_waveform(&key, &identity).expect("load").expect("stored");
+        let stored = (0..100)
+            .find_map(|_| {
+                let waveform = cache_arc.load_waveform(&key, &identity).expect("load");
+                if waveform.is_none() {
+                    thread::sleep(StdDuration::from_millis(2));
+                }
+                waveform
+            })
+            .expect("background extraction stored the exact pyramid");
         assert!(!stored.is_empty(), "pyramid stored in cache");
+    }
+
+    #[test]
+    fn background_extraction_emits_ready_after_storing_exact_waveform() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_source(&dir, b"pcm");
+        let cache: Arc<dyn WaveformCachePort> = Arc::new(FakeWaveformCache::new());
+        let events = Arc::new(FakeEventEmitter::new());
+        let events_port: Arc<dyn crate::playback_events::PlaybackEventEmitter> = events.clone();
+        let (opener, _) = counting_opener(vec![0.25; 400], 1, 1000, 400);
+        let service = NativeWaveformService::with_decoder_opener(Some(cache), opener)
+            .with_events(events_port);
+
+        service
+            .get_level(&WaveformRequest { path: path.clone(), target_peaks: 256 })
+            .expect("sampled preview succeeds");
+
+        let event = (0..100)
+            .find_map(|_| {
+                let event = events
+                    .recorded_events()
+                    .into_iter()
+                    .find(|event| event.event == EVENT_WAVEFORM_READY);
+                if event.is_none() {
+                    thread::sleep(StdDuration::from_millis(2));
+                }
+                event
+            })
+            .expect("ready event emitted after exact waveform is stored");
+        assert_eq!(event.payload["path"], path.to_string_lossy().as_ref());
+    }
+
+    #[test]
+    fn fast_preview_starts_exact_extraction_without_waiting_for_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_source(&dir, b"pcm");
+        let identity = identity_for(&path);
+        let cache: Arc<dyn WaveformCachePort> = Arc::new(FakeWaveformCache::new());
+        let (opener, calls) = counting_opener(vec![0.0; 2_000], 1, 1000, 2_000);
+        let service = NativeWaveformService::with_decoder_opener(Some(Arc::clone(&cache)), opener);
+
+        let level = service
+            .get_level(&WaveformRequest { path, target_peaks: FAST_PREVIEW_PEAK_COUNT })
+            .expect("fast preview");
+
+        assert_eq!(level.min.len(), FAST_PREVIEW_PEAK_COUNT as usize);
+        let key = waveform_cache_key(&identity);
+        let stored = (0..100)
+            .find_map(|_| {
+                let waveform = cache.load_waveform(&key, &identity).expect("cache read");
+                if waveform.is_none() {
+                    thread::sleep(StdDuration::from_millis(2));
+                }
+                waveform
+            })
+            .expect("fast preview starts the exact cache extraction");
+        assert!(!stored.is_empty());
+        assert!(calls.load(Ordering::SeqCst) >= 2, "preview and exact decoders opened");
+    }
+
+    #[test]
+    fn new_preview_cancels_older_and_starts_its_exact_extraction() {
+        let dir = tempfile::tempdir().unwrap();
+        let detailed_path = temp_source(&dir, b"pcm");
+        let detailed_identity = identity_for(&detailed_path);
+        let preview_path = dir.path().join("next.wav");
+        std::fs::write(&preview_path, b"pcm").expect("write next source");
+        let preview_identity = identity_for(&preview_path);
+        let reads = Arc::new(AtomicUsize::new(0));
+        let cache: Arc<dyn WaveformCachePort> = Arc::new(FakeWaveformCache::new());
+        let service = Arc::new(NativeWaveformService::with_decoder_opener(
+            Some(Arc::clone(&cache)),
+            slow_opener(Arc::clone(&reads)),
+        ));
+        let detailed = service
+            .get_level(&WaveformRequest { path: detailed_path, target_peaks: 4_096 })
+            .expect("sampled detail succeeds without waiting for the exact scan");
+        assert_eq!(detailed.min.len(), MAX_SAMPLED_PREVIEW_PEAK_COUNT as usize);
+        while reads.load(Ordering::SeqCst) == 0 {
+            thread::yield_now();
+        }
+
+        service
+            .get_level(&WaveformRequest {
+                path: preview_path,
+                target_peaks: FAST_PREVIEW_PEAK_COUNT,
+            })
+            .expect("new preview succeeds");
+
+        for _ in 0..300 {
+            if service.active_extraction.lock().unwrap().is_none() {
+                break;
+            }
+            thread::sleep(StdDuration::from_millis(2));
+        }
+        assert!(service.active_extraction.lock().unwrap().is_none());
+        let key = waveform_cache_key(&detailed_identity);
+        assert!(cache.load_waveform(&key, &detailed_identity).expect("cache read").is_none());
+        let preview_key = waveform_cache_key(&preview_identity);
+        assert!(
+            cache
+                .load_waveform(&preview_key, &preview_identity)
+                .expect("preview cache read")
+                .is_some(),
+            "the newly selected file should finish its own exact extraction"
+        );
     }
 
     #[test]
@@ -541,7 +821,7 @@ mod tests {
         let level = service
             .get_level(&WaveformRequest { path, target_peaks: 2 })
             .expect("degrades to extraction");
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(calls.load(Ordering::SeqCst) >= 1);
         assert_eq!(level.channels, 1);
     }
 

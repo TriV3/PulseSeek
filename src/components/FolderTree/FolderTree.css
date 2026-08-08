@@ -121,6 +121,11 @@
   background: var(--bg-selected);
 }
 
+.folder-node--audio-path > .folder-node-row {
+  color: var(--folder-active-path);
+  font-weight: 700;
+}
+
 .folder-node-row {
   display: flex;
   align-items: center;
@@ -144,6 +149,7 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  color: inherit;
 }
 
 .folder-arrow {

@@ -45,6 +45,8 @@ impl std::error::Error for AccessError {}
 pub struct FolderEntry {
     pub id: EntryId,
     pub name: String,
+    /// Shallow child-directory probe result. `None` means unknown.
+    pub has_subfolders: Option<bool>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

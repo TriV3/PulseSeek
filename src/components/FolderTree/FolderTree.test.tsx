@@ -105,6 +105,65 @@ describe("FolderTree — selected folder visibility", () => {
   });
 });
 
+describe("FolderTree — selected audio path", () => {
+  it("highlights every ancestor folder without highlighting a prefix sibling", () => {
+    const props = createMockFolderTreeProps({
+      rootPath: "/test",
+      selectedPath: "/test/one/two",
+      folders: {
+        "/test": {
+          expanded: true,
+          children: [
+            { id: "/test/one", name: "one", kind: "folder" },
+            { id: "/test/ones", name: "ones", kind: "folder" },
+          ],
+          isLoading: false,
+          error: null,
+          recursive: false,
+        },
+        "/test/one": {
+          expanded: true,
+          children: [
+            {
+              id: "/test/one/two",
+              name: "two",
+              kind: "folder",
+            },
+          ],
+          isLoading: false,
+          error: null,
+          recursive: false,
+        },
+        "/test/one/two": {
+          expanded: false,
+          children: [],
+          isLoading: false,
+          error: null,
+          recursive: false,
+        },
+        "/test/ones": {
+          expanded: false,
+          children: [],
+          isLoading: false,
+          error: null,
+          recursive: false,
+        },
+      },
+    });
+
+    render(<FolderTree {...props} activeFilePath="/test/one/two/song.flac" />);
+
+    for (const name of ["test", "one", "two"]) {
+      expect(screen.getByText(name).closest(".folder-node")).toHaveClass(
+        "folder-node--audio-path",
+      );
+    }
+    expect(screen.getByText("ones").closest(".folder-node")).not.toHaveClass(
+      "folder-node--audio-path",
+    );
+  });
+});
+
 describe("FolderTree — indentation", () => {
   it("uses one fixed indentation step per nested list", () => {
     const props = createMockFolderTreeProps({
@@ -172,6 +231,32 @@ describe("FolderTree — audio-only folders", () => {
 });
 
 describe("FolderTree — folder expansion", () => {
+  it("does not render an expand control for a leaf while its files load", () => {
+    const props = createMockFolderTreeProps({
+      rootPath: "/test/empty",
+      selectedPath: "/test/empty",
+      folders: {
+        "/test/empty": {
+          expanded: true,
+          children: [],
+          isLoading: true,
+          hasLoaded: false,
+          hasSubfolders: false,
+          error: null,
+          recursive: false,
+        },
+      },
+    });
+
+    render(<FolderTree {...props} />);
+
+    expect(
+      screen.queryByRole("button", { name: /^(expand|collapse) folder$/i }),
+    ).toBeNull();
+    expect(screen.getByRole("treeitem")).not.toHaveAttribute("aria-expanded");
+    expect(screen.queryByText("(empty)")).toBeNull();
+  });
+
   it("shows subfolder children", () => {
     const props = createMockFolderTreeProps({
       rootPath: "/test/music",

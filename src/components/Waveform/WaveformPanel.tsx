@@ -1,9 +1,6 @@
 import { useState } from "react";
 import { useWaveform } from "../../hooks/useWaveform";
-import {
-  defaultTargetPeaksForWidth,
-  type WaveformStyle,
-} from "./waveformRenderer";
+import type { WaveformStyle } from "./waveformRenderer";
 import { WaveformCanvas } from "./WaveformCanvas";
 
 export interface WaveformPanelProps {
@@ -27,7 +24,7 @@ export interface WaveformPanelProps {
  * paint does not wait for the ResizeObserver round-trip; the canvas refines
  * the target once it measures its real width.
  */
-const INITIAL_TARGET_PEAKS = defaultTargetPeaksForWidth(800);
+const INITIAL_TARGET_PEAKS = 64;
 
 /**
  * Waveform overview workspace region.
@@ -45,7 +42,14 @@ export function WaveformPanel({
   onSeek,
   style = "outline",
 }: WaveformPanelProps) {
-  const [targetPeaks, setTargetPeaks] = useState(INITIAL_TARGET_PEAKS);
+  const [resolution, setResolution] = useState<{
+    entryPath: string | null;
+    targetPeaks: number;
+  }>({ entryPath: null, targetPeaks: INITIAL_TARGET_PEAKS });
+  const targetPeaks =
+    resolution.entryPath === entryPath
+      ? resolution.targetPeaks
+      : INITIAL_TARGET_PEAKS;
   const { status, waveform, error } = useWaveform(entryPath, targetPeaks);
 
   return (
@@ -74,7 +78,11 @@ export function WaveformPanel({
             durationMs={durationMs}
             restoredPositionMs={restoredPositionMs}
             resetRevision={resetRevision}
-            onRequestRefetch={setTargetPeaks}
+            onRequestRefetch={(nextTarget) => {
+              if (waveform && targetPeaks === INITIAL_TARGET_PEAKS) {
+                setResolution({ entryPath, targetPeaks: nextTarget });
+              }
+            }}
             onSeek={onSeek}
             style={style}
           />

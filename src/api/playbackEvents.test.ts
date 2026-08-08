@@ -6,8 +6,10 @@ import {
   isFolderChunkPayload,
   isMoveItemResultData,
   isMoveProgressPayload,
+  isWaveformReadyPayload,
   onCopyProgress,
   onMoveProgress,
+  onWaveformReady,
 } from "./playbackEvents";
 
 type EventHandler = (event: { payload: unknown }) => void;
@@ -118,6 +120,26 @@ describe("file change payload validation", () => {
     expect(isFileChangePayload({})).toBe(false);
     expect(isFileChangePayload(null)).toBe(false);
     expect(isFileChangePayload({ path: 42 })).toBe(false);
+  });
+});
+
+describe("waveform ready events", () => {
+  it("validates the selected source path", () => {
+    expect(isWaveformReadyPayload({ path: "/music/track.wav" })).toBe(true);
+    expect(isWaveformReadyPayload({ path: 42 })).toBe(false);
+    expect(isWaveformReadyPayload(null)).toBe(false);
+  });
+
+  it("delivers only valid waveform:ready payloads", async () => {
+    const handler = vi.fn();
+    await onWaveformReady(handler);
+    const emit = eventHandlers.get("waveform:ready");
+
+    emit?.({ payload: { path: "/music/track.wav" } });
+    emit?.({ payload: { path: 42 } });
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledWith({ path: "/music/track.wav" });
   });
 });
 

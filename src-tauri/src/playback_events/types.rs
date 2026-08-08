@@ -25,6 +25,8 @@ pub struct BrowserEntryData {
     pub id: String,
     pub name: String,
     pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_subfolders: Option<bool>,
     pub metadata: Option<PlayableFileMetadataData>,
 }
 
@@ -57,6 +59,15 @@ pub struct FolderChunkPayload {
 /// that no longer belong to the open folder.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileChangePayload {
+    pub path: String,
+}
+
+/// Payload for [`EVENT_WAVEFORM_READY`](super::EVENT_WAVEFORM_READY).
+///
+/// Signals that the exact waveform pyramid is now stored and can replace the
+/// sampled preview for the selected source.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WaveformReadyPayload {
     pub path: String,
 }
 /// One file's outcome in a move batch, reported through

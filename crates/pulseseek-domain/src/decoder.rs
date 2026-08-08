@@ -80,4 +80,13 @@ pub trait Decoder: Send {
 
     /// Seek to a validated target position.
     fn seek(&mut self, target: SeekTarget) -> Result<Position, DecodeError>;
+
+    /// Seek near a validated target without requiring sample-accurate positioning.
+    ///
+    /// Adapters should override this when they can provide a materially cheaper
+    /// coarse seek. The default preserves compatibility by falling back to the
+    /// precise seek contract.
+    fn seek_coarse(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
+        self.seek(target)
+    }
 }

@@ -5,7 +5,11 @@ fn entry_id(path: &str) -> EntryId {
 }
 
 fn folder(path: &str, name: &str) -> BrowserEntry {
-    BrowserEntry::Folder(FolderEntry { id: entry_id(path), name: name.to_string() })
+    BrowserEntry::Folder(FolderEntry {
+        id: entry_id(path),
+        name: name.to_string(),
+        has_subfolders: None,
+    })
 }
 
 fn playable(path: &str, name: &str) -> BrowserEntry {

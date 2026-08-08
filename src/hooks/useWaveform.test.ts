@@ -1,10 +1,17 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { useWaveform } from "./useWaveform";
 import { getWaveform, type WaveformLevel } from "../api/waveform";
+import {
+  onWaveformReady,
+  type WaveformReadyPayload,
+} from "../api/playbackEvents";
 
 vi.mock("../api/waveform", () => ({
   getWaveform: vi.fn(),
+}));
+vi.mock("../api/playbackEvents", () => ({
+  onWaveformReady: vi.fn(),
 }));
 
 const LEVEL: WaveformLevel = {
@@ -14,6 +21,8 @@ const LEVEL: WaveformLevel = {
   min: [-0.5, 0, 0.5],
   max: [-0.4, 0.1, 0.6],
 };
+
+let waveformReadyHandler: ((payload: WaveformReadyPayload) => void) | null;
 
 function deferred() {
   let resolve!: (value: WaveformLevel) => void;
@@ -28,9 +37,31 @@ function deferred() {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getWaveform).mockReset();
+  waveformReadyHandler = null;
+  vi.mocked(onWaveformReady).mockImplementation(async (handler) => {
+    waveformReadyHandler = handler;
+    return () => {};
+  });
 });
 
 describe("useWaveform", () => {
+  it("subscribes for completion before starting the waveform request", async () => {
+    let resolveListener!: (unlisten: () => void) => void;
+    vi.mocked(onWaveformReady).mockReturnValue(
+      new Promise((resolve) => {
+        resolveListener = resolve;
+      }),
+    );
+    vi.mocked(getWaveform).mockResolvedValue(LEVEL);
+
+    renderHook(() => useWaveform("/music/track.wav", 64));
+    await waitFor(() => expect(onWaveformReady).toHaveBeenCalled());
+
+    expect(getWaveform).not.toHaveBeenCalled();
+    await act(async () => resolveListener(() => {}));
+    await waitFor(() => expect(getWaveform).toHaveBeenCalledOnce());
+  });
+
   it("stays idle without a file path and never fetches", () => {
     const { result } = renderHook(() => useWaveform(null, 64));
     expect(result.current.status).toBe("idle");
@@ -73,6 +104,7 @@ describe("useWaveform", () => {
 
     rerender({ path: "/music/b.wav" });
     expect(result.current.status).toBe("loading");
+    expect(result.current.waveform).toBeNull();
     await waitFor(() => expect(result.current.status).toBe("ready"));
     expect(getWaveform).toHaveBeenCalledTimes(2);
     expect(getWaveform).toHaveBeenLastCalledWith("/music/b.wav", 64);
@@ -90,6 +122,7 @@ describe("useWaveform", () => {
       { initialProps: { path: "/music/a.wav" } },
     );
     expect(result.current.status).toBe("loading");
+    await waitFor(() => expect(getWaveform).toHaveBeenCalledOnce());
 
     rerender({ path: "/music/b.wav" });
     first.resolve(LEVEL);
@@ -112,6 +145,44 @@ describe("useWaveform", () => {
     expect(result.current.status).toBe("loading");
     await waitFor(() => expect(result.current.status).toBe("ready"));
     expect(getWaveform).toHaveBeenLastCalledWith("/music/track.wav", 128);
+  });
+
+  it("keeps the preview visible while refining the same file", async () => {
+    const refinement = deferred();
+    vi.mocked(getWaveform)
+      .mockResolvedValueOnce(LEVEL)
+      .mockReturnValueOnce(refinement.promise);
+    const { result, rerender } = renderHook(
+      ({ target }) => useWaveform("/music/track.wav", target),
+      { initialProps: { target: 128 } },
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    rerender({ target: 600 });
+
+    expect(result.current.status).toBe("loading");
+    expect(result.current.waveform).toEqual(LEVEL);
+  });
+
+  it("replaces the preview when the exact waveform becomes ready", async () => {
+    const exact = {
+      ...LEVEL,
+      samples_per_peak: 2,
+      min: [-0.8, -0.4, 0.2, 0.5],
+      max: [-0.2, 0.1, 0.6, 0.9],
+    };
+    vi.mocked(getWaveform)
+      .mockResolvedValueOnce(LEVEL)
+      .mockResolvedValueOnce(exact);
+    const { result } = renderHook(() => useWaveform("/music/track.wav", 600));
+    await waitFor(() => expect(result.current.waveform).toEqual(LEVEL));
+    await waitFor(() => expect(waveformReadyHandler).not.toBeNull());
+
+    act(() => waveformReadyHandler?.({ path: "/music/track.wav" }));
+
+    await waitFor(() => expect(result.current.waveform).toEqual(exact));
+    expect(getWaveform).toHaveBeenCalledTimes(2);
+    expect(getWaveform).toHaveBeenLastCalledWith("/music/track.wav", 600);
   });
 
   it("returns to idle when the selection is cleared", async () => {

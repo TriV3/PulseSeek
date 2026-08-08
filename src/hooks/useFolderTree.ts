@@ -41,6 +41,8 @@ export function folderTreeReducer(
             expanded: false,
             children: [],
             isLoading: false,
+            hasLoaded: false,
+            hasSubfolders: null,
             error: null,
             recursive: false,
           },
@@ -56,6 +58,8 @@ export function folderTreeReducer(
             expanded: false,
             children: rootEntries,
             isLoading: false,
+            hasLoaded: true,
+            hasSubfolders: rootEntries.length > 0,
             error: null,
             recursive: false,
           },
@@ -81,6 +85,8 @@ export function folderTreeReducer(
             expanded: true,
             children: [],
             isLoading: true,
+            hasLoaded: false,
+            hasSubfolders: null,
             error: null,
             recursive: false,
           },
@@ -106,6 +112,8 @@ export function folderTreeReducer(
             expanded: existing?.expanded ?? true,
             children: [],
             isLoading: true,
+            hasLoaded: existing?.hasLoaded ?? false,
+            hasSubfolders: existing?.hasSubfolders ?? null,
             error: null,
             recursive: action.recursive,
           },
@@ -151,12 +159,19 @@ export function folderTreeReducer(
       const discoveredFolderStates = Object.fromEntries(
         newFolders.map((entry) => [
           entry.id,
-          state.folders[entry.id] ?? {
-            expanded: false,
-            children: [],
-            isLoading: false,
-            error: null,
-            recursive: false,
+          {
+            ...(state.folders[entry.id] ?? {
+              expanded: false,
+              children: [],
+              isLoading: false,
+              hasLoaded: false,
+              error: null,
+              recursive: false,
+            }),
+            hasSubfolders:
+              entry.has_subfolders ??
+              state.folders[entry.id]?.hasSubfolders ??
+              null,
           },
         ]),
       );
@@ -173,7 +188,16 @@ export function folderTreeReducer(
                 sensitivity: "base",
               }),
             ),
-            isLoading: !(action.foldersDone ?? action.done),
+            // The directory preview can finish before playable files have
+            // been validated. Keep the shared loading state active until the
+            // whole enumeration completes so neither pane claims the folder
+            // is empty while file scanning is still in progress.
+            isLoading: !action.done,
+            hasLoaded: action.done ? true : current.hasLoaded,
+            hasSubfolders:
+              action.done || childrenById.size > 0
+                ? childrenById.size > 0
+                : current.hasSubfolders,
             expanded: true,
           },
         },
@@ -204,6 +228,8 @@ export function folderTreeReducer(
             expanded: existing?.expanded ?? true,
             children: existing?.children ?? [],
             isLoading: false,
+            hasLoaded: existing?.hasLoaded ?? false,
+            hasSubfolders: existing?.hasSubfolders ?? null,
             error: action.message,
             recursive: existing?.recursive ?? false,
           },
@@ -238,6 +264,8 @@ export function folderTreeReducer(
             expanded: true,
             children: [],
             isLoading: false,
+            hasLoaded: false,
+            hasSubfolders: null,
             error: null,
           },
         ]),
@@ -270,6 +298,8 @@ export function folderTreeReducer(
               expanded: false,
               children: [],
               isLoading: false,
+              hasLoaded: false,
+              hasSubfolders: null,
               error: null,
             }),
             expanded: true,
@@ -540,9 +570,26 @@ export function useFolderTree(): UseFolderTreeReturn {
     [enumeratePath],
   );
 
-  const selectFolder = useCallback((path: string) => {
-    dispatch({ type: "SELECT_FOLDER", path });
-  }, []);
+  const selectFolder = useCallback(
+    (path: string) => {
+      const folder = stateRef.current.folders[path];
+      dispatch({ type: "SELECT_FOLDER", path });
+
+      // A known leaf has no expand control, so selecting it is the only user
+      // action available to start its file scan. Keep expansion and file
+      // enumeration independent: leaves remain arrowless while their audio
+      // rows are loaded.
+      if (
+        folder?.hasSubfolders === false &&
+        !folder.hasLoaded &&
+        !folder.isLoading &&
+        !folder.error
+      ) {
+        void enumeratePath(path, folder.recursive);
+      }
+    },
+    [enumeratePath],
+  );
 
   const navigateUp = useCallback(() => {
     const selected = stateRef.current.selectedPath;

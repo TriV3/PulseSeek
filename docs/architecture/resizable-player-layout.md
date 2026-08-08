@@ -21,13 +21,30 @@ first time it is opened. Each nested list applies the same compact indentation
 step. Only playable audio files are sent to the file table. Browsing remains
 read-only and never imports a file into a manager database.
 
-Enumeration uses two phases. A lightweight preview reads directory entries and
-recognized audio extensions without opening decoders, so folders and filenames
-can render immediately even on large or network-mounted directories. A
-cancellable verification pass then probes file content and replaces preview
-rows with trusted metadata; candidates whose content is unsupported are
-removed. Moving to another folder cancels that verification between files so
-obsolete scans do not monopolize background workers.
+Enumeration uses two phases. A lightweight preview reads directory entries
+without opening audio decoders, so subfolders and recognized audio filenames
+render immediately even on large or network-mounted directories. Before a
+child folder is emitted, a bounded worker pool performs one shallow read to
+determine whether it has subfolders. Known leaves therefore render without an
+expand control from their first frame. Selecting a known leaf starts its file
+enumeration directly, without temporarily adding an expand control. A
+cancellable verification pass then probes direct-child audio candidates
+concurrently and enriches trusted files in small progressive batches; rejected
+candidates are removed. Moving to another folder cancels that verification
+between files so obsolete scans do not monopolize background workers. Until the
+complete scan finishes, both panes remain in a loading state rather than
+displaying a false empty result.
+When an audio file is selected, every visible ancestor folder in its filesystem
+path is rendered with bold text and the theme-specific
+`--folder-active-path` semantic color. Every theme keeps this token at WCAG AA
+contrast against the normal, hover, and selected browser backgrounds.
+Segment-aware matching prevents similarly prefixed sibling folders from being
+highlighted.
+
+The left workspace column has two keyboard-accessible tabs, Browser and Recent
+folders. Their panels occupy the same full-height area instead of stacking.
+Switching tabs preserves the mounted folder tree and its expansion state;
+reopening a recent folder returns to the Browser tab at that location.
 
 The horizontal separator resizes the waveform between 22% and 62% of the
 window. The vertical separator resizes the folder browser between 16% and 46%

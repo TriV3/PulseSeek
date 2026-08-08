@@ -7,6 +7,7 @@ export interface BrowserEntry {
   id: string;
   name: string;
   kind: BrowserEntryKind;
+  has_subfolders?: boolean | null;
   metadata?: PlayableFileMetadata | null;
 }
 
@@ -28,6 +29,10 @@ export interface FolderState {
   children: BrowserEntry[];
   /** Whether a folder enumeration is in progress for this path. */
   isLoading: boolean;
+  /** Whether this folder has completed at least one enumeration. */
+  hasLoaded?: boolean;
+  /** Whether a shallow parent scan found at least one direct subfolder. */
+  hasSubfolders?: boolean | null;
   /** Error message when enumeration failed, or null. */
   error: string | null;
   /** Whether the folder was enumerated in recursive file-view mode. */

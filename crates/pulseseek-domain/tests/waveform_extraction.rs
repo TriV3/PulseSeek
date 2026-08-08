@@ -4,7 +4,8 @@ use pulseseek_domain::decoder::{DecodeError, Decoder, ProbeResult, StreamMetadat
 use pulseseek_domain::error::{DiagnosticCode, DiagnosticContext};
 use pulseseek_domain::playback::position::{Duration, Position, SeekTarget};
 use pulseseek_domain::waveform::extraction::{
-    extract_overview, extract_window, ExtractionError, ExtractionOptions, WindowRequest,
+    extract_overview, extract_sampled_overview, extract_window, ExtractionError, ExtractionOptions,
+    WindowRequest, DEFAULT_TARGET_PEAK_COUNT,
 };
 use pulseseek_domain::waveform::peak::Peak;
 
@@ -16,6 +17,8 @@ struct FakeDecoder {
     sample_rate: u32,
     duration: Duration,
     read_error: bool,
+    precise_seek_count: u32,
+    coarse_seek_count: u32,
 }
 
 impl FakeDecoder {
@@ -27,6 +30,8 @@ impl FakeDecoder {
             sample_rate,
             duration: Duration::from_millis(duration_ms),
             read_error: false,
+            precise_seek_count: 0,
+            coarse_seek_count: 0,
         }
     }
 
@@ -38,6 +43,8 @@ impl FakeDecoder {
             sample_rate,
             duration: Duration::Unknown,
             read_error: false,
+            precise_seek_count: 0,
+            coarse_seek_count: 0,
         }
     }
 
@@ -77,6 +84,14 @@ impl Decoder for FakeDecoder {
     }
 
     fn seek(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
+        self.precise_seek_count += 1;
+        let frame = target.position().as_millis() * self.sample_rate as u64 / 1000;
+        self.position = (frame * self.channels as u64) as usize;
+        Ok(Position::from_millis(target.position().as_millis()))
+    }
+
+    fn seek_coarse(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
+        self.coarse_seek_count += 1;
         let frame = target.position().as_millis() * self.sample_rate as u64 / 1000;
         self.position = (frame * self.channels as u64) as usize;
         Ok(Position::from_millis(target.position().as_millis()))
@@ -205,6 +220,38 @@ fn overview_zero_channels_rejected() {
     assert_eq!(err, ExtractionError::UnsupportedSource);
 }
 
+#[test]
+fn sampled_overview_avoids_precise_seeks() {
+    let mut decoder = FakeDecoder::new(vec![0.0; 20_000], 1, 1000, 20_000);
+
+    extract_sampled_overview(&mut decoder, 16, never_cancelled()).expect("sampled overview");
+
+    assert_eq!(decoder.precise_seek_count, 0);
+}
+
+#[test]
+fn sampled_overview_caps_cache_miss_resolution() {
+    let mut decoder = FakeDecoder::new(vec![0.0; 10_000], 1, 1000, 10_000);
+
+    let waveform =
+        extract_sampled_overview(&mut decoder, 4_096, never_cancelled()).expect("sampled overview");
+
+    assert_eq!(waveform.finest().peaks.len(), 2_048);
+}
+
+#[test]
+fn sampled_overview_bounds_seeks_independently_from_draw_resolution() {
+    let mut decoder = FakeDecoder::new(vec![0.0; 1_000], 1, 1000, 1_000);
+
+    extract_sampled_overview(&mut decoder, 2_048, never_cancelled()).expect("sampled overview");
+
+    assert!(
+        decoder.coarse_seek_count <= 4,
+        "sampled refinement used {} seeks",
+        decoder.coarse_seek_count
+    );
+}
+
 // ── Window: sample-level precision ─────────────────────────────────
 
 fn eight_samples() -> FakeDecoder {
@@ -318,6 +365,13 @@ fn options_default_overview_is_valid() {
     let opts = ExtractionOptions::default_overview();
     assert!(opts.target_peak_count() > 0);
     assert!(opts.max_levels() >= 1);
+}
+
+#[test]
+fn default_overview_has_bounded_finest_level() {
+    let opts = ExtractionOptions::default_overview();
+    assert_eq!(opts.target_peak_count(), 8_192);
+    assert_eq!(DEFAULT_TARGET_PEAK_COUNT, 8_192);
 }
 
 #[test]
