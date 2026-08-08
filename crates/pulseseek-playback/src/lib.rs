@@ -4,6 +4,7 @@ mod control;
 mod engine;
 mod error;
 mod event;
+mod fft;
 mod visualization;
 mod worker;
 
@@ -11,6 +12,7 @@ pub use control::*;
 pub use engine::*;
 pub use error::*;
 pub use event::*;
+pub use fft::*;
 pub use visualization::*;
 pub use worker::*;
 
