@@ -5,6 +5,7 @@ const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig(async () => ({
   plugins: [react()],
+  envPrefix: ["VITE_", "TAURI_ENV_"],
   clearScreen: false,
   test: {
     environment: "jsdom",

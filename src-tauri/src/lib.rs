@@ -4,6 +4,7 @@ mod command_handlers;
 pub mod copy_service;
 pub mod diagnostics;
 pub mod dialog_service;
+pub mod drag_out_service;
 pub mod external_service;
 pub mod file_watcher_service;
 pub mod folder_enumeration_service;
@@ -98,6 +99,15 @@ pub fn run() {
             command_handlers::waveform::get_waveform
         ])
         .setup(|app| {
+            // Native drag-out needs the runtime handle so AppKit startup can
+            // be deferred until WKWebView has finished its `dragstart` turn.
+            let drag_out_service: std::sync::Mutex<
+                Box<dyn drag_out_service::DragOutService>,
+            > = std::sync::Mutex::new(Box::new(
+                drag_out_service::native_drag_out_service(app.handle().clone()),
+            ));
+            app.manage(drag_out_service);
+
             let preferences_path = app
                 .path()
                 .app_config_dir()

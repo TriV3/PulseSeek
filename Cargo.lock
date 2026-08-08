@@ -2732,6 +2732,9 @@ name = "pulseseek"
 version = "0.1.0"
 dependencies = [
  "notify-debouncer-full",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "pulseseek-audio-cpal",
  "pulseseek-browser-fs",
  "pulseseek-cache",

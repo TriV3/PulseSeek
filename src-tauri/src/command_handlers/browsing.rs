@@ -6,17 +6,18 @@ use serde_json::Value;
 
 use crate::command_envelope::types::{
     CancelCopyFilesRequest, CancelCopyFilesResponse, CancelEnumerationRequest,
-    CancelEnumerationResponse, CancelMoveFilesRequest, CancelMoveFilesResponse,
-    ListBrowserRootsRequest, ListBrowserRootsResponse, MoveToTrashItemResult, MoveToTrashRequest,
-    MoveToTrashResponse, OpenWithRequest, OpenWithResponse, PickFolderResponse, RenameFileRequest,
-    RenameFileResponse, RevealFileRequest, RevealFileResponse, StartCopyFilesRequest,
-    StartCopyFilesResponse, StartEnumerationRequest, StartEnumerationResponse,
-    StartMoveFilesRequest, StartMoveFilesResponse,
+    CancelEnumerationResponse, CancelMoveFilesRequest, CancelMoveFilesResponse, DragOutRequest,
+    DragOutResponse, ListBrowserRootsRequest, ListBrowserRootsResponse, MoveToTrashItemResult,
+    MoveToTrashRequest, MoveToTrashResponse, OpenWithRequest, OpenWithResponse, PickFolderResponse,
+    RenameFileRequest, RenameFileResponse, RevealFileRequest, RevealFileResponse,
+    StartCopyFilesRequest, StartCopyFilesResponse, StartEnumerationRequest,
+    StartEnumerationResponse, StartMoveFilesRequest, StartMoveFilesResponse,
 };
 use crate::command_envelope::{from_application_error, CommandResponse};
 use crate::command_handlers::parse_payload;
 use crate::copy_service::CopyService;
 use crate::dialog_service::FolderPicker;
+use crate::drag_out_service::DragOutService;
 use crate::external_service::ExternalService;
 use crate::folder_enumeration_service::{ActiveEnumerations, FolderEnumerationService};
 use crate::move_service::MoveService;
@@ -27,7 +28,7 @@ use crate::trash_service::TrashService;
 
 /// Handles browsing commands: start_enumeration, cancel_enumeration,
 /// move_to_trash, rename_file, start_move_files, cancel_move_files,
-/// start_copy_files, cancel_copy_files, reveal_file, and open_with.
+/// start_copy_files, cancel_copy_files, reveal_file, open_with, and drag_out.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle(
     command: &str,
@@ -38,6 +39,7 @@ pub(crate) fn handle(
     move_service: &dyn MoveService,
     copy_service: &dyn CopyService,
     external_service: &dyn ExternalService,
+    drag_out_service: &dyn DragOutService,
     playback: &mut dyn PlaybackService,
     active: &ActiveEnumerations,
     events: &Arc<dyn PlaybackEventEmitter>,
@@ -209,6 +211,16 @@ pub(crate) fn handle(
             };
             match external_service.open_with(request.path) {
                 Ok(()) => CommandResponse::ok(serde_json::to_value(OpenWithResponse {}).unwrap()),
+                Err(error) => CommandResponse::err(from_application_error(&error)),
+            }
+        },
+        "drag_out" => {
+            let request: DragOutRequest = match parse_payload("drag_out", payload) {
+                Ok(request) => request,
+                Err(response) => return response,
+            };
+            match drag_out_service.drag_out(request.paths) {
+                Ok(()) => CommandResponse::ok(serde_json::to_value(DragOutResponse {}).unwrap()),
                 Err(error) => CommandResponse::err(from_application_error(&error)),
             }
         },

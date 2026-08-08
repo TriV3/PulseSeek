@@ -225,6 +225,14 @@ pub struct OpenWithRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OpenWithResponse {}
 
+#[derive(Debug, Deserialize)]
+pub struct DragOutRequest {
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DragOutResponse {}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RenameFileResponse {
     pub old_path: String,
