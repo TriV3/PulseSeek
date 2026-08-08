@@ -24,6 +24,11 @@ import {
   type SessionMarks,
 } from "./sessionMarks";
 import { useSessionMarks } from "../../hooks/useSessionMarks";
+import { DEFAULT_SHORTCUTS } from "../../shortcuts/keyboardShortcuts";
+
+function openMarkMenu() {
+  fireEvent.click(screen.getByText("Marks"));
+}
 
 const mockMoveToTrash = vi.hoisted(() => vi.fn());
 const mockRenameFile = vi.hoisted(() => vi.fn());
@@ -611,6 +616,29 @@ describe("FileList — move to Trash", () => {
       key: "Delete",
     });
 
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+  });
+
+  it("replaces the row Delete command when Trash is remapped", () => {
+    render(
+      <FileList
+        entries={[sampleEntries[0]]}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        shortcutBindings={{
+          ...DEFAULT_SHORTCUTS,
+          move_to_trash: { key: "x", primary: false, shift: false, alt: false },
+        }}
+      />,
+    );
+    const row = screen.getByRole("row", { name: /song1\.mp3/ });
+    fireEvent.click(row);
+
+    fireEvent.keyDown(row, { key: "Delete" });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(row, { key: "x" });
     expect(screen.getByRole("alertdialog")).toBeInTheDocument();
   });
 
@@ -1801,6 +1829,7 @@ describe("FileList — session marks", () => {
 
   it("renders mark controls in the actions bar", () => {
     render(<MarkHarness />);
+    openMarkMenu();
 
     expect(
       screen.getByRole("button", { name: "Mark Keep" }),
@@ -1820,8 +1849,26 @@ describe("FileList — session marks", () => {
     expect(screen.getByLabelText("Filter by mark")).toBeInTheDocument();
   });
 
+  it("groups file actions and format filters into compact menus", () => {
+    render(<MarkHarness />);
+
+    const fileActions = screen.getByText("File actions").parentElement;
+    const filters = screen.getByText("Filters").parentElement;
+    expect(fileActions?.tagName).toBe("DETAILS");
+    expect(filters?.tagName).toBe("DETAILS");
+    expect(fileActions).not.toHaveAttribute("open");
+    expect(filters).not.toHaveAttribute("open");
+
+    fireEvent.click(screen.getByText("File actions"));
+    fireEvent.click(screen.getByText("Filters"));
+
+    expect(fileActions).toHaveAttribute("open");
+    expect(filters).toHaveAttribute("open");
+  });
+
   it("disables mark buttons without a playable selection", () => {
     render(<MarkHarness />);
+    openMarkMenu();
 
     expect(screen.getByRole("button", { name: "Mark Keep" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Clear mark" })).toBeDisabled();
@@ -1830,6 +1877,7 @@ describe("FileList — session marks", () => {
   it("applies a mark to the single selected file", () => {
     const onMarkChange = vi.fn();
     render(<MarkHarness onMarkChange={onMarkChange} />);
+    openMarkMenu();
 
     fireEvent.click(screen.getByText("song1.mp3"));
     fireEvent.click(screen.getByRole("button", { name: "Mark Keep" }));
@@ -1840,6 +1888,7 @@ describe("FileList — session marks", () => {
   it("applies a mark to every selected file", () => {
     const onMarkChange = vi.fn();
     render(<MarkHarness onMarkChange={onMarkChange} />);
+    openMarkMenu();
 
     fireEvent.click(screen.getByText("song1.mp3"));
     fireEvent.click(screen.getByText("song2.wav"), { ctrlKey: true });
@@ -1859,6 +1908,7 @@ describe("FileList — session marks", () => {
         onMarkChange={onMarkChange}
       />,
     );
+    openMarkMenu();
 
     fireEvent.click(screen.getByText("song1.mp3"));
     fireEvent.click(screen.getByRole("button", { name: "Clear mark" }));
@@ -1947,6 +1997,7 @@ describe("FileList — session marks", () => {
   it("changes the mark filter through the select", () => {
     const onMarkFilterChange = vi.fn();
     render(<MarkHarness onMarkFilterChange={onMarkFilterChange} />);
+    openMarkMenu();
 
     fireEvent.change(screen.getByLabelText("Filter by mark"), {
       target: { value: "keep" },
@@ -1957,6 +2008,7 @@ describe("FileList — session marks", () => {
 
   it("disables Select marked when nothing is marked", () => {
     render(<MarkHarness />);
+    openMarkMenu();
     expect(
       screen.getByRole("button", { name: "Select marked" }),
     ).toBeDisabled();
@@ -1966,6 +2018,7 @@ describe("FileList — session marks", () => {
     render(
       <MarkHarness marks={{ "song1.mp3": "keep", "song2.wav": "maybe" }} />,
     );
+    openMarkMenu();
 
     fireEvent.click(screen.getByRole("button", { name: "Select marked" }));
 
@@ -1995,6 +2048,59 @@ describe("FileList — session marks", () => {
     fireEvent.keyDown(window, { key: "k", metaKey: true, shiftKey: true });
 
     expect(onMarkChange).toHaveBeenCalledWith(["song1.mp3"], "keep");
+  });
+
+  it("uses supplied bindings while grid row has focus", () => {
+    Object.defineProperty(navigator, "platform", {
+      configurable: true,
+      value: "Linux",
+    });
+    const onMarkChange = vi.fn();
+    render(
+      <FileList
+        entries={markedEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        onMarkChange={onMarkChange}
+        shortcutBindings={{
+          ...DEFAULT_SHORTCUTS,
+          mark_keep: { key: "j", primary: true, shift: true, alt: false },
+        }}
+      />,
+    );
+    const row = screen.getByRole("row", { name: /song1\.mp3/ });
+    fireEvent.click(row);
+    row.focus();
+
+    fireEvent.keyDown(row, { key: "j", ctrlKey: true, shiftKey: true });
+
+    expect(onMarkChange).toHaveBeenCalledWith(["song1.mp3"], "keep");
+  });
+
+  it("focuses search when requested", () => {
+    const { rerender } = render(
+      <FileList
+        entries={markedEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        focusSearchRevision={0}
+      />,
+    );
+    rerender(
+      <FileList
+        entries={markedEntries}
+        selectedPath="/music"
+        isLoading={false}
+        error={null}
+        focusSearchRevision={1}
+      />,
+    );
+
+    expect(
+      screen.getByRole("searchbox", { name: /search files/i }),
+    ).toHaveFocus();
   });
 });
 
@@ -2035,6 +2141,7 @@ describe("FileList — session marks end to end", () => {
 
   it("marks a file, filters to its mark, and batch-selects marked files", () => {
     render(<SessionMarksHarness />);
+    openMarkMenu();
 
     fireEvent.click(screen.getByText("song1.mp3"));
     fireEvent.click(screen.getByRole("button", { name: "Mark Keep" }));
@@ -2074,6 +2181,7 @@ describe("FileList — session marks end to end", () => {
     }
 
     render(<MarkFlowHarness />);
+    openMarkMenu();
     fireEvent.click(screen.getByText("song1.mp3"));
     fireEvent.click(screen.getByRole("button", { name: "Mark Keep" }));
     expect(

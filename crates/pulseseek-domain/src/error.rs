@@ -59,6 +59,7 @@ pub enum DiagnosticCode {
     AudioOutput,
     PlaybackControl,
     FileOperation,
+    ShortcutPreferences,
 }
 
 impl DiagnosticCode {
@@ -68,6 +69,7 @@ impl DiagnosticCode {
             Self::AudioOutput => "audio.output",
             Self::PlaybackControl => "playback.control",
             Self::FileOperation => "file.operation",
+            Self::ShortcutPreferences => "shortcut.preferences",
         }
     }
 }

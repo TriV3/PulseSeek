@@ -3,12 +3,17 @@ use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::thread;
 
+use pulseseek_domain::shortcuts::{Platform, ShortcutMapping};
 use pulseseek_domain::waveform::levels::MultiresolutionWaveform;
 use rusqlite::params;
 
 use crate::recent_folders::{
     clear_recent_folders_db, list_recent_folders_db, record_recent_folder_db, RecentFolder,
     RecentFoldersCachePort, RecentFoldersError,
+};
+use crate::shortcut_mappings::{
+    load_shortcut_mappings_db, replace_shortcut_mappings_db, reset_shortcut_mappings_db,
+    ShortcutMappingsCachePort, ShortcutMappingsError,
 };
 use crate::sqlite::{now_ms, open_or_recover, Migration, OpenedDatabase, SqliteError};
 use crate::waveform_cache::{
@@ -17,15 +22,16 @@ use crate::waveform_cache::{
 };
 
 /// Schema version of the technical cache database.
-pub const CACHE_SCHEMA_VERSION: u32 = 3;
+pub const CACHE_SCHEMA_VERSION: u32 = 4;
 
 /// Migrations for `app-cache.sqlite`.
 ///
 /// The first version only carries cache metadata. Record tables (waveform,
 /// recent folders, preferences, ...) are added by the feature PRs that own
 /// them. Version 2 adds the waveform cache owned by PR-063. Version 3 adds
-/// the recent-folder history owned by PR-074.
-pub const CACHE_MIGRATIONS: [Migration; 3] = [
+/// the recent-folder history owned by PR-074. Version 4 adds configurable
+/// shortcut mappings owned by PR-080.
+pub const CACHE_MIGRATIONS: [Migration; 4] = [
     Migration {
         version: 1,
         sql: "CREATE TABLE cache_meta (\
@@ -49,6 +55,16 @@ pub const CACHE_MIGRATIONS: [Migration; 3] = [
               path TEXT PRIMARY KEY, \
               name TEXT NOT NULL, \
               last_opened_ms INTEGER NOT NULL);",
+    },
+    Migration {
+        version: 4,
+        sql: "CREATE TABLE shortcut_mappings (\
+              action TEXT PRIMARY KEY, \
+              key TEXT NOT NULL COLLATE NOCASE, \
+              primary_modifier INTEGER NOT NULL CHECK (primary_modifier IN (0, 1)), \
+              shift_modifier INTEGER NOT NULL CHECK (shift_modifier IN (0, 1)), \
+              alt_modifier INTEGER NOT NULL CHECK (alt_modifier IN (0, 1)), \
+              UNIQUE (key, primary_modifier, shift_modifier, alt_modifier));",
     },
 ];
 
@@ -153,6 +169,18 @@ enum WorkerCommand {
     },
     ClearRecentFolders {
         reply: SyncSender<Result<(), RecentFoldersError>>,
+    },
+    ReplaceShortcutMappings {
+        mappings: Vec<ShortcutMapping>,
+        platform: Platform,
+        reply: SyncSender<Result<(), ShortcutMappingsError>>,
+    },
+    LoadShortcutMappings {
+        reply: SyncSender<Result<Vec<ShortcutMapping>, ShortcutMappingsError>>,
+    },
+    ResetShortcutMappings {
+        platform: Platform,
+        reply: SyncSender<Result<(), ShortcutMappingsError>>,
     },
 }
 
@@ -298,6 +326,40 @@ impl RecentFoldersCachePort for TechnicalCache {
     }
 }
 
+impl ShortcutMappingsCachePort for TechnicalCache {
+    fn replace_shortcut_mappings(
+        &self,
+        mappings: &[ShortcutMapping],
+        platform: Platform,
+    ) -> Result<(), ShortcutMappingsError> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::ReplaceShortcutMappings {
+                mappings: mappings.to_vec(),
+                platform,
+                reply: reply_tx,
+            })
+            .map_err(|_| ShortcutMappingsError::WorkerStopped)?;
+        reply_rx.recv().map_err(|_| ShortcutMappingsError::WorkerStopped)?
+    }
+
+    fn load_shortcut_mappings(&self) -> Result<Vec<ShortcutMapping>, ShortcutMappingsError> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::LoadShortcutMappings { reply: reply_tx })
+            .map_err(|_| ShortcutMappingsError::WorkerStopped)?;
+        reply_rx.recv().map_err(|_| ShortcutMappingsError::WorkerStopped)?
+    }
+
+    fn reset_shortcut_mappings(&self, platform: Platform) -> Result<(), ShortcutMappingsError> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::ResetShortcutMappings { platform, reply: reply_tx })
+            .map_err(|_| ShortcutMappingsError::WorkerStopped)?;
+        reply_rx.recv().map_err(|_| ShortcutMappingsError::WorkerStopped)?
+    }
+}
+
 fn worker_loop(receiver: Receiver<WorkerCommand>, mut database: OpenedDatabase) {
     while let Ok(command) = receiver.recv() {
         match command {
@@ -329,6 +391,16 @@ fn worker_loop(receiver: Receiver<WorkerCommand>, mut database: OpenedDatabase) 
             },
             WorkerCommand::ClearRecentFolders { reply } => {
                 let _ = reply.send(clear_recent_folders_db(&mut database));
+            },
+            WorkerCommand::ReplaceShortcutMappings { mappings, platform, reply } => {
+                let _ =
+                    reply.send(replace_shortcut_mappings_db(&mut database, &mappings, platform));
+            },
+            WorkerCommand::LoadShortcutMappings { reply } => {
+                let _ = reply.send(load_shortcut_mappings_db(&mut database));
+            },
+            WorkerCommand::ResetShortcutMappings { platform, reply } => {
+                let _ = reply.send(reset_shortcut_mappings_db(&mut database, platform));
             },
         }
     }

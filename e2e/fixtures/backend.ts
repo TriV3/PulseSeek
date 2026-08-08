@@ -5,7 +5,33 @@ import { test as base } from "@playwright/test";
 const SCRIPT = `
 (function() {
   if (window.__TAURI_BACKEND__) return;
+  var defaultShortcuts = [
+    ["open_folder", "o", true, false, false],
+    ["toggle_play_pause", "space", false, false, false],
+    ["play_selection", "enter", false, false, false],
+    ["previous_track", "arrowleft", true, false, false],
+    ["next_track", "arrowright", true, false, false],
+    ["seek_backward", "arrowleft", false, false, false],
+    ["seek_forward", "arrowright", false, false, false],
+    ["toggle_loop", "l", false, false, false],
+    ["move_to_trash", "delete", false, false, false],
+    ["refresh", "r", true, false, false],
+    ["focus_search", "f", true, false, false],
+    ["set_playback_mode_one_shot", "1", true, false, true],
+    ["set_playback_mode_loop_current", "2", true, false, true],
+    ["set_playback_mode_sequential", "3", true, false, true],
+    ["set_playback_mode_random", "4", true, false, true],
+    ["mark_keep", "k", true, true, false],
+    ["mark_maybe", "m", true, true, false],
+    ["mark_reject", "r", true, true, false],
+    ["mark_favorite", "f", true, true, false],
+    ["mark_clear", "u", true, true, false]
+  ].map(function(binding) {
+    return { action_id: binding[0], key: binding[1], primary: binding[2], shift: binding[3], alt: binding[4] };
+  });
+  var unavailableShortcuts = ["set_ab_start", "set_ab_end", "toggle_ab_repeat"];
   var state = {
+    shortcuts: defaultShortcuts.map(function(mapping) { return Object.assign({}, mapping); }),
     commandHandlers: {
       list_browser_roots: function() { return { roots: [{ path: "/music", name: "Music" }] }; },
       list_devices: function() { return { devices: [] }; },
@@ -15,6 +41,9 @@ const SCRIPT = `
       volume: function() { return {}; },
       load_player_preferences: function() { return { version: 1, preferences: { schema_version: 1, revision: 0, playback_mode: "one-shot", output_device_id: null, volume: 1, muted: false, waveform_size: 38, browser_size: 24, selected_folder_path: null, expanded_folder_paths: [], last_played_file_path: null, last_played_position_ms: 0, last_played_duration_ms: null, theme: "system", waveform_style: "outline" } }; },
       save_player_preferences: function(args) { return { version: 1, preferences: args.preferences }; },
+      load_shortcuts: function() { return { mappings: state.shortcuts, unavailable_action_ids: unavailableShortcuts }; },
+      save_shortcuts: function(args) { state.shortcuts = args.mappings; return { mappings: state.shortcuts, unavailable_action_ids: unavailableShortcuts }; },
+      reset_shortcuts: function() { state.shortcuts = defaultShortcuts.map(function(mapping) { return Object.assign({}, mapping); }); return { mappings: state.shortcuts, unavailable_action_ids: unavailableShortcuts }; },
       get_waveform: function() {
         var n = 96;
         var min = [];

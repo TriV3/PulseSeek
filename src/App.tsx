@@ -29,6 +29,10 @@ import { usePlaybackMode } from "./hooks/usePlaybackMode";
 import { useAudioDevices } from "./hooks/useAudioDevices";
 import { AudioDeviceSelector } from "./components/AudioDeviceSelector/AudioDeviceSelector";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useShortcutMappings } from "./hooks/useShortcutMappings";
+import { ShortcutEditor } from "./components/ShortcutEditor/ShortcutEditor";
+import { getShortcutPlatform } from "./shortcuts/keyboardShortcuts";
+import { pickFolder, type PlaybackMode } from "./api/commandEnvelope";
 import { usePlayerPreferences } from "./hooks/usePlayerPreferences";
 import { useTheme } from "./hooks/useTheme";
 import { ThemeSelector } from "./components/ThemeSelector/ThemeSelector";
@@ -52,6 +56,11 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [formatFilter, setFormatFilter] = useState<AudioFileFormat[]>([]);
   const [markFilter, setMarkFilter] = useState<MarkFilter>("all");
+  const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
+  const [focusSearchRevision, setFocusSearchRevision] = useState(0);
+  const [folderPickerError, setFolderPickerError] = useState<string | null>(
+    null,
+  );
   const sessionMarks = useSessionMarks();
   const folderTree = useFolderTree();
   const recentFolders = useRecentFolders();
@@ -67,6 +76,7 @@ function App() {
   const playbackMode = usePlaybackMode();
   const audioDevices = useAudioDevices();
   const playerPreferences = usePlayerPreferences();
+  const shortcutMappings = useShortcutMappings();
   const updatePreferences = playerPreferences.update;
   useTheme(playerPreferences.preferences.theme);
   const restoredOptions = useRef(false);
@@ -159,6 +169,16 @@ function App() {
     },
     [folderTree, playerPreferences, recentFolders],
   );
+
+  const openPickedFolder = useCallback(async () => {
+    setFolderPickerError(null);
+    try {
+      const path = await pickFolder();
+      if (path) openFolder(path, { expand: true });
+    } catch {
+      setFolderPickerError("Unable to open folder.");
+    }
+  }, [openFolder]);
 
   useEffect(() => {
     if (!playerPreferences.isLoaded || restoredOptions.current) return;
@@ -366,26 +386,44 @@ function App() {
     [],
   );
 
-  useKeyboardShortcuts({
-    onTogglePlayPause: transport.togglePlayPause,
-    onPreviousTrack: transport.handlePrevious,
-    onNextTrack: transport.handleNext,
-    onSeekBackward: () =>
-      seekAndRemember(Math.max(0, transport.positionMs - 5_000)),
-    onSeekForward: () =>
-      seekAndRemember(
-        transport.durationMs === null
-          ? transport.positionMs + 5_000
-          : Math.min(transport.durationMs, transport.positionMs + 5_000),
-      ),
-    onToggleLoop: () => {
-      const mode =
-        playbackMode.mode === "loop-current" ? "one-shot" : "loop-current";
-      return playbackMode.selectMode(mode).then((confirmed) => {
-        if (confirmed) playerPreferences.update({ playback_mode: confirmed });
-      });
+  const selectPlaybackMode = useCallback(
+    async (mode: PlaybackMode) => {
+      const confirmed = await playbackMode.selectMode(mode);
+      if (confirmed) playerPreferences.update({ playback_mode: confirmed });
     },
-  });
+    [playbackMode, playerPreferences],
+  );
+
+  useKeyboardShortcuts(
+    {
+      onOpenFolder: openPickedFolder,
+      onTogglePlayPause: transport.togglePlayPause,
+      onPreviousTrack: transport.handlePrevious,
+      onNextTrack: transport.handleNext,
+      onSeekBackward: () =>
+        seekAndRemember(Math.max(0, transport.positionMs - 5_000)),
+      onSeekForward: () =>
+        seekAndRemember(
+          transport.durationMs === null
+            ? transport.positionMs + 5_000
+            : Math.min(transport.durationMs, transport.positionMs + 5_000),
+        ),
+      onToggleLoop: () => {
+        const mode =
+          playbackMode.mode === "loop-current" ? "one-shot" : "loop-current";
+        return playbackMode.selectMode(mode).then((confirmed) => {
+          if (confirmed) playerPreferences.update({ playback_mode: confirmed });
+        });
+      },
+      onRefresh: folderTree.refreshSelected,
+      onFocusSearch: () => setFocusSearchRevision((revision) => revision + 1),
+      onSetPlaybackModeOneShot: () => selectPlaybackMode("one-shot"),
+      onSetPlaybackModeLoopCurrent: () => selectPlaybackMode("loop-current"),
+      onSetPlaybackModeSequential: () => selectPlaybackMode("sequential"),
+      onSetPlaybackModeRandom: () => selectPlaybackMode("random"),
+    },
+    shortcutMappings.bindings,
+  );
 
   return (
     <main className="app-shell">
@@ -491,28 +529,51 @@ function App() {
                   }
                 }}
               />
-              <AudioDeviceSelector
-                {...audioDevices}
-                onChange={async (deviceId) => {
-                  const confirmed = await audioDevices.choose(deviceId);
-                  if (confirmed) {
-                    playerPreferences.update({ output_device_id: confirmed });
-                  }
-                }}
-                onRetry={audioDevices.refresh}
-              />
-              <ThemeSelector
-                theme={playerPreferences.preferences.theme}
-                onChange={(theme) => {
-                  playerPreferences.update({ theme });
-                }}
-              />
+              <details className="app-options-menu">
+                <summary aria-label="Open application menu">☰</summary>
+                <div className="app-options-menu-content">
+                  <AudioDeviceSelector
+                    {...audioDevices}
+                    onChange={async (deviceId) => {
+                      const confirmed = await audioDevices.choose(deviceId);
+                      if (confirmed) {
+                        playerPreferences.update({
+                          output_device_id: confirmed,
+                        });
+                      }
+                    }}
+                    onRetry={audioDevices.refresh}
+                  />
+                  <ThemeSelector
+                    theme={playerPreferences.preferences.theme}
+                    onChange={(theme) => {
+                      playerPreferences.update({ theme });
+                    }}
+                  />
+                </div>
+              </details>
               <WaveformStyleSelector
                 style={playerPreferences.preferences.waveform_style}
                 onChange={(waveform_style) => {
                   playerPreferences.update({ waveform_style });
                 }}
               />
+              <button
+                type="button"
+                className="shortcut-settings-button"
+                onClick={() => setShortcutEditorOpen(true)}
+              >
+                Keyboard shortcuts
+              </button>
+              {shortcutMappings.isLoading && (
+                <span role="status">Loading shortcuts…</span>
+              )}
+              {shortcutMappings.error && (
+                <span role="alert">{shortcutMappings.error}</span>
+              )}
+              {folderPickerError && (
+                <span role="alert">{folderPickerError}</span>
+              )}
             </div>
           </div>
           <div
@@ -674,11 +735,30 @@ function App() {
                     folderTree.setRecursive(state.selectedPath, next);
                   }
                 }}
+                shortcutBindings={shortcutMappings.bindings}
+                focusSearchRevision={focusSearchRevision}
               />
             </section>
           </div>
         </section>
       </div>
+      <ShortcutEditor
+        open={shortcutEditorOpen}
+        bindings={shortcutMappings.bindings}
+        platform={getShortcutPlatform()}
+        onCancel={() => setShortcutEditorOpen(false)}
+        onSave={async (bindings) => {
+          const confirmed = await shortcutMappings.save(bindings);
+          if (!confirmed) throw new Error("Could not save keyboard shortcuts.");
+          setShortcutEditorOpen(false);
+        }}
+        onReset={async () => {
+          const confirmed = await shortcutMappings.reset();
+          if (!confirmed)
+            throw new Error("Could not reset keyboard shortcuts.");
+          return confirmed;
+        }}
+      />
     </main>
   );
 }

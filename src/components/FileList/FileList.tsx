@@ -22,6 +22,12 @@ import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
 import { relativeEntryPath } from "../FolderTree/folderTreeTypes";
 import type { PlaybackSelectionStatus } from "../../hooks/usePlaybackSelection";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
+import {
+  DEFAULT_SHORTCUTS,
+  getShortcutPlatform,
+  matchShortcut,
+  type ShortcutBindings,
+} from "../../shortcuts/keyboardShortcuts";
 import { ConfirmDialog } from "../ConfirmDialog/ConfirmDialog";
 import { RenameDialog } from "../RenameDialog/RenameDialog";
 import {
@@ -201,6 +207,8 @@ interface FileListProps {
   recursive?: boolean;
   /** Called when the user toggles the recursive file view. */
   onRecursiveChange?: (recursive: boolean) => void;
+  shortcutBindings?: ShortcutBindings;
+  focusSearchRevision?: number;
 }
 
 /** Column headers that act as clickable sort controls. */
@@ -239,8 +247,14 @@ export function FileList({
   onSelectFolder,
   recursive = false,
   onRecursiveChange,
+  shortcutBindings,
+  focusSearchRevision = 0,
 }: FileListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const initialFocusSearchRevision = useRef(focusSearchRevision);
+  const activeShortcutBindings = shortcutBindings ?? DEFAULT_SHORTCUTS;
+  const shortcutPlatform = getShortcutPlatform();
   const usesNativeDragOut = isMacOSPlatform();
   // Multi-selection stores stable backend entry ids (FR-LS-005) so rows keep
   // their selection across sort, search, and format-filter changes.
@@ -305,6 +319,12 @@ export function FileList({
   useEffect(() => {
     onEntriesMovedRef.current = onEntriesMoved;
   }, [onEntriesMoved]);
+
+  useEffect(() => {
+    if (focusSearchRevision !== initialFocusSearchRevision.current) {
+      searchRef.current?.focus();
+    }
+  }, [focusSearchRevision]);
 
   // Only folders and confirmed playable files may be listed. Unsupported or
   // inaccessible entries must never render, even if a stale backend still
@@ -947,19 +967,29 @@ export function FileList({
     }
   };
 
-  useKeyboardShortcuts({
-    onMoveToTrash: () => {
-      const selected = visibleEntries.find(
-        (entry) => entry.id === primarySelectedId,
-      );
-      if (selected) requestTrash(selected);
+  useKeyboardShortcuts(
+    {
+      onMoveToTrash: () => {
+        const selected = visibleEntries.find(
+          (entry) => entry.id === primarySelectedId,
+        );
+        if (selected) requestTrash(selected);
+      },
+      onMarkKeep: () => applyMarkToSelection("keep"),
+      onMarkMaybe: () => applyMarkToSelection("maybe"),
+      onMarkReject: () => applyMarkToSelection("reject"),
+      onMarkFavorite: () => applyMarkToSelection("favorite"),
+      onMarkClear: () => clearMarkOnSelection(),
+      onPlaySelection: () => {
+        const selected = visibleEntries.find(
+          (entry) =>
+            entry.id === primarySelectedId && entry.kind === "playable",
+        );
+        if (selected) onFileSelect?.(selected);
+      },
     },
-    onMarkKeep: () => applyMarkToSelection("keep"),
-    onMarkMaybe: () => applyMarkToSelection("maybe"),
-    onMarkReject: () => applyMarkToSelection("reject"),
-    onMarkFavorite: () => applyMarkToSelection("favorite"),
-    onMarkClear: () => clearMarkOnSelection(),
-  });
+    shortcutBindings,
+  );
 
   // The primary selection is the anchor (last clicked or focused row). It
   // drives single-file actions such as Move to Trash and Rename; batch
@@ -1069,52 +1099,57 @@ export function FileList({
         >
           Move to Trash
         </button>
-        <button
-          type="button"
-          className="file-list-rename-button"
-          onClick={() => {
-            if (primarySelectedEntry) requestRename(primarySelectedEntry);
-          }}
-          disabled={!canRenamePrimary || renameStatus === "renaming"}
-        >
-          Rename
-        </button>
-        <button
-          type="button"
-          className="file-list-move-button"
-          onClick={requestMove}
-          disabled={!canMoveSelection || moveStatus === "moving"}
-        >
-          Move…
-        </button>
-        <button
-          type="button"
-          className="file-list-copy-button"
-          onClick={requestCopy}
-          disabled={!canCopySelection || copyStatus === "moving"}
-        >
-          Copy…
-        </button>
-        <button
-          type="button"
-          className="file-list-reveal-button"
-          onClick={() => {
-            void runExternalAction(revealFile);
-          }}
-          disabled={!hasPlayablePrimary || externalBusy}
-        >
-          Reveal
-        </button>
-        <button
-          type="button"
-          className="file-list-open-with-button"
-          onClick={() => {
-            void runExternalAction(openWith);
-          }}
-          disabled={!hasPlayablePrimary || externalBusy}
-        >
-          Open With…
-        </button>
+        <details className="file-list-action-menu">
+          <summary>File actions</summary>
+          <div className="file-list-action-menu-content">
+            <button
+              type="button"
+              className="file-list-rename-button"
+              onClick={() => {
+                if (primarySelectedEntry) requestRename(primarySelectedEntry);
+              }}
+              disabled={!canRenamePrimary || renameStatus === "renaming"}
+            >
+              Rename
+            </button>
+            <button
+              type="button"
+              className="file-list-move-button"
+              onClick={requestMove}
+              disabled={!canMoveSelection || moveStatus === "moving"}
+            >
+              Move…
+            </button>
+            <button
+              type="button"
+              className="file-list-copy-button"
+              onClick={requestCopy}
+              disabled={!canCopySelection || copyStatus === "moving"}
+            >
+              Copy…
+            </button>
+            <button
+              type="button"
+              className="file-list-reveal-button"
+              onClick={() => {
+                void runExternalAction(revealFile);
+              }}
+              disabled={!hasPlayablePrimary || externalBusy}
+            >
+              Reveal
+            </button>
+            <button
+              type="button"
+              className="file-list-open-with-button"
+              onClick={() => {
+                void runExternalAction(openWith);
+              }}
+              disabled={!hasPlayablePrimary || externalBusy}
+            >
+              Open With…
+            </button>
+          </div>
+        </details>
         {externalError && (
           <span className="file-list-external-error" role="alert">
             {externalError}
@@ -1129,6 +1164,7 @@ export function FileList({
           Recursive view
         </button>
         <input
+          ref={searchRef}
           type="search"
           className="file-list-search"
           aria-label="Search files"
@@ -1136,74 +1172,84 @@ export function FileList({
           value={searchQuery}
           onChange={(event) => onSearchQueryChange?.(event.target.value)}
         />
-        <fieldset className="file-list-format-filter">
-          <legend className="visually-hidden">Filter by format</legend>
-          {FORMAT_OPTIONS.map((option) => (
-            <label key={option.value} className="file-list-format-option">
-              <input
-                type="checkbox"
-                checked={formatFilter.includes(option.value)}
-                onChange={() => toggleFormat(option.value)}
-              />
-              <span>{option.label}</span>
+        <details className="file-list-filter-menu">
+          <summary>Filters</summary>
+          <div className="file-list-filter-menu-content">
+            <fieldset className="file-list-format-filter">
+              <legend>Filter by format</legend>
+              {FORMAT_OPTIONS.map((option) => (
+                <label key={option.value} className="file-list-format-option">
+                  <input
+                    type="checkbox"
+                    checked={formatFilter.includes(option.value)}
+                    onChange={() => toggleFormat(option.value)}
+                  />
+                  <span>{option.label}</span>
+                </label>
+              ))}
+              <button
+                type="button"
+                aria-label="Reset format filter"
+                onClick={resetFormats}
+                disabled={formatFilter.length === 0}
+              >
+                Reset
+              </button>
+            </fieldset>
+          </div>
+        </details>
+        <details className="file-list-mark-menu">
+          <summary>Marks</summary>
+          <div className="file-list-mark-menu-content">
+            <fieldset className="file-list-mark-controls">
+              <legend>Mark selection</legend>
+              {SESSION_MARKS.map((mark) => (
+                <button
+                  key={mark}
+                  type="button"
+                  aria-label={`Mark ${SESSION_MARK_LABELS[mark]}`}
+                  className={`file-list-mark-button file-list-mark-button--${mark}`}
+                  disabled={selectedIds.size === 0}
+                  onClick={() => applyMarkToSelection(mark)}
+                >
+                  {SESSION_MARK_LABELS[mark]}
+                </button>
+              ))}
+              <button
+                type="button"
+                aria-label="Clear mark"
+                disabled={selectedIds.size === 0}
+                onClick={clearMarkOnSelection}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                aria-label="Select marked"
+                disabled={markedVisibleIds.length === 0}
+                onClick={selectMarked}
+              >
+                Select marked
+              </button>
+            </fieldset>
+            <label className="file-list-mark-filter">
+              <span>Filter by mark</span>
+              <select
+                aria-label="Filter by mark"
+                value={markFilter}
+                onChange={(event) =>
+                  onMarkFilterChange?.(event.target.value as MarkFilter)
+                }
+              >
+                {MARK_FILTERS.map((filter) => (
+                  <option key={filter} value={filter}>
+                    {MARK_FILTER_LABELS[filter]}
+                  </option>
+                ))}
+              </select>
             </label>
-          ))}
-          <button
-            type="button"
-            aria-label="Reset format filter"
-            onClick={resetFormats}
-            disabled={formatFilter.length === 0}
-          >
-            Reset
-          </button>
-        </fieldset>
-        <fieldset className="file-list-mark-controls">
-          <legend className="visually-hidden">Mark selection</legend>
-          {SESSION_MARKS.map((mark) => (
-            <button
-              key={mark}
-              type="button"
-              aria-label={`Mark ${SESSION_MARK_LABELS[mark]}`}
-              className={`file-list-mark-button file-list-mark-button--${mark}`}
-              disabled={selectedIds.size === 0}
-              onClick={() => applyMarkToSelection(mark)}
-            >
-              {SESSION_MARK_LABELS[mark]}
-            </button>
-          ))}
-          <button
-            type="button"
-            aria-label="Clear mark"
-            disabled={selectedIds.size === 0}
-            onClick={clearMarkOnSelection}
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            aria-label="Select marked"
-            disabled={markedVisibleIds.length === 0}
-            onClick={selectMarked}
-          >
-            Select marked
-          </button>
-        </fieldset>
-        <label className="file-list-mark-filter">
-          <span className="visually-hidden">Filter by mark</span>
-          <select
-            aria-label="Filter by mark"
-            value={markFilter}
-            onChange={(event) =>
-              onMarkFilterChange?.(event.target.value as MarkFilter)
-            }
-          >
-            {MARK_FILTERS.map((filter) => (
-              <option key={filter} value={filter}>
-                {MARK_FILTER_LABELS[filter]}
-              </option>
-            ))}
-          </select>
-        </label>
+          </div>
+        </details>
         {trashStatus === "moving" ? (
           <span role="status" aria-live="polite">
             Moving to Trash…
@@ -1391,7 +1437,14 @@ export function FileList({
                     if (handleGridKeyDown(event, virtualRow.index)) {
                       return;
                     }
-                    if (event.key === "Delete" || event.key === "Backspace") {
+                    if (
+                      activeShortcutBindings.move_to_trash &&
+                      matchShortcut(
+                        event.nativeEvent,
+                        activeShortcutBindings.move_to_trash,
+                        shortcutPlatform,
+                      )
+                    ) {
                       event.preventDefault();
                       if (trashStatus !== "moving") requestTrash(entry);
                       return;
@@ -1416,7 +1469,14 @@ export function FileList({
                       focusEntry(entries.length - 1);
                       return;
                     }
-                    if (event.key === "Enter" || event.key === " ") {
+                    if (
+                      activeShortcutBindings.play_selection &&
+                      matchShortcut(
+                        event.nativeEvent,
+                        activeShortcutBindings.play_selection,
+                        shortcutPlatform,
+                      )
+                    ) {
                       event.preventDefault();
                       selectEntry(entry);
                     }

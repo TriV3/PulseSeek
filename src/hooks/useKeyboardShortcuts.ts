@@ -1,4 +1,12 @@
 import { useEffect } from "react";
+import {
+  DEFAULT_SHORTCUTS,
+  getShortcutPlatform,
+  matchShortcut,
+  SHORTCUT_ACTIONS,
+  type ShortcutActionId,
+  type ShortcutBindings,
+} from "../shortcuts/keyboardShortcuts";
 
 export interface KeyboardShortcutActions {
   onOpenFolder?: () => void | Promise<void>;
@@ -14,182 +22,134 @@ export interface KeyboardShortcutActions {
   onMarkReject?: () => void | Promise<void>;
   onMarkFavorite?: () => void | Promise<void>;
   onMarkClear?: () => void | Promise<void>;
-}
-
-function isMacPlatform(): boolean {
-  return /Mac/i.test(navigator.platform) || /Mac/i.test(navigator.userAgent);
+  onPlaySelection?: () => void | Promise<void>;
+  onRefresh?: () => void | Promise<void>;
+  onFocusSearch?: () => void | Promise<void>;
+  onSetPlaybackModeOneShot?: () => void | Promise<void>;
+  onSetPlaybackModeLoopCurrent?: () => void | Promise<void>;
+  onSetPlaybackModeSequential?: () => void | Promise<void>;
+  onSetPlaybackModeRandom?: () => void | Promise<void>;
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   return (
-    target.matches("input, textarea, select, [contenteditable]") ||
-    target.closest("input, textarea, select, [contenteditable]") !== null
+    target.matches("input, textarea, [contenteditable]") ||
+    target.closest("input, textarea, [contenteditable]") !== null
   );
 }
 
-function isInsideFileGrid(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest("[role='grid']") !== null;
+function isNativeActivationTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest(
+      "button, a, select, [role='button'], [role='checkbox'], [role='combobox'], [role='link'], [role='listbox'], [role='menu'], [role='menuitem'], [role='radio'], [role='slider'], [role='spinbutton'], [role='switch'], [role='tab']",
+    ) !== null
+  );
 }
 
-export function useKeyboardShortcuts(actions: KeyboardShortcutActions): void {
+function isNavigationTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest(
+      "[role='grid'], [role='tree'], [role='slider'], [role='separator'], [role='listbox'], [role='menu']",
+    ) !== null
+  );
+}
+
+function isModalTarget(target: EventTarget | null): boolean {
+  const modalSelector =
+    "[aria-modal='true'], [role='dialog'], [role='alertdialog']";
+  return (
+    (target instanceof Element && target.closest(modalSelector) !== null) ||
+    document.querySelector(modalSelector) !== null
+  );
+}
+
+const ACTION_CALLBACKS: Record<
+  ShortcutActionId,
+  keyof KeyboardShortcutActions | null
+> = {
+  open_folder: "onOpenFolder",
+  toggle_play_pause: "onTogglePlayPause",
+  play_selection: "onPlaySelection",
+  previous_track: "onPreviousTrack",
+  next_track: "onNextTrack",
+  seek_backward: "onSeekBackward",
+  seek_forward: "onSeekForward",
+  toggle_loop: "onToggleLoop",
+  move_to_trash: "onMoveToTrash",
+  refresh: "onRefresh",
+  focus_search: "onFocusSearch",
+  set_playback_mode_one_shot: "onSetPlaybackModeOneShot",
+  set_playback_mode_loop_current: "onSetPlaybackModeLoopCurrent",
+  set_playback_mode_sequential: "onSetPlaybackModeSequential",
+  set_playback_mode_random: "onSetPlaybackModeRandom",
+  mark_keep: "onMarkKeep",
+  mark_maybe: "onMarkMaybe",
+  mark_reject: "onMarkReject",
+  mark_favorite: "onMarkFavorite",
+  mark_clear: "onMarkClear",
+  set_ab_start: null,
+  set_ab_end: null,
+  toggle_ab_repeat: null,
+};
+
+export function useKeyboardShortcuts(
+  actions: KeyboardShortcutActions,
+  bindings: ShortcutBindings = DEFAULT_SHORTCUTS,
+): void {
   useEffect(() => {
-    const modifierKey = isMacPlatform() ? "metaKey" : "ctrlKey";
+    const platform = getShortcutPlatform();
 
     function onKeyDown(event: KeyboardEvent) {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        isModalTarget(event.target)
+      )
+        return;
       const editable = isEditableTarget(event.target);
-      const inFileGrid = isInsideFileGrid(event.target);
-      const hasPlatformModifier = event[modifierKey];
-
-      if (editable) return;
-
       if (
-        hasPlatformModifier &&
-        event.key.toLowerCase() === "o" &&
-        actions.onOpenFolder
+        isNavigationTarget(event.target) &&
+        [
+          "ArrowDown",
+          "ArrowUp",
+          "ArrowLeft",
+          "ArrowRight",
+          "Home",
+          "End",
+          "PageDown",
+          "PageUp",
+        ].includes(event.key)
       ) {
-        event.preventDefault();
-        void actions.onOpenFolder();
         return;
       }
-
       if (
-        hasPlatformModifier &&
-        event.key === "ArrowLeft" &&
-        actions.onPreviousTrack
-      ) {
-        event.preventDefault();
-        void actions.onPreviousTrack();
+        !editable &&
+        isNativeActivationTarget(event.target) &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.shiftKey &&
+        !event.altKey &&
+        [" ", "Enter"].includes(event.key)
+      )
         return;
-      }
 
-      if (
-        hasPlatformModifier &&
-        event.key === "ArrowRight" &&
-        actions.onNextTrack
-      ) {
+      for (const action of SHORTCUT_ACTIONS) {
+        if (editable && action.id !== "focus_search") continue;
+        const callbackName = ACTION_CALLBACKS[action.id];
+        const binding = bindings[action.id];
+        if (!callbackName || !binding) continue;
+        const callback = actions[callbackName];
+        if (!callback || !matchShortcut(event, binding, platform)) continue;
         event.preventDefault();
-        void actions.onNextTrack();
+        void callback();
         return;
-      }
-
-      if (
-        !hasPlatformModifier &&
-        event.key === " " &&
-        actions.onTogglePlayPause
-      ) {
-        if (
-          event.target instanceof HTMLElement &&
-          event.target.matches("button, a")
-        ) {
-          return;
-        }
-        event.preventDefault();
-        void actions.onTogglePlayPause();
-        return;
-      }
-
-      if (
-        !hasPlatformModifier &&
-        event.key === "ArrowLeft" &&
-        !inFileGrid &&
-        actions.onSeekBackward
-      ) {
-        event.preventDefault();
-        void actions.onSeekBackward();
-        return;
-      }
-
-      if (
-        !hasPlatformModifier &&
-        event.key === "ArrowRight" &&
-        !inFileGrid &&
-        actions.onSeekForward
-      ) {
-        event.preventDefault();
-        void actions.onSeekForward();
-        return;
-      }
-
-      if (
-        !hasPlatformModifier &&
-        event.key.toLowerCase() === "l" &&
-        actions.onToggleLoop
-      ) {
-        event.preventDefault();
-        void actions.onToggleLoop();
-        return;
-      }
-
-      // Session-mark shortcuts (FR-LS-006) use the platform modifier plus
-      // Shift so they never collide with typing or the unmodified grid keys.
-      if (
-        hasPlatformModifier &&
-        event.shiftKey &&
-        actions.onMarkKeep &&
-        event.key.toLowerCase() === "k"
-      ) {
-        event.preventDefault();
-        void actions.onMarkKeep();
-        return;
-      }
-
-      if (
-        hasPlatformModifier &&
-        event.shiftKey &&
-        actions.onMarkMaybe &&
-        event.key.toLowerCase() === "m"
-      ) {
-        event.preventDefault();
-        void actions.onMarkMaybe();
-        return;
-      }
-
-      if (
-        hasPlatformModifier &&
-        event.shiftKey &&
-        actions.onMarkReject &&
-        event.key.toLowerCase() === "r"
-      ) {
-        event.preventDefault();
-        void actions.onMarkReject();
-        return;
-      }
-
-      if (
-        hasPlatformModifier &&
-        event.shiftKey &&
-        actions.onMarkFavorite &&
-        event.key.toLowerCase() === "f"
-      ) {
-        event.preventDefault();
-        void actions.onMarkFavorite();
-        return;
-      }
-
-      if (
-        hasPlatformModifier &&
-        event.shiftKey &&
-        actions.onMarkClear &&
-        event.key.toLowerCase() === "u"
-      ) {
-        event.preventDefault();
-        void actions.onMarkClear();
-        return;
-      }
-
-      if (
-        !hasPlatformModifier &&
-        (event.key === "Delete" || event.key === "Backspace") &&
-        !inFileGrid &&
-        actions.onMoveToTrash
-      ) {
-        event.preventDefault();
-        void actions.onMoveToTrash();
       }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [actions]);
+  }, [actions, bindings]);
 }

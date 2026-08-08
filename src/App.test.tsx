@@ -4,6 +4,16 @@ import { invoke } from "@tauri-apps/api/core";
 import App from "./App";
 import { DEFAULT_PLAYER_PREFERENCES } from "./hooks/usePlayerPreferences";
 import type { PlayerPreferences } from "./api/commandEnvelope";
+import { DEFAULT_SHORTCUTS } from "./shortcuts/keyboardShortcuts";
+
+const shortcutProfile = (bindings = DEFAULT_SHORTCUTS) => ({
+  mappings: Object.entries(bindings)
+    .filter((entry): entry is [string, NonNullable<(typeof entry)[1]>] =>
+      Boolean(entry[1]),
+    )
+    .map(([action_id, binding]) => ({ action_id, ...binding })),
+  unavailable_action_ids: ["set_ab_start", "set_ab_end", "toggle_ab_repeat"],
+});
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -172,6 +182,184 @@ describe("application shell", () => {
               ?.waveform_style === "gradient",
         ),
     ).toBe(true);
+  });
+});
+
+describe("shortcut integration", () => {
+  function mockAppBackend(
+    bindings = DEFAULT_SHORTCUTS,
+    failShortcutLoad = false,
+  ) {
+    vi.mocked(invoke).mockImplementation(async (command: string, args) => {
+      if (command === "load_player_preferences") {
+        return { version: 1, preferences: DEFAULT_PLAYER_PREFERENCES };
+      }
+      if (command === "save_player_preferences") {
+        return {
+          version: 1,
+          preferences: (args as { preferences: PlayerPreferences }).preferences,
+        };
+      }
+      if (command === "pick_folder_dialog") return { path: "/music" };
+      if (command !== "invoke_command") return undefined;
+      const envelope = (
+        args as { envelope: { command: string; payload: unknown } }
+      ).envelope;
+      switch (envelope.command) {
+        case "load_shortcuts":
+          if (failShortcutLoad) throw new Error("private shortcut path");
+          return { version: 1, ok: true, data: shortcutProfile(bindings) };
+        case "save_shortcuts":
+        case "reset_shortcuts":
+          return { version: 1, ok: true, data: shortcutProfile(bindings) };
+        case "list_browser_roots":
+          return {
+            version: 1,
+            ok: true,
+            data: { roots: [{ path: "/music", name: "Music" }] },
+          };
+        case "list_recent_folders":
+          return { version: 1, ok: true, data: { folders: [] } };
+        case "record_recent_folder":
+          return { version: 1, ok: true, data: {} };
+        case "start_enumeration":
+          return { version: 1, ok: true, data: { session_id: "shortcuts" } };
+        case "set_playback_mode":
+          return {
+            version: 1,
+            ok: true,
+            data: { mode: (envelope.payload as { mode: string }).mode },
+          };
+        default:
+          return {
+            version: 1,
+            ok: false,
+            error: {
+              category: "Unavailable",
+              message: "Unmocked command.",
+              diagnostic_code: "command.unknown",
+            },
+          };
+      }
+    });
+  }
+
+  it("opens editor and saves through backend-confirmed profile", async () => {
+    mockAppBackend();
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
+    expect(
+      screen.getByRole("dialog", { name: "Keyboard shortcuts" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Keyboard shortcuts" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      vi
+        .mocked(invoke)
+        .mock.calls.some(
+          ([command, args]) =>
+            command === "invoke_command" &&
+            (args as { envelope: { command: string } }).envelope.command ===
+              "save_shortcuts",
+        ),
+    ).toBe(true);
+  });
+
+  it("groups output device and theme under the application menu", async () => {
+    mockAppBackend();
+    render(<App />);
+
+    const menuButton = screen.getByLabelText("Open application menu");
+    expect(menuButton).toBeInTheDocument();
+    expect(screen.queryByLabelText("Theme")).not.toBeVisible();
+
+    fireEvent.click(menuButton);
+
+    expect(screen.getByLabelText("Output device")).toBeVisible();
+    expect(screen.getByLabelText("Theme")).toBeVisible();
+  });
+
+  it("shows a safe shortcut loading error while defaults stay available", async () => {
+    mockAppBackend(DEFAULT_SHORTCUTS, true);
+    render(<App />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Keyboard shortcuts unavailable."),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    expect(
+      screen.getByRole("searchbox", { name: /search files/i }),
+    ).toHaveFocus();
+  });
+
+  it("routes confirmed open, search, refresh, and playback-mode bindings", async () => {
+    const bindings = {
+      ...DEFAULT_SHORTCUTS,
+      open_folder: { key: "p", primary: true, shift: false, alt: false },
+      focus_search: { key: "g", primary: true, shift: false, alt: false },
+    };
+    mockAppBackend(bindings);
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.queryByText("Loading shortcuts…")).not.toBeInTheDocument(),
+    );
+
+    fireEvent.keyDown(window, { key: "g", ctrlKey: true });
+    expect(
+      screen.getByRole("searchbox", { name: /search files/i }),
+    ).toHaveFocus();
+    fireEvent.keyDown(window, { key: "p", ctrlKey: true });
+    await waitFor(() =>
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("pick_folder_dialog", {}),
+    );
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(invoke)
+          .mock.calls.filter(
+            ([command, args]) =>
+              command === "invoke_command" &&
+              (args as { envelope: { command: string } }).envelope.command ===
+                "start_enumeration",
+          ),
+      ).toHaveLength(1),
+    );
+    fireEvent.keyDown(window, { key: "r", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "4", ctrlKey: true, altKey: true });
+
+    await waitFor(() =>
+      expect(
+        vi.mocked(invoke).mock.calls.some(
+          ([command, args]) =>
+            command === "invoke_command" &&
+            (args as { envelope: { command: string } }).envelope.command ===
+              "set_playback_mode" &&
+            (
+              args as {
+                envelope: { payload: { mode: string } };
+              }
+            ).envelope.payload.mode === "random",
+        ),
+      ).toBe(true),
+    );
+    expect(
+      vi
+        .mocked(invoke)
+        .mock.calls.filter(
+          ([command, args]) =>
+            command === "invoke_command" &&
+            (args as { envelope: { command: string } }).envelope.command ===
+              "start_enumeration",
+        ).length,
+    ).toBeGreaterThanOrEqual(2);
   });
 });
 

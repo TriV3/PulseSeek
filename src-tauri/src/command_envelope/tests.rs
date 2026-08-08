@@ -15,6 +15,7 @@ use crate::playback_events::{FakeEventEmitter, NoopEventEmitter};
 use crate::playback_service::FakePlaybackService;
 use crate::recent_folders_service::InMemoryRecentFoldersService;
 use crate::rename_service::{FakeRenameService, RenameOutcome};
+use crate::shortcut_mappings_service::{InMemoryShortcutMappingsService, ShortcutMappingsService};
 use crate::trash_service::FakeTrashService;
 
 fn noop_events() -> Arc<dyn PlaybackEventEmitter> {
@@ -104,6 +105,81 @@ fn noop_drag_out() -> FakeDragOutService {
 
 fn noop_recent() -> InMemoryRecentFoldersService {
     InMemoryRecentFoldersService::new()
+}
+
+fn shortcut_dispatch(
+    command: &str,
+    payload: serde_json::Value,
+    shortcut_service: &dyn ShortcutMappingsService,
+) -> CommandResponse {
+    let mut playback = FakePlaybackService::new();
+    dispatch_with_shortcuts(
+        CommandEnvelope { version: CURRENT_COMMAND_VERSION, command: command.to_string(), payload },
+        &mut playback,
+        &mut noop_device(),
+        &mut noop_enum(),
+        &noop_trash(),
+        &noop_rename(),
+        &noop_move(),
+        &noop_copy(),
+        &noop_external(),
+        &noop_drag_out(),
+        &noop_active(),
+        &noop_recent(),
+        shortcut_service,
+        &noop_events(),
+    )
+}
+
+#[test]
+fn shortcut_envelope_load_exposes_available_mappings_and_unavailable_ab_actions() {
+    let shortcuts = InMemoryShortcutMappingsService::new();
+
+    let response = shortcut_dispatch("load_shortcuts", serde_json::json!({}), &shortcuts);
+
+    assert!(response.ok);
+    let data = response.data.unwrap();
+    assert_eq!(data["mappings"].as_array().unwrap().len(), 20);
+    assert_eq!(
+        data["unavailable_action_ids"],
+        serde_json::json!(["set_ab_start", "set_ab_end", "toggle_ab_repeat"])
+    );
+}
+
+#[test]
+fn shortcut_envelope_save_then_reset_round_trip() {
+    let shortcuts = InMemoryShortcutMappingsService::new();
+    let loaded = shortcut_dispatch("load_shortcuts", serde_json::json!({}), &shortcuts);
+    let mut mappings = loaded.data.unwrap()["mappings"].as_array().unwrap().clone();
+    mappings[0]["key"] = serde_json::json!("p");
+
+    let saved = shortcut_dispatch(
+        "save_shortcuts",
+        serde_json::json!({ "mappings": mappings }),
+        &shortcuts,
+    );
+    assert!(saved.ok);
+    assert_eq!(saved.data.unwrap()["mappings"][0]["key"], "p");
+
+    let reset = shortcut_dispatch("reset_shortcuts", serde_json::json!({}), &shortcuts);
+    assert!(reset.ok);
+    assert_eq!(reset.data.unwrap()["mappings"][0]["key"], "o");
+}
+
+#[test]
+fn shortcut_envelope_rejects_invalid_save_payload() {
+    let shortcuts = InMemoryShortcutMappingsService::new();
+
+    let response = shortcut_dispatch(
+        "save_shortcuts",
+        serde_json::json!({ "mappings": "not-an-array" }),
+        &shortcuts,
+    );
+
+    assert!(!response.ok);
+    let error = response.error.unwrap();
+    assert_eq!(error.category, "InvalidInput");
+    assert_eq!(error.diagnostic_code, "command.payload");
 }
 
 fn health_envelope() -> CommandEnvelope {
