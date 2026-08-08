@@ -117,6 +117,7 @@ describe("player preferences boundary", () => {
           last_played_duration_ms: null,
           theme: "system",
           waveform_style,
+          show_hidden_folders: false,
         },
       });
 
@@ -145,6 +146,7 @@ describe("player preferences boundary", () => {
         last_played_duration_ms: null,
         theme: "system",
         waveform_style: "neon",
+        show_hidden_folders: false,
       },
     });
 
@@ -465,23 +467,31 @@ describe("cancelCopyFiles", () => {
 });
 
 describe("listBrowserRoots", () => {
-  it("returns local and network-mounted roots", async () => {
+  it("returns home, local, and network-mounted roots", async () => {
     mockInvoke.mockResolvedValueOnce({
       version: 1,
       ok: true,
       data: {
         roots: [
-          { path: "/", name: "System" },
-          { path: "/Volumes/NAS", name: "NAS" },
+          { path: "/", name: "System", kind: "system" },
+          { path: "/Users/test", name: "Home", kind: "home" },
+          { path: "/Volumes/NAS", name: "NAS", kind: "network" },
+        ],
+        libraries: [
+          { path: "/Users/test/Music", name: "Music", kind: "music" },
         ],
       },
     });
 
     const { listBrowserRoots } = await import("./commandEnvelope");
-    await expect(listBrowserRoots()).resolves.toEqual([
-      { path: "/", name: "System" },
-      { path: "/Volumes/NAS", name: "NAS" },
-    ]);
+    await expect(listBrowserRoots()).resolves.toEqual({
+      roots: [
+        { path: "/", name: "System", kind: "system" },
+        { path: "/Users/test", name: "Home", kind: "home" },
+        { path: "/Volumes/NAS", name: "NAS", kind: "network" },
+      ],
+      libraries: [{ path: "/Users/test/Music", name: "Music", kind: "music" }],
+    });
     expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
       envelope: {
         version: 1,
@@ -489,6 +499,22 @@ describe("listBrowserRoots", () => {
         payload: {},
       },
     });
+  });
+
+  it("rejects an unknown root kind at the Tauri boundary", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: true,
+      data: {
+        roots: [{ path: "/Volumes/Cloud", name: "Cloud", kind: "cloud" }],
+        libraries: [],
+      },
+    });
+
+    const { listBrowserRoots } = await import("./commandEnvelope");
+    await expect(listBrowserRoots()).rejects.toThrow(
+      "Invalid browser roots response.",
+    );
   });
 });
 
@@ -508,7 +534,12 @@ describe("startEnumeration", () => {
       envelope: {
         version: 1,
         command: "start_enumeration",
-        payload: { path: "/music", batch_size: 100, recursive: true },
+        payload: {
+          path: "/music",
+          batch_size: 100,
+          recursive: true,
+          show_hidden: false,
+        },
       },
     });
   });
@@ -526,7 +557,12 @@ describe("startEnumeration", () => {
       envelope: {
         version: 1,
         command: "start_enumeration",
-        payload: { path: "/music", batch_size: undefined, recursive: false },
+        payload: {
+          path: "/music",
+          batch_size: undefined,
+          recursive: false,
+          show_hidden: false,
+        },
       },
     });
   });

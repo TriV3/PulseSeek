@@ -126,9 +126,14 @@ function installBackendMock() {
       ).envelope;
       switch (envelope.command) {
         case "list_browser_roots":
-          return ok({ roots: [{ path: "/music", name: "Music" }] });
+          return ok({
+            roots: [{ path: "/music", name: "Music", kind: "physical" }],
+            libraries: [],
+          });
         case "record_recent_folder":
           return ok({});
+        case "list_folder_bookmarks":
+          return ok({ bookmarks: [] });
         case "cancel_enumeration":
           return ok({});
         case "start_enumeration": {
@@ -155,11 +160,7 @@ describe("external rename keeps the session mark and refreshes the row", () => {
     installBackendMock();
     render(<App />);
 
-    // Wait for roots to load, then expand the Computer root and open /music.
-    await waitFor(() => {
-      expect(screen.getByText("Computer")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByText("Computer"));
+    // Mounted roots are visible immediately; open /music directly.
     await waitFor(() => {
       expect(screen.getByText("Music")).toBeInTheDocument();
     });

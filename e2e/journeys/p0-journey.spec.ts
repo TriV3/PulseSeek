@@ -18,10 +18,10 @@ test.describe("P0 audition workflow", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "PulseSeek" }),
     ).toBeAttached();
-    await expect(page.getByText("Computer", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Drives" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Libraries" })).toBeVisible();
 
-    // ── 2. Expand Computer, select a mounted root, and enumerate ─────
-    await page.getByText("Computer", { exact: true }).click();
+    // ── 2. Select a mounted root, visible immediately, and enumerate ─
     await expect(page.getByText("Music", { exact: true })).toBeVisible();
     await mockCommand("start_enumeration", { session_id: "session-1" });
     await page.getByText("Music", { exact: true }).click();

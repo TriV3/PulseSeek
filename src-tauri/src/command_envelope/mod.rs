@@ -114,7 +114,12 @@ pub fn dispatch_with_shortcuts(
             active,
             events,
         ),
-        "list_recent_folders" | "record_recent_folder" | "clear_recent_folders" => {
+        "list_recent_folders"
+        | "record_recent_folder"
+        | "clear_recent_folders"
+        | "list_folder_bookmarks"
+        | "add_folder_bookmark"
+        | "remove_folder_bookmark" => {
             recent_folders::handle(&envelope.command, envelope.payload, recent_service)
         },
         "load_shortcuts" | "save_shortcuts" | "reset_shortcuts" => {

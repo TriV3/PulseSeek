@@ -42,7 +42,6 @@ test.describe("waveform styles", () => {
       page.getByRole("heading", { level: 1, name: "PulseSeek" }),
     ).toBeAttached();
 
-    await page.getByText("Computer", { exact: true }).click();
     await expect(page.getByText("Music", { exact: true })).toBeVisible();
     await mockCommand("start_enumeration", { session_id: "session-1" });
     await page.getByText("Music", { exact: true }).click();
@@ -93,7 +92,6 @@ test.describe("waveform styles", () => {
       page.getByRole("heading", { level: 1, name: "PulseSeek" }),
     ).toBeAttached();
 
-    await page.getByText("Computer", { exact: true }).click();
     await expect(page.getByText("Music", { exact: true })).toBeVisible();
     await mockCommand("start_enumeration", { session_id: "session-1" });
     await page.getByText("Music", { exact: true }).click();

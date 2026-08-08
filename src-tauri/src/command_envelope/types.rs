@@ -131,6 +131,7 @@ pub struct ListBrowserRootsRequest {}
 #[derive(Debug, Serialize)]
 pub struct ListBrowserRootsResponse {
     pub roots: Vec<crate::folder_enumeration_service::BrowserRootData>,
+    pub libraries: Vec<crate::folder_enumeration_service::BrowserLibraryData>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -141,6 +142,8 @@ pub struct StartEnumerationRequest {
     pub show_unsupported: bool,
     #[serde(default)]
     pub recursive: bool,
+    #[serde(default)]
+    pub show_hidden: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -274,6 +277,22 @@ pub struct ClearRecentFoldersRequest {}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ClearRecentFoldersResponse {}
+
+#[derive(Debug, Deserialize)]
+pub struct ListFolderBookmarksRequest {}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListFolderBookmarksResponse {
+    pub bookmarks: Vec<crate::recent_folders_service::FolderBookmarkData>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChangeFolderBookmarkRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChangeFolderBookmarkResponse {}
 
 #[derive(Debug, Deserialize)]
 pub struct LoadShortcutsRequest {}

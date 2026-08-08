@@ -18,8 +18,12 @@ pub const DEFAULT_DEBOUNCE_MS: u64 = 200;
 ///
 /// The debouncer runs on its own thread and coalesces bursts. On a debounced
 /// batch the service invalidates cached waveforms for modified or removed
-/// sources and emits one `browser:file-change` event carrying the watched
-/// folder path.
+/// direct children and emits one `browser:file-change` event carrying the
+/// watched folder path. Backends such as macOS FSEvents require a recursive
+/// watch to report direct-child changes reliably, so nested events are filtered
+/// before logging or emitting anything. Broad roots such as `/` and `Home` are
+/// never watched because they include PulseSeek's own caches and logs and could
+/// feed internal writes back into an endless refresh cycle.
 ///
 /// `NoCache` is used instead of the recommended file-ID cache: the
 /// recommended cache walks the whole watched tree on every `watch()` call,
@@ -144,13 +148,23 @@ pub(crate) fn on_debounced(
 ) {
     match result {
         Ok(debounced) => {
-            tracing::debug!(count = debounced.len(), "file watcher debounced batch");
-            for event in &debounced {
-                invalidate_changed(&event.event, cache);
-            }
             let Some(path) = watched.lock().expect("watched mutex poisoned").clone() else {
                 return;
             };
+            let changed = debounced
+                .iter()
+                .filter(|event| {
+                    is_content_change(&event.event)
+                        && event_affects_watched_folder(&event.event, &path)
+                })
+                .collect::<Vec<_>>();
+            if changed.is_empty() {
+                return;
+            }
+            tracing::debug!(count = changed.len(), "file watcher debounced content changes");
+            for event in changed {
+                invalidate_changed(&event.event, cache);
+            }
             let payload = FileChangePayload { path: path.to_string_lossy().to_string() };
             let emit_result = events.emit(
                 EVENT_FILE_CHANGE,
@@ -163,6 +177,48 @@ pub(crate) fn on_debounced(
                 tracing::warn!(error = ?error, "file watcher reported an error");
             }
         },
+    }
+}
+
+/// Rejects events queued by a previous watch and changes below nested
+/// directories. Neither can affect the direct children currently rendered by
+/// the browser.
+fn event_affects_watched_folder(
+    event: &notify_debouncer_full::notify::Event,
+    watched: &std::path::Path,
+) -> bool {
+    let watched = normalized_path(watched);
+    event.paths.iter().any(|path| {
+        normalized_path(path) == watched
+            || path.parent().is_some_and(|parent| normalized_path(parent) == watched)
+    })
+}
+
+/// Resolves platform aliases for existing paths (notably `/var` versus
+/// `/private/var` on macOS). For removed files, resolving the surviving parent
+/// still yields a stable comparable path.
+fn normalized_path(path: &std::path::Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| {
+        path.parent()
+            .and_then(|parent| parent.canonicalize().ok())
+            .and_then(|parent| path.file_name().map(|name| parent.join(name)))
+            .unwrap_or_else(|| path.to_path_buf())
+    })
+}
+
+/// True when an event can change the visible directory contents or audio
+/// bytes. Reads/accesses and metadata-only changes are deliberately ignored:
+/// enumeration itself can generate them on some local and network filesystems,
+/// and feeding them back into enumeration creates a refresh loop.
+fn is_content_change(event: &notify_debouncer_full::notify::Event) -> bool {
+    use notify_debouncer_full::notify::event::ModifyKind;
+    use notify_debouncer_full::notify::EventKind;
+
+    match event.kind {
+        EventKind::Create(_) | EventKind::Remove(_) | EventKind::Any => true,
+        EventKind::Modify(ModifyKind::Metadata(_)) => false,
+        EventKind::Modify(_) => true,
+        EventKind::Access(_) | EventKind::Other => false,
     }
 }
 

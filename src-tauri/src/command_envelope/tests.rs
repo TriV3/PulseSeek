@@ -1863,12 +1863,24 @@ fn list_browser_roots_returns_typed_roots() {
         crate::folder_enumeration_service::BrowserRootData {
             path: "/".to_string(),
             name: "System".to_string(),
+            kind: crate::folder_enumeration_service::BrowserRootKind::System,
+        },
+        crate::folder_enumeration_service::BrowserRootData {
+            path: "/Users/test".to_string(),
+            name: "Home".to_string(),
+            kind: crate::folder_enumeration_service::BrowserRootKind::Home,
         },
         crate::folder_enumeration_service::BrowserRootData {
             path: "/Volumes/NAS".to_string(),
             name: "NAS".to_string(),
+            kind: crate::folder_enumeration_service::BrowserRootKind::Network,
         },
     ];
+    enumeration.libraries = vec![crate::folder_enumeration_service::BrowserLibraryData {
+        path: "/Users/test/Music".to_string(),
+        name: "Music".to_string(),
+        kind: crate::folder_enumeration_service::BrowserLibraryKind::Music,
+    }];
     let active = ActiveEnumerations::new();
 
     let response = dispatch(
@@ -1892,9 +1904,16 @@ fn list_browser_roots_returns_typed_roots() {
     );
 
     assert!(response.ok);
-    let roots = response.data.unwrap()["roots"].as_array().unwrap().clone();
-    assert_eq!(roots.len(), 2);
-    assert_eq!(roots[1]["name"], "NAS");
+    let data = response.data.unwrap();
+    let roots = data["roots"].as_array().unwrap().clone();
+    assert_eq!(roots.len(), 3);
+    assert_eq!(roots[1]["name"], "Home");
+    assert_eq!(roots[2]["name"], "NAS");
+    assert_eq!(roots[0]["kind"], "system");
+    assert_eq!(roots[1]["kind"], "home");
+    assert_eq!(roots[2]["kind"], "network");
+    let libraries = data["libraries"].as_array().unwrap().clone();
+    assert_eq!(libraries[0]["kind"], "music");
 }
 
 #[test]
@@ -1959,6 +1978,38 @@ fn start_enumeration_passes_recursive_flag() {
     );
 
     assert_eq!(enum_service.last_recursive, Some(true));
+}
+
+#[test]
+fn start_enumeration_passes_show_hidden_flag() {
+    let mut service = FakePlaybackService::new();
+    let mut device_service = FakeAudioDeviceService::new();
+    let mut enum_service = FakeFolderEnumerationService::new();
+    let active = ActiveEnumerations::new();
+
+    let envelope = CommandEnvelope {
+        version: CURRENT_COMMAND_VERSION,
+        command: "start_enumeration".to_string(),
+        payload: serde_json::json!({"path": "/music", "show_hidden": true}),
+    };
+
+    let _response = dispatch(
+        envelope,
+        &mut service,
+        &mut device_service,
+        &mut enum_service,
+        &noop_trash(),
+        &noop_rename(),
+        &noop_move(),
+        &noop_copy(),
+        &noop_external(),
+        &noop_drag_out(),
+        &active,
+        &noop_recent(),
+        &noop_events(),
+    );
+
+    assert_eq!(enum_service.last_show_hidden, Some(true));
 }
 
 #[test]

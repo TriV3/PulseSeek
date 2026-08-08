@@ -6,10 +6,45 @@ use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContex
 
 use crate::playback_events::PlaybackEventEmitter;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserRootKind {
+    System,
+    Home,
+    Physical,
+    Network,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserLibraryKind {
+    Documents,
+    Music,
+    Pictures,
+    Videos,
+    Downloads,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BrowserLibraryData {
+    pub path: String,
+    pub name: String,
+    pub kind: BrowserLibraryKind,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BrowserRootData {
     pub path: String,
     pub name: String,
+    pub kind: BrowserRootKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FolderEnumerationOptions {
+    pub batch_size: usize,
+    pub show_unsupported: bool,
+    pub recursive: bool,
+    pub show_hidden: bool,
 }
 
 /// Manages active folder enumeration sessions and their cancellation flags.
@@ -62,6 +97,10 @@ pub trait FolderEnumerationService: Send {
     /// network volumes exposed by the operating system.
     fn list_roots(&self) -> Result<Vec<BrowserRootData>, ApplicationError>;
 
+    fn list_libraries(&self) -> Result<Vec<BrowserLibraryData>, ApplicationError> {
+        Ok(native::system_libraries())
+    }
+
     /// Starts enumerating a folder.
     ///
     /// Returns a session_id that can be used to cancel the enumeration.
@@ -70,9 +109,7 @@ pub trait FolderEnumerationService: Send {
     fn start_enumeration(
         &mut self,
         path: &str,
-        batch_size: usize,
-        show_unsupported: bool,
-        recursive: bool,
+        options: FolderEnumerationOptions,
         active: &ActiveEnumerations,
         events: Arc<dyn PlaybackEventEmitter>,
     ) -> Result<String, ApplicationError>;
@@ -86,11 +123,13 @@ pub trait FolderEnumerationService: Send {
 /// Fake implementation of [`FolderEnumerationService`] for tests.
 pub struct FakeFolderEnumerationService {
     pub roots: Vec<BrowserRootData>,
+    pub libraries: Vec<BrowserLibraryData>,
     pub start_call_count: u64,
     pub last_path: Option<String>,
     pub last_batch_size: Option<usize>,
     pub last_show_unsupported: Option<bool>,
     pub last_recursive: Option<bool>,
+    pub last_show_hidden: Option<bool>,
     pub fail_start: bool,
     pub next_session_id: String,
 }
@@ -101,12 +140,15 @@ impl FakeFolderEnumerationService {
             roots: vec![BrowserRootData {
                 path: std::path::MAIN_SEPARATOR.to_string(),
                 name: "System".to_string(),
+                kind: BrowserRootKind::System,
             }],
+            libraries: Vec::new(),
             start_call_count: 0,
             last_path: None,
             last_batch_size: None,
             last_show_unsupported: None,
             last_recursive: None,
+            last_show_hidden: None,
             fail_start: false,
             next_session_id: "test-session-001".to_string(),
         }
@@ -124,20 +166,23 @@ impl FolderEnumerationService for FakeFolderEnumerationService {
         Ok(self.roots.clone())
     }
 
+    fn list_libraries(&self) -> Result<Vec<BrowserLibraryData>, ApplicationError> {
+        Ok(self.libraries.clone())
+    }
+
     fn start_enumeration(
         &mut self,
         path: &str,
-        batch_size: usize,
-        show_unsupported: bool,
-        recursive: bool,
+        options: FolderEnumerationOptions,
         _active: &ActiveEnumerations,
         _events: Arc<dyn PlaybackEventEmitter>,
     ) -> Result<String, ApplicationError> {
         self.start_call_count += 1;
         self.last_path = Some(path.to_string());
-        self.last_batch_size = Some(batch_size);
-        self.last_show_unsupported = Some(show_unsupported);
-        self.last_recursive = Some(recursive);
+        self.last_batch_size = Some(options.batch_size);
+        self.last_show_unsupported = Some(options.show_unsupported);
+        self.last_recursive = Some(options.recursive);
+        self.last_show_hidden = Some(options.show_hidden);
         if self.fail_start {
             return Err(ApplicationError::new(
                 ErrorCategory::Unavailable,

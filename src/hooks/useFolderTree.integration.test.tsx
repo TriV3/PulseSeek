@@ -1,6 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { FolderChunkPayload } from "../api/playbackEvents";
+import type {
+  FileChangePayload,
+  FolderChunkPayload,
+} from "../api/playbackEvents";
 import { useFolderTree } from "./useFolderTree";
 
 const mocks = vi.hoisted(() => ({
@@ -8,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   listBrowserRoots: vi.fn(),
   startEnumeration: vi.fn(),
   folderChunkHandler: null as ((payload: FolderChunkPayload) => void) | null,
+  fileChangeHandler: null as ((payload: FileChangePayload) => void) | null,
 }));
 
 vi.mock("../api/commandEnvelope", () => ({
@@ -17,7 +21,10 @@ vi.mock("../api/commandEnvelope", () => ({
 }));
 
 vi.mock("../api/playbackEvents", () => ({
-  onFileChanged: vi.fn().mockResolvedValue(() => {}),
+  onFileChanged: vi.fn((handler: (payload: FileChangePayload) => void) => {
+    mocks.fileChangeHandler = handler;
+    return Promise.resolve(() => {});
+  }),
   onFolderChunk: vi.fn((handler: (payload: FolderChunkPayload) => void) => {
     mocks.folderChunkHandler = handler;
     return Promise.resolve(() => {});
@@ -28,9 +35,11 @@ describe("useFolderTree leaf selection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.folderChunkHandler = null;
-    mocks.listBrowserRoots.mockResolvedValue([
-      { path: "/music", name: "Music" },
-    ]);
+    mocks.fileChangeHandler = null;
+    mocks.listBrowserRoots.mockResolvedValue({
+      roots: [{ path: "/music", name: "Music", kind: "physical" }],
+      libraries: [],
+    });
     mocks.startEnumeration.mockResolvedValue("folder-1");
   });
 
@@ -78,7 +87,54 @@ describe("useFolderTree leaf selection", () => {
         "/music/leaf",
         undefined,
         false,
+        false,
       );
     });
+  });
+
+  it("coalesces watcher refreshes and ignores an event for a non-selected folder", async () => {
+    const { result } = renderHook(() => useFolderTree());
+    await waitFor(() => expect(mocks.fileChangeHandler).not.toBeNull());
+
+    act(() => result.current.selectFolder("/music"));
+
+    let resolveRefresh: ((session: string) => void) | undefined;
+    mocks.startEnumeration.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+
+    act(() => {
+      mocks.fileChangeHandler?.({ path: "/music" });
+      mocks.fileChangeHandler?.({ path: "/music" });
+      mocks.fileChangeHandler?.({ path: "/old-folder" });
+    });
+
+    await waitFor(() =>
+      expect(mocks.startEnumeration).toHaveBeenCalledTimes(1),
+    );
+    act(() => resolveRefresh?.("refresh-1"));
+
+    await act(async () => {
+      await Promise.resolve();
+      mocks.fileChangeHandler?.({ path: "/music" });
+    });
+    expect(mocks.startEnumeration).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      mocks.folderChunkHandler?.({
+        session_id: "refresh-1",
+        entries: [],
+        folders_done: true,
+        done: true,
+      });
+    });
+    mocks.startEnumeration.mockResolvedValueOnce("refresh-2");
+    act(() => mocks.fileChangeHandler?.({ path: "/music" }));
+    await waitFor(() =>
+      expect(mocks.startEnumeration).toHaveBeenCalledTimes(2),
+    );
   });
 });

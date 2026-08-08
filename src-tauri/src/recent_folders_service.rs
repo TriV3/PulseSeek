@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex};
 use pulseseek_cache::recent_folders::{
     RecentFolder, RecentFoldersCachePort, RecentFoldersError, RECENT_FOLDERS_LIMIT,
 };
+use pulseseek_cache::technical_cache::{CacheError, TechnicalCachePort};
 use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContext, ErrorCategory};
 
 /// One recent-folder entry returned to the frontend.
@@ -29,6 +30,14 @@ pub struct RecentFolderData {
     pub name: String,
     /// Timestamp of the last record in milliseconds since the Unix epoch.
     pub last_opened_ms: u64,
+}
+
+const BOOKMARKS_CACHE_KEY: &str = "browser.bookmarks.v1";
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct FolderBookmarkData {
+    pub path: String,
+    pub name: String,
 }
 
 /// Port used by the command layer to read and update recent-folder history.
@@ -45,16 +54,30 @@ pub trait RecentFoldersService: Send + Sync {
 
     /// Removes every recent-folder record.
     fn clear_recent_folders(&self) -> Result<(), ApplicationError>;
+
+    fn list_bookmarks(&self) -> Result<Vec<FolderBookmarkData>, ApplicationError>;
+    fn add_bookmark(&self, path: &str) -> Result<(), ApplicationError>;
+    fn remove_bookmark(&self, path: &str) -> Result<(), ApplicationError>;
 }
 
 /// Persists recent folders through the technical cache worker.
 pub struct NativeRecentFoldersService {
     cache: Arc<dyn RecentFoldersCachePort>,
+    meta_cache: Option<Arc<dyn TechnicalCachePort>>,
 }
 
 impl NativeRecentFoldersService {
-    pub fn new(cache: Arc<dyn RecentFoldersCachePort>) -> Self {
-        Self { cache }
+    pub fn new(
+        cache: Arc<dyn RecentFoldersCachePort>,
+        meta_cache: Option<Arc<dyn TechnicalCachePort>>,
+    ) -> Self {
+        Self { cache, meta_cache }
+    }
+
+    fn store_bookmarks(&self, bookmarks: &[FolderBookmarkData]) -> Result<(), ApplicationError> {
+        let Some(cache) = &self.meta_cache else { return Ok(()) };
+        let value = serde_json::to_vec(bookmarks).map_err(bookmark_error_to_application)?;
+        cache.set_meta(BOOKMARKS_CACHE_KEY, value).map_err(cache_meta_error_to_application)
     }
 }
 
@@ -77,6 +100,32 @@ impl RecentFoldersService for NativeRecentFoldersService {
     fn clear_recent_folders(&self) -> Result<(), ApplicationError> {
         self.cache.clear_recent_folders().map_err(cache_error_to_application)
     }
+
+    fn list_bookmarks(&self) -> Result<Vec<FolderBookmarkData>, ApplicationError> {
+        let Some(cache) = &self.meta_cache else { return Ok(Vec::new()) };
+        let Some(value) =
+            cache.get_meta(BOOKMARKS_CACHE_KEY).map_err(cache_meta_error_to_application)?
+        else {
+            return Ok(Vec::new());
+        };
+        serde_json::from_slice(&value).map_err(bookmark_error_to_application)
+    }
+
+    fn add_bookmark(&self, path: &str) -> Result<(), ApplicationError> {
+        validate_bookmark_path(path)?;
+        let mut bookmarks = self.list_bookmarks()?;
+        if !bookmarks.iter().any(|bookmark| bookmark.path == path) {
+            bookmarks.push(FolderBookmarkData { path: path.to_string(), name: folder_name(path) });
+            bookmarks.sort_by_key(|bookmark| bookmark.name.to_lowercase());
+        }
+        self.store_bookmarks(&bookmarks)
+    }
+
+    fn remove_bookmark(&self, path: &str) -> Result<(), ApplicationError> {
+        let mut bookmarks = self.list_bookmarks()?;
+        bookmarks.retain(|bookmark| bookmark.path != path);
+        self.store_bookmarks(&bookmarks)
+    }
 }
 
 /// Session-only recent-folder history used when the technical cache is
@@ -84,6 +133,7 @@ impl RecentFoldersService for NativeRecentFoldersService {
 #[derive(Default)]
 pub struct InMemoryRecentFoldersService {
     folders: Mutex<Vec<RecentFolderData>>,
+    bookmarks: Mutex<Vec<FolderBookmarkData>>,
 }
 
 impl InMemoryRecentFoldersService {
@@ -118,6 +168,39 @@ impl RecentFoldersService for InMemoryRecentFoldersService {
         self.folders.lock().expect("recent folders lock poisoned").clear();
         Ok(())
     }
+
+    fn list_bookmarks(&self) -> Result<Vec<FolderBookmarkData>, ApplicationError> {
+        Ok(self.bookmarks.lock().expect("bookmarks lock poisoned").clone())
+    }
+
+    fn add_bookmark(&self, path: &str) -> Result<(), ApplicationError> {
+        validate_bookmark_path(path)?;
+        let mut bookmarks = self.bookmarks.lock().expect("bookmarks lock poisoned");
+        if !bookmarks.iter().any(|bookmark| bookmark.path == path) {
+            bookmarks.push(FolderBookmarkData { path: path.to_string(), name: folder_name(path) });
+            bookmarks.sort_by_key(|bookmark| bookmark.name.to_lowercase());
+        }
+        Ok(())
+    }
+
+    fn remove_bookmark(&self, path: &str) -> Result<(), ApplicationError> {
+        self.bookmarks
+            .lock()
+            .expect("bookmarks lock poisoned")
+            .retain(|bookmark| bookmark.path != path);
+        Ok(())
+    }
+}
+
+fn validate_bookmark_path(path: &str) -> Result<(), ApplicationError> {
+    if is_virtual_root(path) {
+        return Err(ApplicationError::new(
+            ErrorCategory::InvalidInput,
+            DiagnosticContext::new(DiagnosticCode::BrowserRead),
+            std::io::Error::other("virtual browser roots cannot be bookmarked"),
+        ));
+    }
+    crate::path_validation::validate_directory(path)
 }
 
 /// Rejects virtual browser roots so they never enter the history.
@@ -130,6 +213,22 @@ fn recent_folder_to_data(folder: RecentFolder) -> RecentFolderData {
 }
 
 fn cache_error_to_application(error: RecentFoldersError) -> ApplicationError {
+    ApplicationError::new(
+        ErrorCategory::Unavailable,
+        DiagnosticContext::new(DiagnosticCode::BrowserRead),
+        error,
+    )
+}
+
+fn cache_meta_error_to_application(error: CacheError) -> ApplicationError {
+    ApplicationError::new(
+        ErrorCategory::Unavailable,
+        DiagnosticContext::new(DiagnosticCode::BrowserRead),
+        error,
+    )
+}
+
+fn bookmark_error_to_application(error: serde_json::Error) -> ApplicationError {
     ApplicationError::new(
         ErrorCategory::Unavailable,
         DiagnosticContext::new(DiagnosticCode::BrowserRead),
@@ -211,6 +310,26 @@ mod tests {
     }
 
     #[test]
+    fn bookmark_round_trip_is_deduplicated_and_removable() {
+        let service = InMemoryRecentFoldersService::new();
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().to_str().expect("utf8 path");
+
+        service.add_bookmark(path).expect("add bookmark");
+        service.add_bookmark(path).expect("duplicate is harmless");
+        assert_eq!(service.list_bookmarks().expect("list").len(), 1);
+
+        service.remove_bookmark(path).expect("remove bookmark");
+        assert!(service.list_bookmarks().expect("list").is_empty());
+    }
+
+    #[test]
+    fn virtual_root_cannot_be_bookmarked() {
+        let service = InMemoryRecentFoldersService::new();
+        assert!(service.add_bookmark("computer://").is_err());
+    }
+
+    #[test]
     fn native_service_maps_cache_failure_to_unavailable() {
         struct BrokenCache;
         impl RecentFoldersCachePort for BrokenCache {
@@ -225,7 +344,7 @@ mod tests {
             }
         }
 
-        let service = NativeRecentFoldersService::new(Arc::new(BrokenCache));
+        let service = NativeRecentFoldersService::new(Arc::new(BrokenCache), None);
         let error = service.list_recent_folders().expect_err("broken cache fails");
         assert_eq!(error.user_descriptor().category(), ErrorCategory::Unavailable);
         assert_eq!(error.diagnostic_context().code(), DiagnosticCode::BrowserRead.as_str());

@@ -33,9 +33,10 @@ export function folderTreeReducer(
         id: root.path,
         name: root.name,
         kind: "folder" as const,
+        rootKind: root.kind,
       }));
       const rootFolders = Object.fromEntries(
-        action.roots.map((root) => [
+        [...action.roots, ...action.libraries].map((root) => [
           root.path,
           {
             expanded: false,
@@ -52,10 +53,16 @@ export function folderTreeReducer(
         ...state,
         rootPath,
         selectedPath: rootPath,
+        libraries: action.libraries.map((library) => ({
+          id: library.path,
+          name: library.name,
+          kind: "folder" as const,
+          libraryKind: library.kind,
+        })),
         folders: {
           ...rootFolders,
           [rootPath]: {
-            expanded: false,
+            expanded: true,
             children: rootEntries,
             isLoading: false,
             hasLoaded: true,
@@ -82,7 +89,7 @@ export function folderTreeReducer(
         selectedPath: action.path,
         folders: {
           [action.path]: {
-            expanded: true,
+            expanded: false,
             children: [],
             isLoading: true,
             hasLoaded: false,
@@ -198,7 +205,7 @@ export function folderTreeReducer(
               action.done || childrenById.size > 0
                 ? childrenById.size > 0
                 : current.hasSubfolders,
-            expanded: true,
+            expanded: current.expanded,
           },
         },
         playableEntries: {
@@ -261,7 +268,7 @@ export function folderTreeReducer(
         action.expandedPaths.map((path) => [
           path,
           state.folders[path] ?? {
-            expanded: true,
+            expanded: false,
             children: [],
             isLoading: false,
             hasLoaded: false,
@@ -302,7 +309,7 @@ export function folderTreeReducer(
               hasSubfolders: null,
               error: null,
             }),
-            expanded: true,
+            expanded: false,
           },
         },
       };
@@ -402,16 +409,19 @@ export interface UseFolderTreeReturn {
   refreshSelected: () => void;
 }
 
-export function useFolderTree(): UseFolderTreeReturn {
+export function useFolderTree(showHiddenFolders = false): UseFolderTreeReturn {
   const [state, dispatch] = useReducer(
     folderTreeReducer,
     INITIAL_FOLDER_TREE_STATE,
   );
   const stateRef = useRef(state);
+  const showHiddenFoldersRef = useRef(showHiddenFolders);
+  const pendingWatcherRefreshPathsRef = useRef(new Set<string>());
 
   // Keep ref synchronised with latest state after each render.
   useEffect(() => {
     stateRef.current = state;
+    showHiddenFoldersRef.current = showHiddenFolders;
   });
 
   // Set up event listener for folder chunk events.
@@ -463,7 +473,12 @@ export function useFolderTree(): UseFolderTreeReturn {
     }
 
     try {
-      const sessionId = await startEnumeration(path, undefined, recursive);
+      const sessionId = await startEnumeration(
+        path,
+        undefined,
+        recursive,
+        showHiddenFoldersRef.current,
+      );
       // Register mapping before dispatching START_ENUMERATING so that
       // any chunks buffered during the await are applied to the correct
       // folder state after the reducer resets entries.
@@ -495,13 +510,23 @@ export function useFolderTree(): UseFolderTreeReturn {
     }
   }, []);
 
+  const previousShowHiddenFoldersRef = useRef(showHiddenFolders);
+  useEffect(() => {
+    if (previousShowHiddenFoldersRef.current === showHiddenFolders) return;
+    previousShowHiddenFoldersRef.current = showHiddenFolders;
+    const selected = stateRef.current.selectedPath;
+    if (!selected || selected === "computer://") return;
+    const recursive = stateRef.current.folders[selected]?.recursive ?? false;
+    void enumeratePath(selected, recursive);
+  }, [enumeratePath, showHiddenFolders]);
+
   useEffect(() => {
     let active = true;
     try {
       void listBrowserRoots()
-        .then((roots) => {
+        .then(({ roots, libraries }) => {
           if (!active) return;
-          dispatch({ type: "ROOTS_LOADED", roots });
+          dispatch({ type: "ROOTS_LOADED", roots, libraries });
         })
         .catch((error: unknown) => {
           if (!active) return;
@@ -536,9 +561,14 @@ export function useFolderTree(): UseFolderTreeReturn {
     let unlisten: UnlistenFn | null = null;
     void onFileChanged((payload) => {
       const { path } = payload;
+      if (stateRef.current.selectedPath !== path) return;
       const folder = stateRef.current.folders[path];
       if (!folder || folder.isLoading || folder.error) return;
-      void enumeratePath(path, folder.recursive);
+      if (pendingWatcherRefreshPathsRef.current.has(path)) return;
+      pendingWatcherRefreshPathsRef.current.add(path);
+      void enumeratePath(path, folder.recursive).finally(() => {
+        pendingWatcherRefreshPathsRef.current.delete(path);
+      });
     })
       .then((unlistenFn) => {
         unlisten = unlistenFn;
@@ -648,7 +678,12 @@ export function useFolderTree(): UseFolderTreeReturn {
       const results = await Promise.all(
         paths.map(async (path) => {
           try {
-            const sessionId = await startEnumeration(path);
+            const sessionId = await startEnumeration(
+              path,
+              undefined,
+              false,
+              showHiddenFoldersRef.current,
+            );
             SESSION_PATHS[sessionId] = path;
             dispatch({
               type: "START_ENUMERATING",

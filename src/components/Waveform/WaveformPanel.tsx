@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useWaveform } from "../../hooks/useWaveform";
+import type { PlayableFileMetadata } from "../FolderTree/folderTreeTypes";
 import type { WaveformStyle } from "./waveformRenderer";
 import { WaveformCanvas } from "./WaveformCanvas";
 
@@ -10,6 +11,8 @@ export interface WaveformPanelProps {
   entryName: string;
   /** Duration of the selected file, or null when unknown. */
   durationMs: number | null;
+  /** Audio characteristics reported for the selected file. */
+  metadata?: PlayableFileMetadata | null;
   /** Saved position shown before playback starts, without autoplay. */
   restoredPositionMs?: number;
   resetRevision?: number;
@@ -26,6 +29,36 @@ export interface WaveformPanelProps {
  */
 const INITIAL_TARGET_PEAKS = 64;
 
+function formatAudioSummary(
+  metadata: PlayableFileMetadata | null | undefined,
+): string {
+  if (!metadata) return "Audio details unavailable";
+
+  const characteristics: string[] = [];
+  if (metadata.sample_rate !== null && metadata.sample_rate > 0) {
+    characteristics.push(
+      `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(metadata.sample_rate / 1_000)} kHz`,
+    );
+  }
+  if (metadata.channels === 1) characteristics.push("mono");
+  else if (metadata.channels === 2) characteristics.push("stereo");
+  else if (metadata.channels !== null && metadata.channels > 0) {
+    characteristics.push(`${metadata.channels} channels`);
+  }
+
+  const encoding: string[] = [];
+  if (metadata.bit_depth !== null && metadata.bit_depth > 0) {
+    encoding.push(`${metadata.bit_depth}-bit`);
+  }
+  const codec = metadata.codec?.trim();
+  if (codec) encoding.push(codec);
+
+  const groups = [characteristics.join(", "), encoding.join(" ")].filter(
+    Boolean,
+  );
+  return groups.length > 0 ? groups.join(" · ") : "Audio details unavailable";
+}
+
 /**
  * Waveform overview workspace region.
  *
@@ -37,6 +70,7 @@ export function WaveformPanel({
   entryPath,
   entryName,
   durationMs,
+  metadata,
   restoredPositionMs = 0,
   resetRevision = 0,
   onSeek,
@@ -66,7 +100,7 @@ export function WaveformPanel({
           pulseseek
         </div>
       </header>
-      <div className="audio-summary">44.1 kHz, stereo · lossless audio</div>
+      <div className="audio-summary">{formatAudioSummary(metadata)}</div>
       <div className="waveform-canvas">
         {status === "error" ? (
           <p className="waveform-error" role="alert">

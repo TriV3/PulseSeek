@@ -50,6 +50,188 @@ describe("FolderTree — initial state", () => {
   });
 });
 
+describe("FolderTree — volume icons", () => {
+  it("renders home, physical, and network roots with different semantic icons", () => {
+    const props = createMockFolderTreeProps({
+      rootPath: "computer://",
+      selectedPath: "computer://",
+      folders: {
+        "computer://": {
+          expanded: true,
+          children: [
+            {
+              id: "/Users/test",
+              name: "Home",
+              kind: "folder",
+              rootKind: "home",
+            },
+            {
+              id: "/Volumes/Portable",
+              name: "Portable",
+              kind: "folder",
+              rootKind: "physical",
+            },
+            {
+              id: "/Volumes/Studio",
+              name: "Studio",
+              kind: "folder",
+              rootKind: "network",
+            },
+          ],
+          isLoading: false,
+          hasLoaded: true,
+          hasSubfolders: true,
+          error: null,
+          recursive: false,
+        },
+        "/Volumes/Portable": {
+          expanded: false,
+          children: [],
+          isLoading: false,
+          error: null,
+          recursive: false,
+        },
+        "/Users/test": {
+          expanded: false,
+          children: [],
+          isLoading: false,
+          error: null,
+          recursive: false,
+        },
+        "/Volumes/Studio": {
+          expanded: false,
+          children: [],
+          isLoading: false,
+          error: null,
+          recursive: false,
+        },
+      },
+    });
+
+    render(<FolderTree {...props} />);
+
+    expect(
+      screen
+        .getByText("Home")
+        .parentElement?.querySelector("[data-folder-icon='home']"),
+    ).not.toBeNull();
+    expect(
+      screen
+        .getByText("Portable")
+        .parentElement?.querySelector("[data-folder-icon='physical']"),
+    ).not.toBeNull();
+    expect(
+      screen
+        .getByText("Studio")
+        .parentElement?.querySelector("[data-folder-icon='network']"),
+    ).not.toBeNull();
+  });
+});
+
+describe("FolderTree — browser sections", () => {
+  it("shows drives and libraries and collapses each section independently", () => {
+    const props = createMockFolderTreeProps({
+      rootPath: "computer://",
+      selectedPath: "computer://",
+      libraries: [
+        {
+          id: "/Users/test/Music",
+          name: "Music",
+          kind: "folder",
+          libraryKind: "music",
+        },
+      ],
+      folders: {
+        "computer://": {
+          expanded: true,
+          children: [
+            { id: "/", name: "System", kind: "folder", rootKind: "system" },
+          ],
+          isLoading: false,
+          hasLoaded: true,
+          error: null,
+          recursive: false,
+        },
+        "/": {
+          expanded: false,
+          children: [],
+          isLoading: false,
+          error: null,
+          recursive: false,
+        },
+        "/Users/test/Music": {
+          expanded: false,
+          children: [],
+          isLoading: false,
+          error: null,
+          recursive: false,
+        },
+      },
+    });
+
+    render(<FolderTree {...props} />);
+    const drives = screen.getByRole("button", { name: "Drives" });
+    const libraries = screen.getByRole("button", { name: "Libraries" });
+    expect(screen.getByText("System")).toBeVisible();
+    expect(screen.getByText("Music")).toBeVisible();
+    expect(
+      screen
+        .getByText("Music")
+        .parentElement?.querySelector("[data-folder-icon='music']"),
+    ).not.toBeNull();
+
+    fireEvent.click(drives);
+    expect(drives).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("System")).toBeNull();
+    expect(screen.getByText("Music")).toBeVisible();
+
+    fireEvent.click(libraries);
+    expect(screen.queryByText("Music")).toBeNull();
+  });
+});
+
+describe("FolderTree — bookmarks", () => {
+  it("marks every bookmarked folder independently of the current selection", () => {
+    const props = createMockFolderTreeProps({
+      rootPath: "computer://",
+      selectedPath: "computer://",
+      folders: {
+        "computer://": {
+          expanded: true,
+          children: [
+            {
+              id: "/music",
+              name: "Music",
+              kind: "folder",
+              rootKind: "physical",
+            },
+          ],
+          isLoading: false,
+          hasLoaded: true,
+          error: null,
+          recursive: false,
+        },
+        "/music": {
+          expanded: false,
+          children: [],
+          isLoading: false,
+          hasLoaded: true,
+          error: null,
+          recursive: false,
+        },
+      },
+    });
+
+    render(
+      <FolderTree {...props} isPathBookmarked={(path) => path === "/music"} />,
+    );
+
+    expect(screen.getByText("Music").closest("[role='treeitem']")).toHaveClass(
+      "folder-node--bookmarked",
+    );
+  });
+});
+
 describe("FolderTree — selected path display", () => {
   it("shows the root path when a folder is selected", () => {
     const props = createMockFolderTreeProps({

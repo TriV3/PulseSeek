@@ -69,6 +69,7 @@ describe("application shell", () => {
     render(<App />);
 
     const browserTab = screen.getByRole("tab", { name: "Browser" });
+    const bookmarksTab = screen.getByRole("tab", { name: "Bookmarks" });
     const recentTab = screen.getByRole("tab", { name: "Recent folders" });
     expect(screen.getByRole("tabpanel", { name: "Browser" })).toBeVisible();
 
@@ -79,6 +80,8 @@ describe("application shell", () => {
     ).toBeVisible();
 
     fireEvent.keyDown(recentTab, { key: "ArrowLeft" });
+    expect(bookmarksTab).toHaveFocus();
+    fireEvent.keyDown(bookmarksTab, { key: "ArrowLeft" });
     expect(browserTab).toHaveFocus();
     expect(browserTab).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel", { name: "Browser" })).toBeVisible();
@@ -242,10 +245,15 @@ describe("shortcut integration", () => {
           return {
             version: 1,
             ok: true,
-            data: { roots: [{ path: "/music", name: "Music" }] },
+            data: {
+              roots: [{ path: "/music", name: "Music", kind: "physical" }],
+              libraries: [],
+            },
           };
         case "list_recent_folders":
           return { version: 1, ok: true, data: { folders: [] } };
+        case "list_folder_bookmarks":
+          return { version: 1, ok: true, data: { bookmarks: [] } };
         case "record_recent_folder":
           return { version: 1, ok: true, data: {} };
         case "start_enumeration":
@@ -274,6 +282,10 @@ describe("shortcut integration", () => {
     mockAppBackend();
     render(<App />);
 
+    expect(
+      screen.queryByRole("button", { name: "Keyboard shortcuts" }),
+    ).not.toBeVisible();
+    fireEvent.click(screen.getByLabelText("Open application menu"));
     fireEvent.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
     expect(
       screen.getByRole("dialog", { name: "Keyboard shortcuts" }),
@@ -297,18 +309,24 @@ describe("shortcut integration", () => {
     ).toBe(true);
   });
 
-  it("groups output device and theme under the application menu", async () => {
+  it("groups general settings inside an isolated application menu", async () => {
     mockAppBackend();
     render(<App />);
 
     const menuButton = screen.getByLabelText("Open application menu");
     expect(menuButton).toBeInTheDocument();
     expect(screen.queryByLabelText("Theme")).not.toBeVisible();
+    expect(menuButton.closest("details")).toBe(
+      document.querySelector(".transport-options")?.lastElementChild,
+    );
 
     fireEvent.click(menuButton);
 
     expect(screen.getByLabelText("Output device")).toBeVisible();
     expect(screen.getByLabelText("Theme")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Keyboard shortcuts" }),
+    ).toBeVisible();
   });
 
   it("shows a safe shortcut loading error while defaults stay available", async () => {
@@ -413,12 +431,17 @@ describe("recent folders wiring", () => {
         switch (envelope.command) {
           case "list_browser_roots":
             return envelopeResponse({
-              roots: [{ path: "/music", name: "Music" }],
+              roots: [{ path: "/music", name: "Music", kind: "physical" }],
+              libraries: [],
             });
           case "list_recent_folders":
             return envelopeResponse({ folders: [] });
+          case "list_folder_bookmarks":
+            return envelopeResponse({ bookmarks: [] });
           case "record_recent_folder":
           case "clear_recent_folders":
+          case "add_folder_bookmark":
+          case "remove_folder_bookmark":
             return envelopeResponse({});
           case "start_enumeration":
             return envelopeResponse({ session_id: "session-1" });
@@ -453,8 +476,6 @@ describe("recent folders wiring", () => {
   it("records a selected folder and clears the history", async () => {
     render(<App />);
 
-    await screen.findByText("Computer", { exact: true });
-    fireEvent.click(screen.getByText("Computer", { exact: true }));
     await screen.findByText("Music", { exact: true });
     fireEvent.click(screen.getByText("Music", { exact: true }));
     fireEvent.click(screen.getByRole("tab", { name: "Recent folders" }));
@@ -498,5 +519,66 @@ describe("recent folders wiring", () => {
               "clear_recent_folders",
         ),
     ).toBe(true);
+  });
+
+  it("bookmarks the selected folder and removes it from the Bookmarks tab", async () => {
+    render(<App />);
+
+    await screen.findByText("Music", { exact: true });
+    fireEvent.click(screen.getByText("Music", { exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Bookmark folder" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Bookmarks" }));
+
+    const bookmark = await screen.findByRole("button", { name: "music" });
+    expect(bookmark).toHaveAttribute("title", "/music");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove music bookmark" }),
+    );
+    await waitFor(() => expect(bookmark).not.toBeInTheDocument());
+  });
+
+  it("persists the hidden-folder option and refreshes the selected folder", async () => {
+    render(<App />);
+    await screen.findByText("Music", { exact: true });
+    fireEvent.click(screen.getByText("Music", { exact: true }));
+    fireEvent.click(screen.getByLabelText("Open application menu"));
+
+    const option = screen.getByRole("checkbox", {
+      name: "Show hidden folders",
+    });
+    expect(option).not.toBeChecked();
+    fireEvent.click(option);
+
+    await waitFor(() => {
+      expect(
+        vi
+          .mocked(invoke)
+          .mock.calls.some(
+            ([command, args]) =>
+              command === "save_player_preferences" &&
+              (args as { preferences: PlayerPreferences }).preferences
+                .show_hidden_folders === true,
+          ),
+      ).toBe(true);
+      expect(
+        vi.mocked(invoke).mock.calls.some(
+          ([command, args]) =>
+            command === "invoke_command" &&
+            (
+              args as {
+                envelope: {
+                  command: string;
+                  payload: { show_hidden?: boolean };
+                };
+              }
+            ).envelope.command === "start_enumeration" &&
+            (
+              args as {
+                envelope: { payload: { show_hidden?: boolean } };
+              }
+            ).envelope.payload.show_hidden === true,
+        ),
+      ).toBe(true);
+    });
   });
 });

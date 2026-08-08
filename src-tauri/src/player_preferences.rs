@@ -38,6 +38,8 @@ pub struct PlayerPreferences {
     pub theme: String,
     #[serde(default = "default_waveform_style")]
     pub waveform_style: String,
+    #[serde(default)]
+    pub show_hidden_folders: bool,
 }
 
 impl Default for PlayerPreferences {
@@ -58,6 +60,7 @@ impl Default for PlayerPreferences {
             last_played_duration_ms: None,
             theme: default_theme(),
             waveform_style: default_waveform_style(),
+            show_hidden_folders: false,
         }
     }
 }
@@ -257,6 +260,7 @@ mod tests {
         }
         .validated();
         assert_eq!(preferences.waveform_style, "outline");
+        assert!(!preferences.show_hidden_folders);
     }
 
     #[test]

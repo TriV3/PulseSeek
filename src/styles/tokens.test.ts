@@ -51,6 +51,14 @@ const requiredTokens = [
   "text-danger",
   "text-on-accent",
   "folder-active-path",
+  "folder-bookmark",
+  "browser-icon-computer",
+  "browser-icon-system",
+  "browser-icon-home",
+  "browser-icon-physical",
+  "browser-icon-network",
+  "browser-icon-folder",
+  "browser-icon-library",
   "line",
   "line-strong",
   "line-soft",
@@ -272,6 +280,18 @@ describe("theme accessibility", () => {
       assertContrast(theme, "folder-active-path", "bg-selected", 4.5);
     }
     expect(folderTreeCss).toContain("color: var(--folder-active-path)");
+  });
+
+  it("keeps bookmarked folders at AA contrast in every browser state", () => {
+    for (const theme of themeFiles) {
+      assertContrast(theme, "folder-bookmark", "bg-subtle", 4.5);
+      assertContrast(theme, "folder-bookmark", "bg-hover", 4.5);
+      assertContrast(theme, "folder-bookmark", "bg-selected", 4.5);
+    }
+    expect(folderTreeCss).toContain("color: var(--folder-bookmark)");
+    expect(folderTreeCss).toMatch(
+      /\.go-up-btn\s*\{[^}]*color:\s*var\(--text-strong\)/s,
+    );
   });
 
   it("keeps High Contrast primary text at AAA contrast", () => {

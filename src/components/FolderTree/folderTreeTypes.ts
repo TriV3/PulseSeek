@@ -2,11 +2,18 @@
 export type BrowserEntryKind =
   "folder" | "playable" | "unsupported" | "inaccessible";
 
+export type BrowserRootKind = "system" | "home" | "physical" | "network";
+export type BrowserLibraryKind =
+  "documents" | "music" | "pictures" | "videos" | "downloads";
+
 /** A single entry from a folder enumeration chunk. */
 export interface BrowserEntry {
   id: string;
   name: string;
   kind: BrowserEntryKind;
+  /** Present only for filesystem roots supplied by the operating system. */
+  rootKind?: BrowserRootKind;
+  libraryKind?: BrowserLibraryKind;
   has_subfolders?: boolean | null;
   metadata?: PlayableFileMetadata | null;
 }
@@ -45,6 +52,7 @@ export interface FolderTreeState {
   rootPath: string | null;
   /** Map of folder path → folder state. */
   folders: Record<string, FolderState>;
+  libraries: BrowserEntry[];
   /** Playable file entries per folder path (for file list). */
   playableEntries: Record<string, BrowserEntry[]>;
   /** Full path of the currently selected (highlighted) folder. */
@@ -60,7 +68,12 @@ export interface FolderTreeState {
 export type FolderTreeAction =
   | {
       type: "ROOTS_LOADED";
-      roots: Array<{ path: string; name: string }>;
+      roots: Array<{ path: string; name: string; kind: BrowserRootKind }>;
+      libraries: Array<{
+        path: string;
+        name: string;
+        kind: BrowserLibraryKind;
+      }>;
     }
   | { type: "ROOTS_ERROR"; message: string }
   | { type: "START_PICKING" }
@@ -102,6 +115,7 @@ export type FolderTreeAction =
 export const INITIAL_FOLDER_TREE_STATE: FolderTreeState = {
   rootPath: null,
   folders: {},
+  libraries: [],
   playableEntries: {},
   selectedPath: null,
   activeSessionId: null,
@@ -113,7 +127,8 @@ export const INITIAL_FOLDER_TREE_STATE: FolderTreeState = {
 export function getParentPath(path: string): string | null {
   const normalized = path.replace(/\/+$/, "");
   const lastSlash = normalized.lastIndexOf("/");
-  if (lastSlash <= 0) return null;
+  if (lastSlash < 0) return null;
+  if (lastSlash === 0) return normalized.length > 1 ? "/" : null;
   return normalized.substring(0, lastSlash);
 }
 

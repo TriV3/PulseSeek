@@ -21,6 +21,7 @@ export const DEFAULT_PLAYER_PREFERENCES: PlayerPreferences = {
   last_played_duration_ms: null,
   theme: "system",
   waveform_style: "outline",
+  show_hidden_folders: false,
 };
 
 export function usePlayerPreferences() {

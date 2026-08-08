@@ -72,6 +72,42 @@ describe("WaveformPanel", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows the selected file's actual audio metadata", () => {
+    render(
+      <WaveformPanel
+        entryPath="/music/a.mp3"
+        entryName="A.mp3"
+        durationMs={2000}
+        metadata={{
+          duration_ms: 2000,
+          size_bytes: 1234,
+          modified_at_ms: 5678,
+          channels: 1,
+          sample_rate: 48_000,
+          bit_depth: null,
+          codec: "MP3",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("48 kHz, mono · MP3")).toBeInTheDocument();
+    expect(screen.queryByText(/lossless/i)).not.toBeInTheDocument();
+  });
+
+  it("does not invent audio metadata when it is unavailable", () => {
+    render(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+        metadata={null}
+      />,
+    );
+
+    expect(screen.getByText("Audio details unavailable")).toBeInTheDocument();
+    expect(screen.queryByText(/44\.1 kHz/i)).not.toBeInTheDocument();
+  });
+
   it("requests a waveform level for the selected file", async () => {
     vi.mocked(getWaveform).mockResolvedValue(LEVEL);
     const { container } = render(

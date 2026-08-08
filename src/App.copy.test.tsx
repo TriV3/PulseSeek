@@ -102,9 +102,14 @@ function installBackendMock() {
       ).envelope;
       switch (envelope.command) {
         case "list_browser_roots":
-          return ok({ roots: [{ path: "/music", name: "Music" }] });
+          return ok({
+            roots: [{ path: "/music", name: "Music", kind: "physical" }],
+            libraries: [],
+          });
         case "record_recent_folder":
           return ok({});
+        case "list_folder_bookmarks":
+          return ok({ bookmarks: [] });
         case "cancel_enumeration":
           return ok({});
         case "start_enumeration": {
@@ -157,10 +162,6 @@ function emitCopyProgress(payload: unknown) {
 }
 
 async function openMusicFolder() {
-  await waitFor(() => {
-    expect(screen.getByText("Computer")).toBeInTheDocument();
-  });
-  fireEvent.click(screen.getByText("Computer"));
   await waitFor(() => {
     expect(screen.getByText("Music")).toBeInTheDocument();
   });
