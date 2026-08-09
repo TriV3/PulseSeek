@@ -19,6 +19,7 @@ pub mod recent_folders_service;
 pub mod rename_service;
 pub mod shortcut_mappings_service;
 pub mod trash_service;
+mod visualization_service;
 pub mod waveform_service;
 
 use std::sync::{Arc, Mutex};

@@ -79,6 +79,10 @@
   --wave-seek-hover: #7ddc55;
   --wave-time-current: #ffd0a3;
   --wave-time-hover: #b9f4a5;
+  --analyzer-spectrum: #bada4b;
+  --analyzer-spectrum-soft: rgba(186, 218, 75, 0.18);
+  --analyzer-grid: #3a434d;
+  --analyzer-label: #8b97a5;
 
   /* Focus and overlay */
   --focus-ring: #6ab0ff;

@@ -13,6 +13,7 @@ use pulseseek_playback::{PlaybackControl, PlaybackWorker};
 
 use crate::playback_events::{NoopEventEmitter, PlaybackEventEmitter, EVENT_COMPLETED};
 use crate::playback_service::PlaybackService;
+use crate::visualization_service::VisualizationPipeline;
 
 pub struct NativePlaybackService {
     output: Arc<Mutex<CpalAudioOutput>>,
@@ -25,6 +26,7 @@ pub struct NativePlaybackService {
     buffer_frames: usize,
     output_sample_rate: Option<u32>,
     position_reporter: Option<PositionReporter>,
+    visualization: Option<VisualizationPipeline>,
 }
 
 struct PositionReporter {
@@ -105,6 +107,7 @@ impl NativePlaybackService {
             buffer_frames: 131_072,
             output_sample_rate: None,
             position_reporter: None,
+            visualization: None,
         }
     }
 
@@ -127,6 +130,7 @@ impl PlaybackService for NativePlaybackService {
         if let Some(mut reporter) = self.position_reporter.take() {
             reporter.stop();
         }
+        self.visualization = None;
         let mut decoder = pulseseek_decoder_symphonia::registry::DecoderRegistry::open(path)
             .map_err(|e| {
                 ApplicationError::new(
@@ -174,7 +178,7 @@ impl PlaybackService for NativePlaybackService {
             .map_err(|e| Self::unavailable(&format!("failed to read output sample rate: {e}")))?;
         drop(output);
 
-        let (worker, consumer) = PlaybackWorker::start_resampled(
+        let (worker, mut consumer) = PlaybackWorker::start_resampled(
             decoder,
             self.buffer_frames,
             channels,
@@ -195,6 +199,21 @@ impl PlaybackService for NativePlaybackService {
             return Err(Self::unavailable(&format!("failed to set playback mode: {mode_result}")));
         }
 
+        let visualization = match VisualizationPipeline::start(
+            output_sample_rate,
+            channels,
+            Arc::clone(&self.events),
+        ) {
+            Ok((pipeline, tap)) => {
+                consumer.set_visualization_tap(tap);
+                Some(pipeline)
+            },
+            Err(error) => {
+                tracing::warn!(error = %error, "visualization pipeline unavailable; playback continues");
+                None
+            },
+        };
+
         let control = consumer.control();
 
         let mut output =
@@ -210,6 +229,7 @@ impl PlaybackService for NativePlaybackService {
         self.current_path = Some(path.to_string());
         self.current_metadata = Some(metadata);
         self.output_sample_rate = Some(output_sample_rate);
+        self.visualization = visualization;
 
         let duration_ms = self.current_metadata.as_ref().and_then(metadata_duration_ms);
         self.position_reporter = Some(PositionReporter::start(
@@ -268,6 +288,7 @@ impl PlaybackService for NativePlaybackService {
             self.output.lock().map_err(|_| Self::unavailable("output lock poisoned"))?;
         let _ = output.stop();
         drop(output);
+        self.visualization = None;
         self.worker = None;
         self.control = None;
         self.current_path = None;
@@ -385,6 +406,7 @@ impl PlaybackService for NativePlaybackService {
                 .map_err(|error| Self::unavailable(&format!("device change failed: {error}")))?;
         }
         self.worker = None;
+        self.visualization = None;
         self.control = None;
         self.current_path = None;
         self.current_metadata = None;

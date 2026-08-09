@@ -25,6 +25,8 @@ export interface WaveformCanvasProps {
   targetPeaksForWidth?: (widthPx: number) => number;
   getTokens?: (scope: Element | null | undefined) => WaveformTokens;
   style?: WaveformStyle;
+  /** Accessible name for the seek surface when reused by another visualizer. */
+  ariaLabel?: string;
 }
 
 const REFETCH_DEBOUNCE_MS = 200;
@@ -58,6 +60,7 @@ export function WaveformCanvas({
   targetPeaksForWidth = defaultTargetPeaksForWidth,
   getTokens = resolveTokens,
   style = "outline",
+  ariaLabel = "Waveform seek",
 }: WaveformCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const currentTimeRef = useRef<HTMLSpanElement | null>(null);
@@ -496,7 +499,7 @@ export function WaveformCanvas({
           waveform ? " waveform-canvas-surface--revealing" : ""
         }`}
         role="slider"
-        aria-label="Waveform seek"
+        aria-label={ariaLabel}
         aria-valuemin={0}
         aria-valuemax={durationMs ?? 0}
         aria-valuenow={0}

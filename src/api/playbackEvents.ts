@@ -57,6 +57,15 @@ export interface WaveformReadyPayload {
   path: string;
 }
 
+export interface SpectrumFramePayload {
+  format_version: 1;
+  sequence: number;
+  position_frames: number;
+  sample_rate: number;
+  fft_size: number;
+  magnitudes: number[];
+}
+
 export interface MoveItemResultData {
   /** Source path of the file before the move. */
   path: string;
@@ -167,6 +176,31 @@ export function isWaveformReadyPayload(
   return isRecord(value) && typeof value.path === "string";
 }
 
+export function isSpectrumFramePayload(
+  value: unknown,
+): value is SpectrumFramePayload {
+  if (!isRecord(value)) return false;
+  if (
+    value.format_version !== 1 ||
+    !isNonNegativeSafeInteger(value.sequence) ||
+    !isNonNegativeSafeInteger(value.position_frames) ||
+    !isPositiveSafeInteger(value.sample_rate) ||
+    !isPositiveSafeInteger(value.fft_size) ||
+    value.fft_size > 8_192 ||
+    !isPowerOfTwo(value.fft_size) ||
+    !Array.isArray(value.magnitudes) ||
+    value.magnitudes.length !== value.fft_size / 2 + 1
+  ) {
+    return false;
+  }
+  return value.magnitudes.every(
+    (magnitude) =>
+      typeof magnitude === "number" &&
+      Number.isFinite(magnitude) &&
+      magnitude >= 0,
+  );
+}
+
 export function isFolderChunkPayload(
   value: unknown,
 ): value is FolderChunkPayload {
@@ -187,6 +221,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isOptionalSafeInteger(value: unknown): boolean {
   return value === null || (Number.isSafeInteger(value) && Number(value) >= 0);
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) > 0;
+}
+
+function isPowerOfTwo(value: number): boolean {
+  if (value < 2) return false;
+  let remaining = value;
+  while (remaining % 2 === 0) remaining /= 2;
+  return remaining === 1;
 }
 
 function isOptionalTimestamp(value: unknown): boolean {
@@ -246,6 +295,7 @@ export const EVENT_DEVICE_LOST = "audio:device-lost";
 export const EVENT_FOLDER_CHUNK = "browser:folder-chunk";
 export const EVENT_FILE_CHANGE = "browser:file-change";
 export const EVENT_WAVEFORM_READY = "waveform:ready";
+export const EVENT_SPECTRUM_FRAME = "visualization:spectrum";
 export const EVENT_MOVE_PROGRESS = "browser:move-progress";
 export const EVENT_COPY_PROGRESS = "browser:copy-progress";
 
@@ -288,6 +338,17 @@ export function onWaveformReady(
 ): Promise<UnlistenFn> {
   return listen<WaveformReadyPayload>(EVENT_WAVEFORM_READY, (event) => {
     if (isWaveformReadyPayload(event.payload)) {
+      handler(event.payload);
+    }
+  });
+}
+
+/** Listens for validated, versioned FFT frames from the native worker. */
+export function onSpectrumFrame(
+  handler: (payload: SpectrumFramePayload) => void,
+): Promise<UnlistenFn> {
+  return listen<SpectrumFramePayload>(EVENT_SPECTRUM_FRAME, (event) => {
+    if (isSpectrumFramePayload(event.payload)) {
       handler(event.payload);
     }
   });

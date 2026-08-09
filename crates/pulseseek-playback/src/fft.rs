@@ -214,9 +214,29 @@ pub struct SpectrumReceiver {
     connected: Arc<AtomicBool>,
 }
 
+pub struct LatestSpectrum {
+    pub frame: SpectrumFrame,
+    pub discarded: u64,
+}
+
 impl SpectrumReceiver {
     pub fn try_receive(&self) -> Option<SpectrumFrame> {
         self.receiver.try_recv().ok()
+    }
+
+    /// Returns the newest spectrum currently queued and discards older ones.
+    ///
+    /// The queue is bounded by the worker output capacity, so this operation
+    /// never performs unbounded work. Consumers can use the discard count for
+    /// diagnostics without allowing rendering lag to reach playback.
+    pub fn try_receive_latest(&self) -> Option<LatestSpectrum> {
+        let mut frame = self.try_receive()?;
+        let mut discarded = 0_u64;
+        while let Some(newer) = self.try_receive() {
+            frame = newer;
+            discarded = discarded.saturating_add(1);
+        }
+        Some(LatestSpectrum { frame, discarded })
     }
 
     pub fn recv_timeout(&self, timeout: Duration) -> Result<SpectrumFrame, RecvTimeoutError> {
@@ -263,3 +283,28 @@ impl fmt::Display for FftError {
 }
 
 impl Error for FftError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spectrum(sequence: u64) -> SpectrumFrame {
+        SpectrumFrame::new(sequence, sequence * 256, 48_000, 8, vec![0.0; 5]).unwrap()
+    }
+
+    #[test]
+    fn latest_receive_discards_queued_spectra() {
+        let (sender, receiver) = mpsc::sync_channel(3);
+        sender.try_send(spectrum(1)).unwrap();
+        sender.try_send(spectrum(2)).unwrap();
+        sender.try_send(spectrum(3)).unwrap();
+        let connected = Arc::new(AtomicBool::new(true));
+        let spectra = SpectrumReceiver { receiver, connected };
+
+        let latest = spectra.try_receive_latest().expect("latest spectrum");
+
+        assert_eq!(latest.frame.sequence(), 3);
+        assert_eq!(latest.discarded, 2);
+        assert!(spectra.try_receive().is_none());
+    }
+}

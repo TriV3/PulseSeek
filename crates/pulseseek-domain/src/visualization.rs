@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fmt;
 
 /// Maximum interleaved sample count carried by one callback-safe frame.
-pub const MAX_VISUALIZATION_FRAME_SAMPLES: usize = 2_048;
+pub const MAX_VISUALIZATION_FRAME_SAMPLES: usize = 8_192;
 
 /// Immutable time-domain audio captured for off-thread visualization work.
 ///

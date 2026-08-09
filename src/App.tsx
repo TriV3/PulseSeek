@@ -43,6 +43,10 @@ import { useTheme } from "./hooks/useTheme";
 import { ThemeSelector } from "./components/ThemeSelector/ThemeSelector";
 import { WaveformStyleSelector } from "./components/WaveformStyleSelector/WaveformStyleSelector";
 import { WaveformPanel } from "./components/Waveform/WaveformPanel";
+import {
+  VisualizationSelector,
+  type VisualizationMode,
+} from "./components/VisualizationSelector/VisualizationSelector";
 import "./styles/tokens.css";
 import "./styles/themes/light.css";
 import "./styles/themes/dark.css";
@@ -66,6 +70,8 @@ function App() {
   >("browser");
   const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
   const [focusSearchRevision, setFocusSearchRevision] = useState(0);
+  const [visualization, setVisualization] =
+    useState<VisualizationMode>("waveform");
   const [folderPickerError, setFolderPickerError] = useState<string | null>(
     null,
   );
@@ -89,7 +95,7 @@ function App() {
   const audioDevices = useAudioDevices();
   const shortcutMappings = useShortcutMappings();
   const updatePreferences = playerPreferences.update;
-  useTheme(playerPreferences.preferences.theme);
+  const resolvedTheme = useTheme(playerPreferences.preferences.theme);
   const restoredOptions = useRef(false);
   const restoredBrowser = useRef(false);
   const restoredDevice = useRef(false);
@@ -496,11 +502,13 @@ function App() {
           resetRevision={waveformResetRevision}
           onSeek={seekAndRemember}
           style={playerPreferences.preferences.waveform_style}
+          theme={resolvedTheme}
+          visualization={visualization}
         />
         <div
           className="splitter splitter--horizontal"
           role="separator"
-          aria-label="Resize waveform"
+          aria-label="Resize visualization"
           aria-orientation="horizontal"
           aria-valuemin={22}
           aria-valuemax={62}
@@ -579,12 +587,18 @@ function App() {
                     }
                   }}
                 />
-                <WaveformStyleSelector
-                  style={playerPreferences.preferences.waveform_style}
-                  onChange={(waveform_style) => {
-                    playerPreferences.update({ waveform_style });
-                  }}
+                <VisualizationSelector
+                  value={visualization}
+                  onChange={setVisualization}
                 />
+                {visualization === "waveform" && (
+                  <WaveformStyleSelector
+                    style={playerPreferences.preferences.waveform_style}
+                    onChange={(waveform_style) => {
+                      playerPreferences.update({ waveform_style });
+                    }}
+                  />
+                )}
                 {shortcutMappings.isLoading && (
                   <span role="status">Loading shortcuts…</span>
                 )}

@@ -18,6 +18,7 @@ pub const EVENT_DEVICE_LOST: &str = "audio:device-lost";
 pub const EVENT_FOLDER_CHUNK: &str = "browser:folder-chunk";
 pub const EVENT_FILE_CHANGE: &str = "browser:file-change";
 pub const EVENT_WAVEFORM_READY: &str = "waveform:ready";
+pub const EVENT_SPECTRUM_FRAME: &str = "visualization:spectrum";
 pub const EVENT_MOVE_PROGRESS: &str = "browser:move-progress";
 pub const EVENT_COPY_PROGRESS: &str = "browser:copy-progress";
 

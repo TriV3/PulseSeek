@@ -8,7 +8,7 @@ renderers, or a plugin ABI.
 
 `VisualizationFrame` is an immutable value containing a sequence number,
 playback-frame position, sample rate, channel count, and interleaved `f32`
-samples. The payload uses fixed storage for at most 2,048 samples. Its
+samples. The payload uses fixed storage for at most 8,192 samples. Its
 constructor rejects empty, oversized, zero-rate, zero-channel, and incomplete
 interleaved frames.
 
