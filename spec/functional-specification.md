@@ -16,6 +16,34 @@ The product is composed of four clearly separated user-facing modules:
 These modules belong to one application and share reusable services, but their
 domain models and persistent data must remain separate.
 
+### 1.1 Specification hierarchy and implementation contract
+
+This file remains the product-level functional specification for PulseSeek. It
+defines the product priorities, module boundaries, cross-module requirements,
+and global non-functional constraints. Its real-time visualization requirements
+(`FR-VS-*`) and section 4.5 are not discarded by the more detailed metering
+specifications; they are the product-level contract that the metering work must
+continue to satisfy.
+
+The metering specifications are subordinate, complementary specifications:
+
+- `spec/metering-functional-specification.md` refines the user-visible behavior
+  of the Meters workspace and each analysis tile;
+- `spec/metering-dsp-specification.md` defines formulas, numerical conventions,
+  windows, FFT products, units, and algorithm versions;
+- `spec/metering-architecture-specification.md` defines Rust/React ownership,
+  source ports, workers, queues, subscriptions, IPC, and cache contracts;
+- `spec/metering-validation-specification.md` defines fixtures, tolerances,
+  lifecycle scenarios, performance budgets, and release evidence.
+
+The implementation plan is the execution authority: it maps each requirement
+to a small PR, its dependencies, failing tests, acceptance evidence, and the
+specifications that must be read and updated. A PR is not complete because a
+document was written; its behavior, tests, and traceability evidence must also
+be complete. If a detailed metering rule conflicts with a product boundary in
+this file, the product boundary wins and the detailed specification must be
+amended before implementation continues.
+
 ## 2. Product priorities
 
 ### 2.1 Top priority
@@ -209,7 +237,137 @@ Priorities:
 Candidate later visualizations include a spectrogram, vectorscope/goniometer,
 phase correlation meter, oscilloscope, loudness history, and stereo spectrum.
 
-### 4.5 File operations
+### 4.5 Real-time metering and mixing/mastering analysis
+
+The Audio Player shall provide a live metering workspace for interpreting a mix
+or master. It displays measurements and relationships; it does not issue an
+automatic artistic verdict.
+
+The first live module family includes Spectrum Analyzer, configurable band
+energy, colored waveform, spectrogram, loudness, sample peak, true peak,
+stereo, Mid/Side, correlation, and phase-cancellation visibility. Whole-file
+offline analysis and reference comparison remain future consumers of the same
+analysis products.
+
+#### Lower workspace and configurable tiles
+
+The lower player area shall switch between two preserved workspaces:
+
+- **Browser:** the existing folder tree and File List.
+- **Meters:** a configurable grid of analysis tiles.
+
+The upper waveform, seek, and transport remain available. Switching workspaces
+preserves Browser selection, scroll, expanded folders, tile layout, tile
+settings, subscriptions, and relevant live state. Meters supports adding,
+removing, duplicating, reordering, resizing, maximizing, and restoring named
+layouts. Tiles and controls shall be keyboard accessible and shall expose their
+units, source, measurement point, quality, and error/degraded state.
+
+#### Shared real-time analysis pipeline
+
+```mermaid
+flowchart TB
+    S["AudioAnalysisSource"] --> C["Bounded capture"]
+    C --> E["Shared AnalysisEngine"]
+    E --> F["Per-channel FFT bank"]
+    E --> T["Time-domain products"]
+    E --> L["K-weighting / loudness"]
+    E --> P["True-peak oversampling"]
+    F --> X["Spectrum, bands, spectrogram, colored waveform, frequency stereo"]
+    T --> Y["Peak, RMS, Mid/Side, correlation"]
+    X --> O["Versioned bounded outputs"]
+    Y --> O
+    L --> O
+    P --> O
+    O --> U["Meter tiles and diagnostics"]
+```
+
+The Source point is after decoding and before resampling, gain, and output. The
+Monitor point is after resampling and before user volume, preserving L/R.
+Mono and stereo are the initial supported topologies.
+
+The audio callback may only publish bounded captured blocks and atomics. It
+shall not allocate, lock, log, perform I/O, SQL, FFT, or communicate with
+React. Rust owns the shared engine, windows, buffers, workers, subscriptions,
+and output delivery. Products start with their first compatible consumer and
+stop after the last one. Visual outputs are latest-only; loudness and true peak
+use a continuous lane that cannot silently lose samples.
+
+#### Live metering requirements
+
+- **FR-MW-001..006:** The lower area switches Browser/Meters; state is preserved;
+  Meters supports multiple configurable accessible tiles and named layouts.
+- **FR-MS-001..008:** Source/Monitor points, session metadata, mono/stereo,
+  pause decay, ordinary-seek reset, A/B-loop continuity, source changes, and
+  explicit global/per-tile reset are defined.
+- **FR-SP-001..010:** Shared per-channel FFT supports 2,048/4,096/8,192/16,384
+  points; selectable windows; L/R, energy, mono, Mid, Side and difference modes;
+  instant/smoothing/averages/peak-hold; dBFS/PSD; linear/log axes; visual tilt.
+- **FR-BE-001..007:** Default musical bands cover infrabass through air; bands
+  are editable/addable/removable; overlaps/gaps are visible; bin power, filtered
+  RMS, PSD and relative energy are selectable; overlay and standalone views exist.
+- **FR-CW-001..006:** Colored waveform represents only played/captured coverage,
+  supports spectral/energy color modes, remains readable without color, and is
+  multiresolution with distinct unknown/invalid segments.
+- **FR-SG-001..004:** Spectrogram rows reuse shared FFT data and expose bounded
+  scrolling, frequency range, dynamic range, palette, and speed.
+- **FR-LD-001..007:** LUFS-M/S/I, gating, duration, LRA, sample peak, true peak,
+  calibration, incomplete-measurement state, compact view, and live history
+  follow ITU-R BS.1770 / EBU R128.
+- **FR-ST-001..006:** Balance, M/S, width, broadband and frequency correlation,
+  goniometer modes, mono-compatible monitoring, and visible L=-R cancellation
+  are provided.
+- **FR-CF-001..004:** Eco/Normal/High target 15/30/60 FPS; hop and overlap
+  depend on preset/product/rate; overrides and serialized settings migrate.
+- **FR-DG-001:** Diagnostics shall expose source, measurement point, sample
+  rate, channel count, active profile, effective FPS, and latency.
+- **FR-DG-002:** Diagnostics shall expose queue depth, drops, active products,
+  FFT sharing, and the current degradation level.
+- **FR-DG-003:** Diagnostics shall expose incomplete, unavailable, invalid,
+  and permission/source failure states without blocking playback.
+- **FR-EX-001..006:** External sources use the same contract with explicit
+  selection, permission, visible capture, safe stop, and future system/DAW
+  adapters kept separate.
+- **FR-DS-001 (P1):** A configurable spectral-occupancy field shall show
+  instantaneous energy, rolling percentiles, and a user-selected baseline
+  without emitting an automatic mix verdict.
+- **FR-DS-002 (P1):** A mono-survivability field shall show per-frequency
+  correlation, Mid/Side energy, and fold-down behavior.
+- **FR-DS-003 (P1):** A transient/tonal contrast view shall compare short-window
+  energy with local sustain energy using an explicit configurable ratio.
+- **FR-DS-004 (P1):** A dynamic-density map shall combine crest factor, RMS
+  distribution, peak hold, and spectral occupancy over time and bands.
+- **FR-DS-005 (P1):** Decision snapshots shall freeze synchronized tile states,
+  settings, cursor time, and user annotations for later inspection.
+- **FR-DS-006 (P1):** An uncertainty/coverage layer shall distinguish measured,
+  stale, interpolated, incomplete, and unplayed regions.
+- **FR-DS-007 (P1):** A cost inspector shall show shared products, CPU time,
+  memory, queue depth, visual drops, and the products stopped by tile removal.
+
+Pause freezes the measurement clock while presentation decays. Ordinary seek
+resets continuity-dependent products; A/B loop wrap does not. Only played or
+captured coverage is persisted. Large data uses versioned blobs referenced by
+SQLite with source fingerprint, algorithm version, configuration, coverage,
+checksum, and asynchronous atomic writes. Unknown regions are not silence.
+Playback never waits for cache writes and the cache never creates a manager item.
+
+The algorithm formulas, units, window normalization, thread ownership, event
+schemas, backpressure, reset rules, cache migrations, calibration fixtures,
+performance budgets, diagnostics, and user-visible controls shall be documented
+in the same PR that introduces or changes them.
+
+The normative technical references are:
+
+- `spec/metering-functional-specification.md`;
+- `spec/metering-dsp-specification.md`;
+- `spec/metering-architecture-specification.md`;
+- `spec/metering-validation-specification.md`;
+- `docs/architecture/realtime-metering-engine.md`;
+- `docs/dsp/metering-dsp-algorithms.md`;
+- `docs/architecture/metering-event-and-cache-contracts.md`;
+- `docs/testing/metering-calibration-and-performance.md`.
+
+### 4.6 File operations
 
 - **FR-FM-001 (P0):** The user shall be able to move selected files to the
   operating system trash.
@@ -230,7 +388,7 @@ phase correlation meter, oscilloscope, loudness history, and stereo spectrum.
 - **FR-FM-011 (P1):** The playing or selected file shall be draggable into
   compatible applications, including DAWs and audio editors.
 
-### 4.6 Keyboard interaction
+### 4.7 Keyboard interaction
 
 - **FR-KB-001 (P0):** The complete primary audition workflow shall be keyboard
   accessible.
@@ -243,7 +401,7 @@ phase correlation meter, oscilloscope, loudness history, and stereo spectrum.
 - **FR-KB-005 (P1):** Mouse-wheel interaction may adjust hovered controls, such
   as volume or scrollable lists, without requiring a preliminary click.
 
-### 4.7 Audio output
+### 4.8 Audio output
 
 - **FR-IO-001 (P0):** PulseSeek shall enumerate available audio output devices.
 - **FR-IO-002 (P0):** The user shall be able to select an output device.
@@ -259,7 +417,7 @@ phase correlation meter, oscilloscope, loudness history, and stereo spectrum.
   shall preserve the current file, playback position, volume, playback mode,
   and playing or paused state; the user shall not need to restart playback.
 
-### 4.8 Sample Manager
+### 4.9 Sample Manager
 
 - **FR-SM-001 (P2):** The Sample Manager shall use its own versioned SQLite
   database.
@@ -284,7 +442,7 @@ phase correlation meter, oscilloscope, loudness history, and stereo spectrum.
 - **FR-SM-011 (P3):** The DAW bridge shall communicate with the desktop
   application through a versioned local protocol.
 
-### 4.9 Music Manager
+### 4.10 Music Manager
 
 - **FR-MM-001 (P2):** The Music Manager shall use its own versioned SQLite
   database.
@@ -304,7 +462,7 @@ phase correlation meter, oscilloscope, loudness history, and stereo spectrum.
 - **FR-MM-008 (P2):** Missing referenced files shall be detectable and
   relinkable.
 
-### 4.10 Playlist Manager
+### 4.11 Playlist Manager
 
 - **FR-PM-001 (P2):** The Playlist Manager shall use its own versioned SQLite
   database.
@@ -329,7 +487,7 @@ phase correlation meter, oscilloscope, loudness history, and stereo spectrum.
 - **FR-PM-011 (Later):** Smart playlists may update automatically from metadata
   rules.
 
-### 4.11 Audio effect and visualizer plugins
+### 4.12 Audio effect and visualizer plugins
 
 - **FR-PL-001 (P3):** The desktop application shall discover supported audio
   effect plugins from configured locations.
@@ -450,6 +608,32 @@ MIDI playback and audio extraction from video containers are deferred.
 - Core features shall require no account.
 - Local paths, metadata, listening history, and analysis shall stay local unless
   the user invokes an explicit integration.
+
+### 7.6 Real-time metering constraints
+
+- **NFR-MT-001:** The audio callback never allocates, locks, logs, performs I/O,
+  SQL, FFT, rendering, or Tauri/React communication.
+- **NFR-MT-002:** Every queue has bounded capacity, saturation policy, counters,
+  backpressure, and explicit shutdown behavior.
+- **NFR-MT-003:** Playback has priority; stale visual frames may be dropped, but
+  continuous measurement loss is visible and invalidates affected results.
+- **NFR-MT-004:** The DSP engine remains independent of Tauri, React, SQLite,
+  and concrete audio/capture adapters.
+- **NFR-MT-005:** Eco/Normal/High target 15/30/60 FPS with measured degradation
+  before playback is affected.
+- **NFR-MT-006:** Algorithms, schemas, settings, cache blobs, migrations,
+  diagnostics, and calibration tolerances are documented as implementation evolves.
+- **NFR-MT-007:** Expert customization shall be represented by versioned profiles
+  and data-driven tile settings, not duplicated widget-specific DSP paths.
+- **NFR-MT-008:** Experimental decision-support views shall expose their formula,
+  baseline, window, algorithm version, and validity state.
+- **NFR-MT-009:** Every normative DSP product shall have deterministic fixtures,
+  published tolerances, and a reproducible validation command before it is
+  considered release-ready.
+- **NFR-MT-010:** Every performance-sensitive change shall record hardware,
+  sample rate, profile, tile layout, CPU/memory percentiles, queue metrics,
+  visual drops, continuous gaps, and audio underruns before and after the
+  change.
 
 ## 8. Resonic-inspired scope
 
