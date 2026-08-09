@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { useWaveform } from "../../hooks/useWaveform";
 import type { PlayableFileMetadata } from "../FolderTree/folderTreeTypes";
+import { LogAnalyzerCanvas } from "../LogAnalyzer/LogAnalyzerCanvas";
+import type { ResolvedTheme } from "../../hooks/useTheme";
+import type { VisualizationMode } from "../VisualizationSelector/VisualizationSelector";
 import type { WaveformStyle } from "./waveformRenderer";
 import { WaveformCanvas } from "./WaveformCanvas";
 
@@ -20,6 +23,10 @@ export interface WaveformPanelProps {
   onSeek?: (positionMs: number) => void | Promise<void>;
   /** Renderer style for the envelope. */
   style?: WaveformStyle;
+  /** Resolved semantic theme used to repaint the analyzer immediately. */
+  theme?: ResolvedTheme;
+  /** The single visualization rendered in this workspace. */
+  visualization?: VisualizationMode;
 }
 
 /**
@@ -60,7 +67,7 @@ function formatAudioSummary(
 }
 
 /**
- * Waveform overview workspace region.
+ * Exclusive waveform/analyzer workspace region.
  *
  * Owns the waveform resolution selection and surfaces load errors to screen
  * readers. The playhead is drawn imperatively by {@link WaveformCanvas} and
@@ -75,6 +82,8 @@ export function WaveformPanel({
   resetRevision = 0,
   onSeek,
   style = "outline",
+  theme = "light",
+  visualization = "waveform",
 }: WaveformPanelProps) {
   const [resolution, setResolution] = useState<{
     entryPath: string | null;
@@ -84,10 +93,11 @@ export function WaveformPanel({
     resolution.entryPath === entryPath
       ? resolution.targetPeaks
       : INITIAL_TARGET_PEAKS;
-  const { status, waveform, error } = useWaveform(entryPath, targetPeaks);
+  const waveformPath = visualization === "waveform" ? entryPath : null;
+  const { status, waveform, error } = useWaveform(waveformPath, targetPeaks);
 
   return (
-    <section className="waveform-panel" aria-label="Waveform overview">
+    <section className="waveform-panel" aria-label="Audio visualization">
       <header className="now-playing">
         <div>
           <span className="now-playing-label">Play:</span>{" "}
@@ -101,24 +111,37 @@ export function WaveformPanel({
         </div>
       </header>
       <div className="audio-summary">{formatAudioSummary(metadata)}</div>
-      <div className="waveform-canvas">
-        {status === "error" ? (
-          <p className="waveform-error" role="alert">
-            {error}
-          </p>
+      <div className="visualization-workspace">
+        {visualization === "waveform" ? (
+          <div className="waveform-canvas">
+            {status === "error" ? (
+              <p className="waveform-error" role="alert">
+                {error}
+              </p>
+            ) : (
+              <WaveformCanvas
+                waveform={waveform}
+                durationMs={durationMs}
+                restoredPositionMs={restoredPositionMs}
+                resetRevision={resetRevision}
+                onRequestRefetch={(nextTarget) => {
+                  if (waveform && targetPeaks === INITIAL_TARGET_PEAKS) {
+                    setResolution({ entryPath, targetPeaks: nextTarget });
+                  }
+                }}
+                onSeek={onSeek}
+                style={style}
+              />
+            )}
+          </div>
         ) : (
-          <WaveformCanvas
-            waveform={waveform}
+          <LogAnalyzerCanvas
+            enabled
+            theme={theme}
             durationMs={durationMs}
             restoredPositionMs={restoredPositionMs}
             resetRevision={resetRevision}
-            onRequestRefetch={(nextTarget) => {
-              if (waveform && targetPeaks === INITIAL_TARGET_PEAKS) {
-                setResolution({ entryPath, targetPeaks: nextTarget });
-              }
-            }}
             onSeek={onSeek}
-            style={style}
           />
         )}
       </div>

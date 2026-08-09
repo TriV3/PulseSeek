@@ -2,12 +2,17 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { WaveformPanel } from "./WaveformPanel";
 import { getWaveform } from "../../api/waveform";
-import { onPosition, onWaveformReady } from "../../api/playbackEvents";
+import {
+  onPosition,
+  onSpectrumFrame,
+  onWaveformReady,
+} from "../../api/playbackEvents";
 import type { WaveformLevel } from "../../api/waveform";
 
 vi.mock("../../api/waveform", () => ({ getWaveform: vi.fn() }));
 vi.mock("../../api/playbackEvents", () => ({
   onPosition: vi.fn(),
+  onSpectrumFrame: vi.fn(),
   onWaveformReady: vi.fn(),
 }));
 
@@ -19,31 +24,32 @@ const LEVEL: WaveformLevel = {
   max: [-0.4, 0.1, 0.6],
 };
 
-let observerInstance: {
+let observerInstances: Array<{
   trigger: (width: number, height: number) => void;
-} | null;
+}>;
 
 class MockResizeObserver {
   private readonly callback: ResizeObserverCallback;
   constructor(callback: ResizeObserverCallback) {
     this.callback = callback;
-    observerInstance = {
+    observerInstances.push({
       trigger: (width: number, height: number) => {
         this.callback(
           [{ contentRect: { width, height } } as ResizeObserverEntry],
           this as unknown as ResizeObserver,
         );
       },
-    };
+    });
   }
   observe = vi.fn();
   disconnect = vi.fn();
 }
 
 beforeEach(() => {
-  observerInstance = null;
+  observerInstances = [];
   vi.mocked(getWaveform).mockReset().mockResolvedValue(LEVEL);
   vi.mocked(onPosition).mockResolvedValue(() => {});
+  vi.mocked(onSpectrumFrame).mockResolvedValue(() => {});
   vi.mocked(onWaveformReady).mockResolvedValue(() => {});
   window.ResizeObserver =
     MockResizeObserver as unknown as typeof ResizeObserver;
@@ -68,8 +74,65 @@ describe("WaveformPanel", () => {
 
     expect(screen.getByText("A.wav")).toBeInTheDocument();
     expect(
-      screen.getByRole("region", { name: "Waveform overview" }),
+      screen.getByRole("region", { name: "Audio visualization" }),
     ).toBeInTheDocument();
+  });
+
+  it("shows only the waveform by default", () => {
+    render(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+        theme="midnight"
+      />,
+    );
+
+    expect(
+      screen.getByRole("slider", { name: "Waveform seek" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("img", { name: "Logarithmic frequency analyzer" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the logarithmic analyzer instead of the waveform when selected", () => {
+    const onSeek = vi.fn();
+    render(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+        theme="midnight"
+        visualization="logarithmic"
+        onSeek={onSeek}
+      />,
+    );
+
+    expect(
+      screen.getByRole("img", { name: "Logarithmic frequency analyzer" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("slider", { name: "Waveform seek" }),
+    ).not.toBeInTheDocument();
+    const analyzerSeek = screen.getByRole("slider", {
+      name: "Log analyzer seek",
+    });
+    vi.spyOn(analyzerSeek, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 100,
+      bottom: 40,
+      width: 100,
+      height: 40,
+      toJSON: () => ({}),
+    } as DOMRect);
+    fireEvent.pointerDown(analyzerSeek, { clientX: 75, pointerId: 1 });
+    fireEvent.pointerUp(analyzerSeek, { pointerId: 1 });
+    expect(onSeek).toHaveBeenCalledWith(1500);
+    expect(getWaveform).not.toHaveBeenCalled();
   });
 
   it("shows the selected file's actual audio metadata", () => {
@@ -165,7 +228,7 @@ describe("WaveformPanel", () => {
     );
     await waitFor(() => expect(getWaveform).toHaveBeenCalled());
 
-    observerInstance?.trigger(300, 100);
+    for (const observer of observerInstances) observer.trigger(300, 100);
     await waitFor(
       () => expect(getWaveform).toHaveBeenCalledWith("/music/a.wav", 600),
       { timeout: 2000 },

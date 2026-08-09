@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+pub const SPECTRUM_FORMAT_VERSION: u32 = 1;
+
 /// Payload for [`EVENT_STATE_CHANGED`](super::EVENT_STATE_CHANGED).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StateChangedPayload {
@@ -69,6 +71,17 @@ pub struct FileChangePayload {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WaveformReadyPayload {
     pub path: String,
+}
+
+/// Versioned FFT magnitudes emitted to the built-in visualization renderer.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpectrumFramePayload {
+    pub format_version: u32,
+    pub sequence: u64,
+    pub position_frames: u64,
+    pub sample_rate: u32,
+    pub fft_size: usize,
+    pub magnitudes: Vec<f32>,
 }
 /// One file's outcome in a move batch, reported through
 /// [`EVENT_MOVE_PROGRESS`](super::EVENT_MOVE_PROGRESS). Successful and failed

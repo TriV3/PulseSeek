@@ -19,6 +19,9 @@ const playerTransportCss = readCss(
 const confirmDialogCss = readCss(
   "../components/ConfirmDialog/ConfirmDialog.css",
 );
+const logAnalyzerCss = readCss(
+  "../components/LogAnalyzer/LogAnalyzerCanvas.css",
+);
 
 // Vite rewrites `new URL(<literal>, import.meta.url)` into an http:// dev
 // URL, so resolve through a variable to keep a file: URL for readdirSync.
@@ -83,6 +86,10 @@ const requiredTokens = [
   "wave-seek-hover",
   "wave-time-current",
   "wave-time-hover",
+  "analyzer-spectrum",
+  "analyzer-spectrum-soft",
+  "analyzer-grid",
+  "analyzer-label",
   "focus-ring",
   "overlay-backdrop",
   "shadow-overlay",
@@ -97,6 +104,7 @@ const featureStyles = [
   folderTreeCss,
   playerTransportCss,
   confirmDialogCss,
+  logAnalyzerCss,
 ];
 
 const rawColorPattern =

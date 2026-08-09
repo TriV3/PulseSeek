@@ -6,9 +6,11 @@ import {
   isFolderChunkPayload,
   isMoveItemResultData,
   isMoveProgressPayload,
+  isSpectrumFramePayload,
   isWaveformReadyPayload,
   onCopyProgress,
   onMoveProgress,
+  onSpectrumFrame,
   onWaveformReady,
 } from "./playbackEvents";
 
@@ -140,6 +142,58 @@ describe("waveform ready events", () => {
 
     expect(handler).toHaveBeenCalledOnce();
     expect(handler).toHaveBeenCalledWith({ path: "/music/track.wav" });
+  });
+});
+
+const validSpectrumPayload = {
+  format_version: 1,
+  sequence: 7,
+  position_frames: 2_048,
+  sample_rate: 48_000,
+  fft_size: 8,
+  magnitudes: [0, 0.1, 0.4, 0.2, 0],
+};
+
+describe("spectrum frame events", () => {
+  it("accepts only finite versioned FFT payloads with the expected bin count", () => {
+    expect(isSpectrumFramePayload(validSpectrumPayload)).toBe(true);
+    expect(
+      isSpectrumFramePayload({ ...validSpectrumPayload, format_version: 2 }),
+    ).toBe(false);
+    expect(
+      isSpectrumFramePayload({ ...validSpectrumPayload, fft_size: 6 }),
+    ).toBe(false);
+    expect(
+      isSpectrumFramePayload({ ...validSpectrumPayload, magnitudes: [0, 1] }),
+    ).toBe(false);
+    expect(
+      isSpectrumFramePayload({
+        ...validSpectrumPayload,
+        magnitudes: [0, Number.NaN, 0, 0, 0],
+      }),
+    ).toBe(false);
+  });
+
+  it("accepts the higher-resolution FFT used for low frequencies", () => {
+    expect(
+      isSpectrumFramePayload({
+        ...validSpectrumPayload,
+        fft_size: 4_096,
+        magnitudes: Array.from({ length: 2_049 }, () => 0),
+      }),
+    ).toBe(true);
+  });
+
+  it("delivers only valid visualization:spectrum payloads", async () => {
+    const handler = vi.fn();
+    await onSpectrumFrame(handler);
+    const emit = eventHandlers.get("visualization:spectrum");
+
+    emit?.({ payload: validSpectrumPayload });
+    emit?.({ payload: { ...validSpectrumPayload, sample_rate: 0 } });
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledWith(validSpectrumPayload);
   });
 });
 

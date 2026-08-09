@@ -47,6 +47,28 @@ fn event_envelope_has_correct_version() {
 }
 
 #[test]
+fn spectrum_payload_is_versioned_and_serializable() {
+    let payload = types::SpectrumFramePayload {
+        format_version: types::SPECTRUM_FORMAT_VERSION,
+        sequence: 7,
+        position_frames: 2_048,
+        sample_rate: 48_000,
+        fft_size: 1_024,
+        magnitudes: vec![0.0, 0.25, 1.0],
+    };
+
+    let envelope = EventEnvelope::new(
+        EVENT_SPECTRUM_FRAME,
+        serde_json::to_value(&payload).expect("spectrum payload serialization"),
+    );
+
+    assert_eq!(envelope.event, "visualization:spectrum");
+    assert_eq!(envelope.payload["format_version"], 1);
+    assert_eq!(envelope.payload["sequence"], 7);
+    assert_eq!(envelope.payload["magnitudes"], serde_json::json!([0.0, 0.25, 1.0]));
+}
+
+#[test]
 fn throttled_emitter_tracks_dropped_events() {
     let inner = FakeEventEmitter::new();
     let throttled = ThrottledEventEmitter::new(Box::new(inner), 1000);

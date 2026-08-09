@@ -29,9 +29,9 @@ between frames.
 Magnitudes are normalized by the Hann window's coherent gain. Interior
 positive-frequency bins use the one-sided factor of two; DC and Nyquist do not.
 Consequently, a bin-centred sine wave reports its source peak amplitude within
-floating-point tolerance. The default planned integration size is 1,024 audio
-frames, although the analyzer supports other valid sizes up to the fixed input
-frame capacity.
+floating-point tolerance. The logarithmic analyzer integration uses 4,096 audio
+frames for stereo output (8,192 interleaved samples), although the analyzer
+supports other valid power-of-two sizes up to the fixed input frame capacity.
 
 ## Worker lifecycle and lag
 

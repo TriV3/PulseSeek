@@ -97,7 +97,10 @@ fn analyzer_rejects_frames_with_a_different_fft_size() {
 fn analyzer_and_worker_reject_invalid_configuration() {
     assert!(matches!(FftAnalyzer::new(0), Err(FftError::InvalidFftSize { requested: 0 })));
     assert!(matches!(FftAnalyzer::new(3), Err(FftError::InvalidFftSize { requested: 3 })));
-    assert!(matches!(FftAnalyzer::new(4_096), Err(FftError::InvalidFftSize { requested: 4_096 })));
+    assert!(matches!(
+        FftAnalyzer::new(16_384),
+        Err(FftError::InvalidFftSize { requested: 16_384 })
+    ));
 
     let (_publisher, subscriber) = visualization_channel(1);
     assert!(matches!(

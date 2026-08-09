@@ -55,7 +55,7 @@ describe("application shell", () => {
     render(<App />);
 
     expect(
-      screen.getByRole("region", { name: "Waveform overview" }),
+      screen.getByRole("region", { name: "Audio visualization" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("toolbar", { name: "Playback controls" }),
@@ -105,7 +105,7 @@ describe("application shell", () => {
     render(<App />);
 
     const waveformSeparator = screen.getByRole("separator", {
-      name: "Resize waveform",
+      name: "Resize visualization",
     });
     const browserSeparator = screen.getByRole("separator", {
       name: "Resize browser",
@@ -217,6 +217,29 @@ describe("application shell", () => {
               ?.waveform_style === "gradient",
         ),
     ).toBe(true);
+  });
+
+  it("switches exclusively between the waveform and logarithmic analyzer", () => {
+    render(<App />);
+
+    const selector = screen.getByLabelText("Visualization");
+    expect(selector).toHaveValue("waveform");
+    expect(
+      screen.getByRole("slider", { name: "Waveform seek" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("img", { name: "Logarithmic frequency analyzer" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(selector, { target: { value: "logarithmic" } });
+
+    expect(
+      screen.getByRole("img", { name: "Logarithmic frequency analyzer" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("slider", { name: "Waveform seek" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Waveform style")).not.toBeInTheDocument();
   });
 });
 
