@@ -95,6 +95,34 @@ fn spectrum_payload_is_versioned_and_serializable() {
 }
 
 #[test]
+fn musical_spectrum_payload_is_versioned_and_serializable() {
+    let payload = types::MusicalSpectrumFramePayload {
+        format_version: types::MUSICAL_SPECTRUM_FORMAT_VERSION,
+        sequence: 8,
+        position_frames: 4_096,
+        sample_rate: 48_000,
+        tuning_reference_hz: 440.0,
+        bands: vec![types::MusicalBandPayload {
+            note_number: 69,
+            lower_frequency_hz: 427.47,
+            center_frequency_hz: 440.0,
+            upper_frequency_hz: 452.89,
+            magnitude: 0.8,
+        }],
+    };
+
+    let envelope = EventEnvelope::new(
+        EVENT_MUSICAL_SPECTRUM_FRAME,
+        serde_json::to_value(&payload).expect("musical spectrum payload serialization"),
+    );
+
+    assert_eq!(envelope.event, "visualization:musical-spectrum");
+    assert_eq!(envelope.payload["format_version"], 1);
+    assert_eq!(envelope.payload["tuning_reference_hz"], 440.0);
+    assert_eq!(envelope.payload["bands"][0]["note_number"], 69);
+}
+
+#[test]
 fn throttled_emitter_tracks_dropped_events() {
     let inner = FakeEventEmitter::new();
     let throttled = ThrottledEventEmitter::new(Box::new(inner), 1000);

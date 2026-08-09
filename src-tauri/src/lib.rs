@@ -104,6 +104,9 @@ pub fn run() {
             playback_events::subscribe_spectrum_events,
             playback_events::unsubscribe_spectrum_events,
             playback_events::acknowledge_spectrum_frame,
+            playback_events::subscribe_musical_spectrum_events,
+            playback_events::unsubscribe_musical_spectrum_events,
+            playback_events::acknowledge_musical_spectrum_frame,
             command_handlers::waveform::get_waveform
         ])
         .setup(|app| {

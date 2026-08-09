@@ -3,6 +3,7 @@ import { useWaveform } from "../../hooks/useWaveform";
 import type { PlayableFileMetadata } from "../FolderTree/folderTreeTypes";
 import { LinearAnalyzerCanvas } from "../LinearAnalyzer/LinearAnalyzerCanvas";
 import { LogAnalyzerCanvas } from "../LogAnalyzer/LogAnalyzerCanvas";
+import { MusicalSpectrumCanvas } from "../MusicalSpectrum/MusicalSpectrumCanvas";
 import type { ResolvedTheme } from "../../hooks/useTheme";
 import type { VisualizationMode } from "../VisualizationSelector/VisualizationSelector";
 import type { WaveformStyle } from "./waveformRenderer";
@@ -144,8 +145,17 @@ export function WaveformPanel({
             resetRevision={resetRevision}
             onSeek={onSeek}
           />
-        ) : (
+        ) : visualization === "linear" ? (
           <LinearAnalyzerCanvas
+            enabled
+            theme={theme}
+            durationMs={durationMs}
+            restoredPositionMs={restoredPositionMs}
+            resetRevision={resetRevision}
+            onSeek={onSeek}
+          />
+        ) : (
+          <MusicalSpectrumCanvas
             enabled
             theme={theme}
             durationMs={durationMs}

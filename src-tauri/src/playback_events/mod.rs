@@ -19,6 +19,7 @@ pub const EVENT_FOLDER_CHUNK: &str = "browser:folder-chunk";
 pub const EVENT_FILE_CHANGE: &str = "browser:file-change";
 pub const EVENT_WAVEFORM_READY: &str = "waveform:ready";
 pub const EVENT_SPECTRUM_FRAME: &str = "visualization:spectrum";
+pub const EVENT_MUSICAL_SPECTRUM_FRAME: &str = "visualization:musical-spectrum";
 pub const EVENT_MOVE_PROGRESS: &str = "browser:move-progress";
 pub const EVENT_COPY_PROGRESS: &str = "browser:copy-progress";
 
@@ -53,6 +54,16 @@ pub trait PlaybackEventEmitter: Send + Sync {
     }
 
     fn acknowledge_spectrum(&self) {}
+
+    fn subscribe_musical_spectrum(&self) {}
+
+    fn unsubscribe_musical_spectrum(&self) {}
+
+    fn try_begin_musical_spectrum_delivery(&self) -> bool {
+        true
+    }
+
+    fn acknowledge_musical_spectrum(&self) {}
 }
 
 /// Bounds native-to-webview spectrum delivery to one unconsumed frame.
@@ -248,11 +259,16 @@ impl PlaybackEventEmitter for ThrottledEventEmitter {
 pub struct TauriEventEmitter {
     app: tauri::AppHandle,
     spectrum_gate: SpectrumDeliveryGate,
+    musical_spectrum_gate: SpectrumDeliveryGate,
 }
 
 impl TauriEventEmitter {
     pub fn new(app: tauri::AppHandle) -> Self {
-        Self { app, spectrum_gate: SpectrumDeliveryGate::new() }
+        Self {
+            app,
+            spectrum_gate: SpectrumDeliveryGate::new(),
+            musical_spectrum_gate: SpectrumDeliveryGate::new(),
+        }
     }
 }
 
@@ -296,6 +312,22 @@ impl PlaybackEventEmitter for TauriEventEmitter {
     fn acknowledge_spectrum(&self) {
         self.spectrum_gate.acknowledge();
     }
+
+    fn subscribe_musical_spectrum(&self) {
+        self.musical_spectrum_gate.subscribe();
+    }
+
+    fn unsubscribe_musical_spectrum(&self) {
+        self.musical_spectrum_gate.unsubscribe();
+    }
+
+    fn try_begin_musical_spectrum_delivery(&self) -> bool {
+        self.musical_spectrum_gate.try_begin_delivery()
+    }
+
+    fn acknowledge_musical_spectrum(&self) {
+        self.musical_spectrum_gate.acknowledge();
+    }
 }
 
 #[tauri::command]
@@ -311,6 +343,23 @@ pub fn unsubscribe_spectrum_events(events: tauri::State<'_, Arc<dyn PlaybackEven
 #[tauri::command]
 pub fn acknowledge_spectrum_frame(events: tauri::State<'_, Arc<dyn PlaybackEventEmitter>>) {
     events.acknowledge_spectrum();
+}
+
+#[tauri::command]
+pub fn subscribe_musical_spectrum_events(events: tauri::State<'_, Arc<dyn PlaybackEventEmitter>>) {
+    events.subscribe_musical_spectrum();
+}
+
+#[tauri::command]
+pub fn unsubscribe_musical_spectrum_events(
+    events: tauri::State<'_, Arc<dyn PlaybackEventEmitter>>,
+) {
+    events.unsubscribe_musical_spectrum();
+}
+
+#[tauri::command]
+pub fn acknowledge_musical_spectrum_frame(events: tauri::State<'_, Arc<dyn PlaybackEventEmitter>>) {
+    events.acknowledge_musical_spectrum();
 }
 
 #[cfg(test)]

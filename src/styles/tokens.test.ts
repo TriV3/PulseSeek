@@ -25,6 +25,9 @@ const logAnalyzerCss = readCss(
 const linearAnalyzerCss = readCss(
   "../components/LinearAnalyzer/LinearAnalyzerCanvas.css",
 );
+const musicalSpectrumCss = readCss(
+  "../components/MusicalSpectrum/MusicalSpectrumCanvas.css",
+);
 
 // Vite rewrites `new URL(<literal>, import.meta.url)` into an http:// dev
 // URL, so resolve through a variable to keep a file: URL for readdirSync.
@@ -109,6 +112,7 @@ const featureStyles = [
   confirmDialogCss,
   logAnalyzerCss,
   linearAnalyzerCss,
+  musicalSpectrumCss,
 ];
 
 /** Component-local properties written imperatively at runtime, not theme tokens. */
