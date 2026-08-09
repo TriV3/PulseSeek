@@ -1,5 +1,6 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 use pulseseek_domain::visualization::{
     VisualizationFrame, VisualizationFrameError, MAX_VISUALIZATION_FRAME_SAMPLES,
@@ -102,6 +103,7 @@ pub struct VisualizationTap {
     channels: u16,
     samples_per_frame: usize,
     hop_samples: usize,
+    control: Option<VisualizationControl>,
     pending_position_frames: u64,
     pending_len: usize,
     pending: [f32; MAX_VISUALIZATION_FRAME_SAMPLES],
@@ -153,11 +155,30 @@ impl VisualizationTap {
             channels,
             samples_per_frame,
             hop_samples,
+            control: None,
             pending_position_frames: 0,
             pending_len: 0,
             pending: [0.0; MAX_VISUALIZATION_FRAME_SAMPLES],
             sequence: 0,
         })
+    }
+
+    pub fn new_controlled(
+        publisher: VisualizationPublisher,
+        sample_rate: u32,
+        channels: u16,
+        samples_per_frame: usize,
+        control: VisualizationControl,
+    ) -> Result<Self, VisualizationFrameError> {
+        let mut tap = Self::new_with_hop_frames(
+            publisher,
+            sample_rate,
+            channels,
+            samples_per_frame,
+            control.hop_frames(),
+        )?;
+        tap.control = Some(control);
+        Ok(tap)
     }
 
     pub(crate) fn capture(
@@ -166,6 +187,10 @@ impl VisualizationTap {
         position_frames: u64,
         output_channels: usize,
     ) {
+        if self.control.as_ref().is_some_and(|control| !control.is_enabled()) {
+            self.pending_len = 0;
+            return;
+        }
         let channels = usize::from(self.channels);
         if output_channels != channels {
             self.pending_len = 0;
@@ -203,20 +228,83 @@ impl VisualizationTap {
                 .expect("visualization tap preserves validated frame shape");
                 let _ = self.publisher.try_publish(frame);
                 self.sequence = self.sequence.wrapping_add(1);
-                let retained = self.samples_per_frame - self.hop_samples;
+                let hop_samples = self
+                    .control
+                    .as_ref()
+                    .map(|control| {
+                        control
+                            .hop_frames()
+                            .saturating_mul(channels)
+                            .clamp(channels, self.samples_per_frame)
+                    })
+                    .unwrap_or(self.hop_samples);
+                let retained = self.samples_per_frame - hop_samples;
                 if retained > 0 {
-                    self.pending.copy_within(self.hop_samples..self.samples_per_frame, 0);
+                    self.pending.copy_within(hop_samples..self.samples_per_frame, 0);
                 }
                 self.pending_len = retained;
                 self.pending_position_frames = self
                     .pending_position_frames
-                    .saturating_add(u64::try_from(self.hop_samples / channels).unwrap_or(u64::MAX));
+                    .saturating_add(u64::try_from(hop_samples / channels).unwrap_or(u64::MAX));
             }
         }
     }
 
     pub(crate) fn dropped_frames(&self) -> u64 {
         self.publisher.dropped_frames()
+    }
+}
+
+/// Lock-free runtime gate shared with the audio callback's visualization tap.
+#[derive(Clone)]
+pub struct VisualizationControl {
+    enabled: Arc<AtomicBool>,
+    hop_frames: Arc<AtomicUsize>,
+    wake: Arc<(Mutex<()>, Condvar)>,
+}
+
+impl VisualizationControl {
+    pub fn new(enabled: bool, hop_frames: usize) -> Self {
+        assert!(hop_frames > 0, "visualization hop must be positive");
+        Self {
+            enabled: Arc::new(AtomicBool::new(enabled)),
+            hop_frames: Arc::new(AtomicUsize::new(hop_frames)),
+            wake: Arc::new((Mutex::new(()), Condvar::new())),
+        }
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.load(Ordering::Acquire)
+    }
+
+    pub fn set_enabled(&self, enabled: bool) {
+        self.enabled.store(enabled, Ordering::Release);
+        self.notify_workers();
+    }
+
+    pub fn hop_frames(&self) -> usize {
+        self.hop_frames.load(Ordering::Acquire).max(1)
+    }
+
+    pub fn set_hop_frames(&self, hop_frames: usize) {
+        self.hop_frames.store(hop_frames.max(1), Ordering::Release);
+    }
+
+    pub(crate) fn wait_while_disabled(&self, cancel: &AtomicBool, output_connected: &AtomicBool) {
+        if self.is_enabled() {
+            return;
+        }
+        let (lock, wake) = &*self.wake;
+        let guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _ = wake.wait_timeout_while(guard, Duration::from_millis(100), |_| {
+            !self.is_enabled()
+                && !cancel.load(Ordering::Acquire)
+                && output_connected.load(Ordering::Acquire)
+        });
+    }
+
+    pub(crate) fn notify_workers(&self) {
+        self.wake.1.notify_all();
     }
 }
 

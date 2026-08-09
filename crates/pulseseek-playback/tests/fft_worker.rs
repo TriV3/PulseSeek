@@ -4,7 +4,9 @@ use std::thread;
 use std::time::Duration;
 
 use pulseseek_domain::visualization::VisualizationFrame;
-use pulseseek_playback::{visualization_channel, FftAnalyzer, FftError, FftWorker, PublishResult};
+use pulseseek_playback::{
+    visualization_channel, FftAnalyzer, FftError, FftWorker, PublishResult, VisualizationControl,
+};
 
 const FFT_SIZE: usize = 1_024;
 const SAMPLE_RATE: u32 = 48_000;
@@ -158,4 +160,21 @@ fn dropping_spectrum_receiver_stops_an_idle_worker() {
     }
     waiter.join().unwrap();
     assert_eq!(stopped_without_more_input, Ok(Ok(())));
+}
+
+#[test]
+fn disabled_control_parks_fft_work_and_resumes_on_enable() {
+    let (mut publisher, subscriber) = visualization_channel(2);
+    let control = VisualizationControl::new(false, FFT_SIZE);
+    let (worker, spectra) =
+        FftWorker::start_controlled(subscriber, FFT_SIZE, 1, control.clone()).unwrap();
+
+    assert!(spectra.recv_timeout(Duration::from_millis(30)).is_err());
+
+    control.set_enabled(true);
+    assert_eq!(publisher.try_publish(signal_frame(2, 1, &[(30, 0.5)])), PublishResult::Published);
+    assert_eq!(spectra.recv_timeout(Duration::from_secs(1)).unwrap().sequence(), 2);
+
+    publisher.shutdown();
+    assert_eq!(worker.wait(), Ok(()));
 }

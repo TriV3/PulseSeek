@@ -41,7 +41,7 @@ fn fresh_migration_creates_working_meta_store() {
 
     assert_eq!(
         cache.status(),
-        CacheStatus::Healthy { schema_version: 4 },
+        CacheStatus::Healthy { schema_version: 5 },
         "fresh cache is healthy at the latest schema"
     );
 
@@ -60,12 +60,12 @@ fn fresh_migration_creates_working_meta_store() {
 fn repeat_migration_is_noop_and_does_not_backup() {
     let dir = tempfile::tempdir().unwrap();
     let first = start_cache(&dir);
-    assert_eq!(first.status(), CacheStatus::Healthy { schema_version: 4 });
+    assert_eq!(first.status(), CacheStatus::Healthy { schema_version: 5 });
     first.set_meta("k", b"v".to_vec()).expect("set");
     drop(first);
 
     let second = start_cache(&dir);
-    assert_eq!(second.status(), CacheStatus::Healthy { schema_version: 4 });
+    assert_eq!(second.status(), CacheStatus::Healthy { schema_version: 5 });
     assert_eq!(second.get_meta("k").expect("get"), Some(b"v".to_vec()));
     drop(second);
 
@@ -133,7 +133,7 @@ fn corrupt_database_recovers_and_reports_degraded() {
     assert_eq!(
         cache.status(),
         CacheStatus::Degraded {
-            schema_version: 4,
+            schema_version: 5,
             reason: "recovered from corrupt database".to_string()
         }
     );
@@ -146,7 +146,7 @@ fn corrupt_database_recovers_and_reports_degraded() {
 
     // Subsequent opens are healthy.
     let reopened = start_cache(&dir);
-    assert_eq!(reopened.status(), CacheStatus::Healthy { schema_version: 4 });
+    assert_eq!(reopened.status(), CacheStatus::Healthy { schema_version: 5 });
 }
 
 #[test]

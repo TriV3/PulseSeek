@@ -35,8 +35,8 @@ independent SQLite files described in ADR 0003.
   One transaction replaces the complete available shortcut profile. A
   case-insensitive unique chord constraint prevents conflicting mappings even if validation is
   bypassed. Reset stores the canonical defaults.
-- Remaining feature record tables (visualization settings) are
-  added by the PRs that own them through later migrations.
+- Schema version 5 (PR-086) adds the singleton `visualization_settings` record. It stores only the
+  built-in mode, enabled state, and quality policy; database checks reject unknown values.
 - `migrations(version, applied_at_ms)` records the applied schema version.
   Migrations run in a transaction and are idempotent on repeat startup.
 - The database is opened and migrated on `start`; every subsequent operation

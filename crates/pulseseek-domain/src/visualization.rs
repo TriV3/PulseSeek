@@ -1,6 +1,95 @@
 use std::error::Error;
 use std::fmt;
 
+/// Built-in visualization selected for the player workspace.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VisualizationMode {
+    Waveform,
+    Logarithmic,
+    Linear,
+    Musical,
+}
+
+impl VisualizationMode {
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Waveform => "waveform",
+            Self::Logarithmic => "logarithmic",
+            Self::Linear => "linear",
+            Self::Musical => "musical",
+        }
+    }
+
+    pub fn from_id(value: &str) -> Option<Self> {
+        match value {
+            "waveform" => Some(Self::Waveform),
+            "logarithmic" => Some(Self::Logarithmic),
+            "linear" => Some(Self::Linear),
+            "musical" => Some(Self::Musical),
+            _ => None,
+        }
+    }
+}
+
+/// Refresh-rate policy for optional real-time visualization work.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VisualizationQuality {
+    Low,
+    Balanced,
+    High,
+}
+
+impl VisualizationQuality {
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Balanced => "balanced",
+            Self::High => "high",
+        }
+    }
+
+    pub fn from_id(value: &str) -> Option<Self> {
+        match value {
+            "low" => Some(Self::Low),
+            "balanced" => Some(Self::Balanced),
+            "high" => Some(Self::High),
+            _ => None,
+        }
+    }
+
+    pub const fn target_fps(self) -> u32 {
+        match self {
+            Self::Low => 15,
+            Self::Balanced => 30,
+            Self::High => 60,
+        }
+    }
+}
+
+/// Persisted built-in visualization preferences, independent of adapters.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VisualizationSettings {
+    pub enabled: bool,
+    pub mode: VisualizationMode,
+    pub quality: VisualizationQuality,
+}
+
+impl VisualizationSettings {
+    pub const fn new(
+        enabled: bool,
+        mode: VisualizationMode,
+        quality: VisualizationQuality,
+    ) -> Self {
+        Self { enabled, mode, quality }
+    }
+}
+
+impl Default for VisualizationSettings {
+    fn default() -> Self {
+        Self::new(true, VisualizationMode::Waveform, VisualizationQuality::Balanced)
+    }
+}
+
 /// Maximum interleaved sample count carried by one callback-safe frame.
 pub const MAX_VISUALIZATION_FRAME_SAMPLES: usize = 8_192;
 

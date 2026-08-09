@@ -255,6 +255,11 @@ input {
   min-width: 0;
 }
 
+.visualization-motion-note {
+  color: var(--text-muted);
+  white-space: normal;
+}
+
 .transport-options p {
   display: none;
 }
@@ -327,6 +332,22 @@ input {
 
 .app-options-menu-content select {
   max-width: 150px;
+}
+
+.app-options-menu-content .visualization-settings-controls {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.visualization-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.visualization-settings-row input {
+  margin: 0;
 }
 
 .app-options-menu-content .shortcut-settings-button {

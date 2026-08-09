@@ -369,6 +369,9 @@ describe("shortcut integration", () => {
     const menuButton = screen.getByLabelText("Open application menu");
     expect(menuButton).toBeInTheDocument();
     expect(screen.queryByLabelText("Theme")).not.toBeVisible();
+    expect(
+      screen.queryByRole("checkbox", { name: "Real-time visualizations" }),
+    ).not.toBeVisible();
     expect(menuButton.closest("details")).toBe(
       document.querySelector(".transport-options")?.lastElementChild,
     );
@@ -377,6 +380,10 @@ describe("shortcut integration", () => {
 
     expect(screen.getByLabelText("Output device")).toBeVisible();
     expect(screen.getByLabelText("Theme")).toBeVisible();
+    expect(
+      screen.getByRole("checkbox", { name: "Real-time visualizations" }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Visualization quality")).toBeVisible();
     expect(
       screen.getByRole("button", { name: "Keyboard shortcuts" }),
     ).toBeVisible();

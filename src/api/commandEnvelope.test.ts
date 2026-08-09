@@ -9,6 +9,8 @@ import {
   loadShortcuts,
   resetShortcuts,
   saveShortcuts,
+  loadVisualizationSettings,
+  saveVisualizationSettings,
 } from "./commandEnvelope";
 import { DEFAULT_SHORTCUTS } from "../shortcuts/keyboardShortcuts";
 
@@ -153,6 +155,48 @@ describe("player preferences boundary", () => {
     await expect(loadPlayerPreferences()).rejects.toThrow(
       "Invalid player preferences response.",
     );
+  });
+});
+
+describe("visualization settings boundary", () => {
+  it("loads validated settings with the reduced-motion state", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      settings: { enabled: true, mode: "musical", quality: "high" },
+    });
+
+    await expect(loadVisualizationSettings(true)).resolves.toEqual({
+      enabled: true,
+      mode: "musical",
+      quality: "high",
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("load_visualization_settings", {
+      reducedMotion: true,
+    });
+  });
+
+  it("rejects unknown settings and saves only the supported contract", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      settings: { enabled: true, mode: "plugin", quality: "extreme" },
+    });
+    await expect(loadVisualizationSettings(false)).rejects.toThrow(
+      "Invalid visualization settings response.",
+    );
+
+    const settings = {
+      enabled: false,
+      mode: "linear" as const,
+      quality: "low" as const,
+    };
+    mockInvoke.mockResolvedValueOnce({ version: 1, settings });
+    await expect(saveVisualizationSettings(settings, false)).resolves.toEqual(
+      settings,
+    );
+    expect(mockInvoke).toHaveBeenCalledWith("save_visualization_settings", {
+      settings,
+      reducedMotion: false,
+    });
   });
 });
 

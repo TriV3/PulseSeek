@@ -11,7 +11,7 @@ use pulseseek_domain::visualization::{
 };
 use realfft::{RealFftPlanner, RealToComplex};
 
-use crate::VisualizationSubscriber;
+use crate::{VisualizationControl, VisualizationSubscriber};
 
 /// Stateful real-to-complex analyzer whose buffers are reused between frames.
 pub struct FftAnalyzer {
@@ -97,13 +97,32 @@ pub struct FftWorker {
     skipped_input: Arc<AtomicU64>,
     dropped_output: Arc<AtomicU64>,
     join: Option<JoinHandle<Result<(), FftError>>>,
+    control: Option<VisualizationControl>,
 }
 
 impl FftWorker {
     pub fn start(
+        subscriber: VisualizationSubscriber,
+        fft_size: usize,
+        output_capacity: usize,
+    ) -> Result<(Self, SpectrumReceiver), FftError> {
+        Self::start_inner(subscriber, fft_size, output_capacity, None)
+    }
+
+    pub fn start_controlled(
+        subscriber: VisualizationSubscriber,
+        fft_size: usize,
+        output_capacity: usize,
+        control: VisualizationControl,
+    ) -> Result<(Self, SpectrumReceiver), FftError> {
+        Self::start_inner(subscriber, fft_size, output_capacity, Some(control))
+    }
+
+    fn start_inner(
         mut subscriber: VisualizationSubscriber,
         fft_size: usize,
         output_capacity: usize,
+        control: Option<VisualizationControl>,
     ) -> Result<(Self, SpectrumReceiver), FftError> {
         let mut analyzer = FftAnalyzer::new(fft_size)?;
         if output_capacity == 0 {
@@ -118,6 +137,7 @@ impl FftWorker {
         let worker_output_connected = Arc::clone(&output_connected);
         let worker_skipped = Arc::clone(&skipped_input);
         let worker_dropped = Arc::clone(&dropped_output);
+        let worker_control = control.clone();
         let join = thread::Builder::new()
             .name("pulseseek-fft".to_string())
             .spawn(move || {
@@ -125,21 +145,33 @@ impl FftWorker {
                     &mut subscriber,
                     &mut analyzer,
                     &output_tx,
-                    &worker_cancel,
-                    &worker_output_connected,
-                    &worker_skipped,
-                    &worker_dropped,
+                    WorkerSignals {
+                        cancel: &worker_cancel,
+                        output_connected: &worker_output_connected,
+                        skipped_input: &worker_skipped,
+                        dropped_output: &worker_dropped,
+                        control: worker_control.as_ref(),
+                    },
                 )
             })
             .map_err(|_| FftError::WorkerStartFailed)?;
         Ok((
-            Self { cancel, skipped_input, dropped_output, join: Some(join) },
-            SpectrumReceiver { receiver: output_rx, connected: output_connected },
+            Self {
+                cancel,
+                skipped_input,
+                dropped_output,
+                join: Some(join),
+                control: control.clone(),
+            },
+            SpectrumReceiver { receiver: output_rx, connected: output_connected, control },
         ))
     }
 
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::Release);
+        if let Some(control) = &self.control {
+            control.notify_workers();
+        }
     }
 
     pub fn skipped_input_frames(&self) -> u64 {
@@ -162,27 +194,44 @@ impl FftWorker {
 impl Drop for FftWorker {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Release);
+        if let Some(control) = &self.control {
+            control.notify_workers();
+        }
         if let Some(join) = self.join.take() {
             let _ = join.join();
         }
     }
 }
 
+struct WorkerSignals<'a> {
+    cancel: &'a AtomicBool,
+    output_connected: &'a AtomicBool,
+    skipped_input: &'a AtomicU64,
+    dropped_output: &'a AtomicU64,
+    control: Option<&'a VisualizationControl>,
+}
+
 fn run_worker(
     subscriber: &mut VisualizationSubscriber,
     analyzer: &mut FftAnalyzer,
     output: &SyncSender<SpectrumFrame>,
-    cancel: &AtomicBool,
-    output_connected: &AtomicBool,
-    skipped_input: &AtomicU64,
-    dropped_output: &AtomicU64,
+    signals: WorkerSignals<'_>,
 ) -> Result<(), FftError> {
     loop {
-        if cancel.load(Ordering::Acquire) {
+        if signals.cancel.load(Ordering::Acquire) {
             return Err(FftError::Cancelled);
         }
-        if !output_connected.load(Ordering::Acquire) {
+        if !signals.output_connected.load(Ordering::Acquire) {
             return Ok(());
+        }
+        if let Some(control) = signals.control {
+            if !control.is_enabled() {
+                while subscriber.try_receive().is_some() {
+                    signals.skipped_input.fetch_add(1, Ordering::Relaxed);
+                }
+                control.wait_while_disabled(signals.cancel, signals.output_connected);
+                continue;
+            }
         }
         let Some(mut latest) = subscriber.try_receive() else {
             if subscriber.is_closed() {
@@ -193,16 +242,16 @@ fn run_worker(
         };
         while let Some(frame) = subscriber.try_receive() {
             latest = frame;
-            skipped_input.fetch_add(1, Ordering::Relaxed);
+            signals.skipped_input.fetch_add(1, Ordering::Relaxed);
         }
-        if cancel.load(Ordering::Acquire) {
+        if signals.cancel.load(Ordering::Acquire) {
             return Err(FftError::Cancelled);
         }
         let spectrum = analyzer.analyze(&latest)?;
         match output.try_send(spectrum) {
             Ok(()) => {},
             Err(TrySendError::Full(_)) => {
-                dropped_output.fetch_add(1, Ordering::Relaxed);
+                signals.dropped_output.fetch_add(1, Ordering::Relaxed);
             },
             Err(TrySendError::Disconnected(_)) => return Ok(()),
         }
@@ -212,6 +261,7 @@ fn run_worker(
 pub struct SpectrumReceiver {
     receiver: Receiver<SpectrumFrame>,
     connected: Arc<AtomicBool>,
+    control: Option<VisualizationControl>,
 }
 
 pub struct LatestSpectrum {
@@ -247,6 +297,9 @@ impl SpectrumReceiver {
 impl Drop for SpectrumReceiver {
     fn drop(&mut self) {
         self.connected.store(false, Ordering::Release);
+        if let Some(control) = &self.control {
+            control.notify_workers();
+        }
     }
 }
 
@@ -299,7 +352,7 @@ mod tests {
         sender.try_send(spectrum(2)).unwrap();
         sender.try_send(spectrum(3)).unwrap();
         let connected = Arc::new(AtomicBool::new(true));
-        let spectra = SpectrumReceiver { receiver, connected };
+        let spectra = SpectrumReceiver { receiver, connected, control: None };
 
         let latest = spectra.try_receive_latest().expect("latest spectrum");
 

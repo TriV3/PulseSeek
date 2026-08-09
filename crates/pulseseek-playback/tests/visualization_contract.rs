@@ -1,7 +1,9 @@
 use pulseseek_domain::decoder::{DecodeError, Decoder, ProbeResult, StreamMetadata};
 use pulseseek_domain::playback::position::{Position, SeekTarget};
 use pulseseek_domain::visualization::VisualizationFrame;
-use pulseseek_playback::{visualization_channel, PlaybackEngine, PublishResult, VisualizationTap};
+use pulseseek_playback::{
+    visualization_channel, PlaybackEngine, PublishResult, VisualizationControl, VisualizationTap,
+};
 
 fn frame(sequence: u64) -> VisualizationFrame {
     VisualizationFrame::new(sequence, sequence * 4, 48_000, 1, &[sequence as f32]).unwrap()
@@ -83,6 +85,42 @@ fn visualization_tap_ignores_output_with_a_different_channel_layout() {
     assert_eq!(written, 4);
     assert_eq!(output, [0.25, 0.25, 0.5, 0.5]);
     assert!(subscriber.try_receive().is_none());
+}
+
+#[test]
+fn disabled_visualization_control_stops_capture_and_resumes_without_restarting_playback() {
+    let (publisher, mut subscriber) = visualization_channel(2);
+    let control = VisualizationControl::new(true, 1);
+    let tap = VisualizationTap::new_controlled(publisher, 48_000, 1, 2, control.clone()).unwrap();
+    let (mut engine, mut consumer) = PlaybackEngine::new(Box::new(FixedDecoder::new()), 8);
+    consumer.set_visualization_tap(tap);
+    assert!(engine.process_chunk().unwrap());
+
+    control.set_enabled(false);
+    let mut output = [0.0; 2];
+    consumer.consume_channels_with_volume(&mut output, 1, 1, 1.0);
+    assert!(subscriber.try_receive().is_none());
+
+    control.set_enabled(true);
+    consumer.consume_channels_with_volume(&mut output, 1, 1, 1.0);
+    assert!(subscriber.try_receive().is_some());
+}
+
+#[test]
+fn controlled_tap_applies_quality_hop_changes_at_runtime() {
+    let (publisher, mut subscriber) = visualization_channel(4);
+    let control = VisualizationControl::new(true, 2);
+    let tap = VisualizationTap::new_controlled(publisher, 48_000, 1, 4, control.clone()).unwrap();
+    let (mut engine, mut consumer) = PlaybackEngine::new(Box::new(FixedDecoder::new()), 8);
+    consumer.set_visualization_tap(tap);
+    assert!(engine.process_chunk().unwrap());
+
+    let mut output = [0.0; 4];
+    consumer.consume_channels_with_volume(&mut output, 1, 1, 1.0);
+    assert_eq!(subscriber.try_receive().unwrap().position_frames(), 0);
+
+    control.set_hop_frames(1);
+    assert_eq!(control.hop_frames(), 1);
 }
 
 struct FixedDecoder {
