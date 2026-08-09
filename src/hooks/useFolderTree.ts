@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useReducer,
+  useRef,
+} from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   cancelEnumeration,
@@ -418,8 +424,9 @@ export function useFolderTree(showHiddenFolders = false): UseFolderTreeReturn {
   const showHiddenFoldersRef = useRef(showHiddenFolders);
   const pendingWatcherRefreshPathsRef = useRef(new Set<string>());
 
-  // Keep ref synchronised with latest state after each render.
-  useEffect(() => {
+  // Event handlers read these refs synchronously. Update them before the
+  // browser can dispatch an interaction for the newly committed UI.
+  useLayoutEffect(() => {
     stateRef.current = state;
     showHiddenFoldersRef.current = showHiddenFolders;
   });
