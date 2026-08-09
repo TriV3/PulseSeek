@@ -210,3 +210,159 @@ impl fmt::Display for SpectrumFrameError {
 }
 
 impl Error for SpectrumFrameError {}
+
+/// Energy associated with one equal-tempered musical pitch band.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MusicalBand {
+    note_number: i16,
+    lower_frequency_hz: f32,
+    center_frequency_hz: f32,
+    upper_frequency_hz: f32,
+    magnitude: f32,
+}
+
+impl MusicalBand {
+    pub fn new(
+        note_number: i16,
+        lower_frequency_hz: f32,
+        center_frequency_hz: f32,
+        upper_frequency_hz: f32,
+        magnitude: f32,
+    ) -> Result<Self, MusicalSpectrumFrameError> {
+        if !lower_frequency_hz.is_finite()
+            || !center_frequency_hz.is_finite()
+            || !upper_frequency_hz.is_finite()
+            || lower_frequency_hz <= 0.0
+            || lower_frequency_hz >= center_frequency_hz
+            || center_frequency_hz >= upper_frequency_hz
+        {
+            return Err(MusicalSpectrumFrameError::InvalidBandFrequencies);
+        }
+        if !magnitude.is_finite() || magnitude < 0.0 {
+            return Err(MusicalSpectrumFrameError::InvalidMagnitude);
+        }
+        Ok(Self {
+            note_number,
+            lower_frequency_hz,
+            center_frequency_hz,
+            upper_frequency_hz,
+            magnitude,
+        })
+    }
+
+    pub fn note_number(&self) -> i16 {
+        self.note_number
+    }
+
+    pub fn lower_frequency_hz(&self) -> f32 {
+        self.lower_frequency_hz
+    }
+
+    pub fn center_frequency_hz(&self) -> f32 {
+        self.center_frequency_hz
+    }
+
+    pub fn upper_frequency_hz(&self) -> f32 {
+        self.upper_frequency_hz
+    }
+
+    pub fn magnitude(&self) -> f32 {
+        self.magnitude
+    }
+}
+
+/// Immutable pitch-oriented spectrum derived from one FFT spectrum frame.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MusicalSpectrumFrame {
+    sequence: u64,
+    position_frames: u64,
+    sample_rate: u32,
+    tuning_reference_hz: f32,
+    bands: Box<[MusicalBand]>,
+}
+
+impl MusicalSpectrumFrame {
+    pub fn new(
+        sequence: u64,
+        position_frames: u64,
+        sample_rate: u32,
+        tuning_reference_hz: f32,
+        bands: Vec<MusicalBand>,
+    ) -> Result<Self, MusicalSpectrumFrameError> {
+        if sample_rate == 0 {
+            return Err(MusicalSpectrumFrameError::InvalidSampleRate);
+        }
+        if !tuning_reference_hz.is_finite() || tuning_reference_hz <= 0.0 {
+            return Err(MusicalSpectrumFrameError::InvalidTuningReference);
+        }
+        if bands.is_empty() {
+            return Err(MusicalSpectrumFrameError::EmptyBands);
+        }
+        if bands.windows(2).any(|pair| {
+            pair[0].note_number.checked_add(1) != Some(pair[1].note_number)
+                || (pair[0].upper_frequency_hz - pair[1].lower_frequency_hz).abs() > 0.01
+        }) {
+            return Err(MusicalSpectrumFrameError::NonContiguousBands);
+        }
+        Ok(Self {
+            sequence,
+            position_frames,
+            sample_rate,
+            tuning_reference_hz,
+            bands: bands.into_boxed_slice(),
+        })
+    }
+
+    pub fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    pub fn position_frames(&self) -> u64 {
+        self.position_frames
+    }
+
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    pub fn tuning_reference_hz(&self) -> f32 {
+        self.tuning_reference_hz
+    }
+
+    pub fn bands(&self) -> &[MusicalBand] {
+        &self.bands
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MusicalSpectrumFrameError {
+    InvalidSampleRate,
+    InvalidTuningReference,
+    EmptyBands,
+    InvalidBandFrequencies,
+    InvalidMagnitude,
+    NonContiguousBands,
+}
+
+impl fmt::Display for MusicalSpectrumFrameError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidSampleRate => formatter.write_str("sample rate must be greater than zero"),
+            Self::InvalidTuningReference => {
+                formatter.write_str("tuning reference must be finite and greater than zero")
+            },
+            Self::EmptyBands => formatter.write_str("musical spectrum must contain bands"),
+            Self::InvalidBandFrequencies => {
+                formatter.write_str("musical band frequencies must be finite and ordered")
+            },
+            Self::InvalidMagnitude => {
+                formatter.write_str("musical band magnitude must be finite and non-negative")
+            },
+            Self::NonContiguousBands => {
+                formatter.write_str("musical spectrum bands must be ordered and contiguous")
+            },
+        }
+    }
+}
+
+impl Error for MusicalSpectrumFrameError {}

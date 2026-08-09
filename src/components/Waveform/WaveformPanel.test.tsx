@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { WaveformPanel } from "./WaveformPanel";
 import { getWaveform } from "../../api/waveform";
 import {
+  onMusicalSpectrumFrame,
   onPosition,
   onSpectrumFrame,
   onWaveformReady,
@@ -11,6 +12,7 @@ import type { WaveformLevel } from "../../api/waveform";
 
 vi.mock("../../api/waveform", () => ({ getWaveform: vi.fn() }));
 vi.mock("../../api/playbackEvents", () => ({
+  onMusicalSpectrumFrame: vi.fn(),
   onPosition: vi.fn(),
   onSpectrumFrame: vi.fn(),
   onWaveformReady: vi.fn(),
@@ -49,6 +51,7 @@ beforeEach(() => {
   observerInstances = [];
   vi.mocked(getWaveform).mockReset().mockResolvedValue(LEVEL);
   vi.mocked(onPosition).mockResolvedValue(() => {});
+  vi.mocked(onMusicalSpectrumFrame).mockResolvedValue(() => {});
   vi.mocked(onSpectrumFrame).mockResolvedValue(() => {});
   vi.mocked(onWaveformReady).mockResolvedValue(() => {});
   window.ResizeObserver =
@@ -180,6 +183,32 @@ describe("WaveformPanel", () => {
       ),
     );
     expect(onSeek).toHaveBeenCalledWith(1500);
+    expect(getWaveform).not.toHaveBeenCalled();
+  });
+
+  it("shows the musical spectrum exclusively with the shared seek overlay", () => {
+    render(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2_000}
+        theme="dark"
+        visualization="musical"
+      />,
+    );
+
+    expect(
+      screen.getByRole("img", { name: "Musical spectrum" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("slider", { name: "Musical spectrum seek" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("img", { name: "Linear frequency analyzer" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("slider", { name: "Waveform seek" }),
+    ).not.toBeInTheDocument();
     expect(getWaveform).not.toHaveBeenCalled();
   });
 

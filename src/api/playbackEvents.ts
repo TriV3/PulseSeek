@@ -67,6 +67,23 @@ export interface SpectrumFramePayload {
   magnitudes: number[];
 }
 
+export interface MusicalBandPayload {
+  note_number: number;
+  lower_frequency_hz: number;
+  center_frequency_hz: number;
+  upper_frequency_hz: number;
+  magnitude: number;
+}
+
+export interface MusicalSpectrumFramePayload {
+  format_version: 1;
+  sequence: number;
+  position_frames: number;
+  sample_rate: number;
+  tuning_reference_hz: number;
+  bands: MusicalBandPayload[];
+}
+
 export interface MoveItemResultData {
   /** Source path of the file before the move. */
   path: string;
@@ -202,6 +219,51 @@ export function isSpectrumFramePayload(
   );
 }
 
+export function isMusicalSpectrumFramePayload(
+  value: unknown,
+): value is MusicalSpectrumFramePayload {
+  if (!isRecord(value)) return false;
+  if (
+    value.format_version !== 1 ||
+    !isNonNegativeSafeInteger(value.sequence) ||
+    !isNonNegativeSafeInteger(value.position_frames) ||
+    !isPositiveSafeInteger(value.sample_rate) ||
+    !isPositiveFiniteNumber(value.tuning_reference_hz) ||
+    !Array.isArray(value.bands) ||
+    value.bands.length === 0 ||
+    value.bands.length > 256 ||
+    !value.bands.every(isMusicalBandPayload)
+  ) {
+    return false;
+  }
+  return value.bands.every((band, index, bands) => {
+    if (band.center_frequency_hz >= Number(value.sample_rate) / 2) return false;
+    const previous = bands[index - 1];
+    if (!previous) return true;
+    const tolerance = Math.max(0.01, previous.upper_frequency_hz * 1e-5);
+    return (
+      band.note_number === previous.note_number + 1 &&
+      Math.abs(band.lower_frequency_hz - previous.upper_frequency_hz) <=
+        tolerance
+    );
+  });
+}
+
+function isMusicalBandPayload(value: unknown): value is MusicalBandPayload {
+  if (!isRecord(value)) return false;
+  return (
+    Number.isSafeInteger(value.note_number) &&
+    isPositiveFiniteNumber(value.lower_frequency_hz) &&
+    isPositiveFiniteNumber(value.center_frequency_hz) &&
+    isPositiveFiniteNumber(value.upper_frequency_hz) &&
+    Number(value.lower_frequency_hz) < Number(value.center_frequency_hz) &&
+    Number(value.center_frequency_hz) < Number(value.upper_frequency_hz) &&
+    typeof value.magnitude === "number" &&
+    Number.isFinite(value.magnitude) &&
+    value.magnitude >= 0
+  );
+}
+
 export function isFolderChunkPayload(
   value: unknown,
 ): value is FolderChunkPayload {
@@ -230,6 +292,10 @@ function isNonNegativeSafeInteger(value: unknown): value is number {
 
 function isPositiveSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) > 0;
+}
+
+function isPositiveFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 function isPowerOfTwo(value: number): boolean {
@@ -297,6 +363,7 @@ export const EVENT_FOLDER_CHUNK = "browser:folder-chunk";
 export const EVENT_FILE_CHANGE = "browser:file-change";
 export const EVENT_WAVEFORM_READY = "waveform:ready";
 export const EVENT_SPECTRUM_FRAME = "visualization:spectrum";
+export const EVENT_MUSICAL_SPECTRUM_FRAME = "visualization:musical-spectrum";
 export const EVENT_MOVE_PROGRESS = "browser:move-progress";
 export const EVENT_COPY_PROGRESS = "browser:copy-progress";
 
@@ -375,6 +442,40 @@ async function subscribeToSpectrumFrames(
   return () => {
     unlisten();
     void invoke("unsubscribe_spectrum_events");
+  };
+}
+
+/** Listens for validated pitch-band frames from the native analyzer. */
+export function onMusicalSpectrumFrame(
+  handler: (payload: MusicalSpectrumFramePayload) => void,
+): Promise<UnlistenFn> {
+  return subscribeToMusicalSpectrumFrames(handler);
+}
+
+async function subscribeToMusicalSpectrumFrames(
+  handler: (payload: MusicalSpectrumFramePayload) => void,
+): Promise<UnlistenFn> {
+  const unlisten = await listen<MusicalSpectrumFramePayload>(
+    EVENT_MUSICAL_SPECTRUM_FRAME,
+    (event) => {
+      try {
+        if (isMusicalSpectrumFramePayload(event.payload)) {
+          handler(event.payload);
+        }
+      } finally {
+        void invoke("acknowledge_musical_spectrum_frame");
+      }
+    },
+  );
+  try {
+    await invoke("subscribe_musical_spectrum_events");
+  } catch (error) {
+    unlisten();
+    throw error;
+  }
+  return () => {
+    unlisten();
+    void invoke("unsubscribe_musical_spectrum_events");
   };
 }
 

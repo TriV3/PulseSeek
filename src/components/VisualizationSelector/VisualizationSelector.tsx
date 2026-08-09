@@ -1,4 +1,5 @@
-export type VisualizationMode = "waveform" | "logarithmic" | "linear";
+export type VisualizationMode =
+  "waveform" | "logarithmic" | "linear" | "musical";
 
 interface VisualizationSelectorProps {
   value: VisualizationMode;
@@ -12,6 +13,7 @@ const VISUALIZATIONS: Array<{
   { value: "waveform", label: "Waveform" },
   { value: "logarithmic", label: "Log analyzer" },
   { value: "linear", label: "Linear analyzer" },
+  { value: "musical", label: "Musical spectrum" },
 ];
 
 export function VisualizationSelector({

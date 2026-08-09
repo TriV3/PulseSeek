@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const SPECTRUM_FORMAT_VERSION: u32 = 1;
+pub const MUSICAL_SPECTRUM_FORMAT_VERSION: u32 = 1;
 
 /// Payload for [`EVENT_STATE_CHANGED`](super::EVENT_STATE_CHANGED).
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -82,6 +83,27 @@ pub struct SpectrumFramePayload {
     pub sample_rate: u32,
     pub fft_size: usize,
     pub magnitudes: Vec<f32>,
+}
+
+/// One equal-tempered pitch band sent to the musical spectrum renderer.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MusicalBandPayload {
+    pub note_number: i16,
+    pub lower_frequency_hz: f32,
+    pub center_frequency_hz: f32,
+    pub upper_frequency_hz: f32,
+    pub magnitude: f32,
+}
+
+/// Versioned pitch-oriented spectrum derived outside the audio callback.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MusicalSpectrumFramePayload {
+    pub format_version: u32,
+    pub sequence: u64,
+    pub position_frames: u64,
+    pub sample_rate: u32,
+    pub tuning_reference_hz: f32,
+    pub bands: Vec<MusicalBandPayload>,
 }
 /// One file's outcome in a move batch, reported through
 /// [`EVENT_MOVE_PROGRESS`](super::EVENT_MOVE_PROGRESS). Successful and failed

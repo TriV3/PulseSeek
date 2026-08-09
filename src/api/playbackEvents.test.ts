@@ -7,10 +7,12 @@ import {
   isFolderChunkPayload,
   isMoveItemResultData,
   isMoveProgressPayload,
+  isMusicalSpectrumFramePayload,
   isSpectrumFramePayload,
   isWaveformReadyPayload,
   onCopyProgress,
   onMoveProgress,
+  onMusicalSpectrumFrame,
   onSpectrumFrame,
   onWaveformReady,
 } from "./playbackEvents";
@@ -209,6 +211,89 @@ describe("spectrum frame events", () => {
     unlisten();
 
     expect(invoke).toHaveBeenCalledWith("unsubscribe_spectrum_events");
+  });
+});
+
+const validMusicalSpectrumPayload = {
+  format_version: 1,
+  sequence: 8,
+  position_frames: 4_096,
+  sample_rate: 48_000,
+  tuning_reference_hz: 440,
+  bands: [
+    {
+      note_number: 68,
+      lower_frequency_hz: 403.48,
+      center_frequency_hz: 415.3,
+      upper_frequency_hz: 427.47,
+      magnitude: 0.2,
+    },
+    {
+      note_number: 69,
+      lower_frequency_hz: 427.47,
+      center_frequency_hz: 440,
+      upper_frequency_hz: 452.89,
+      magnitude: 0.8,
+    },
+  ],
+};
+
+describe("musical spectrum frame events", () => {
+  it("accepts only finite, ordered, versioned musical bands", () => {
+    expect(isMusicalSpectrumFramePayload(validMusicalSpectrumPayload)).toBe(
+      true,
+    );
+    expect(
+      isMusicalSpectrumFramePayload({
+        ...validMusicalSpectrumPayload,
+        format_version: 2,
+      }),
+    ).toBe(false);
+    expect(
+      isMusicalSpectrumFramePayload({
+        ...validMusicalSpectrumPayload,
+        tuning_reference_hz: Number.NaN,
+      }),
+    ).toBe(false);
+    expect(
+      isMusicalSpectrumFramePayload({
+        ...validMusicalSpectrumPayload,
+        bands: validMusicalSpectrumPayload.bands.map((band) => ({
+          ...band,
+          magnitude: -1,
+        })),
+      }),
+    ).toBe(false);
+    expect(
+      isMusicalSpectrumFramePayload({
+        ...validMusicalSpectrumPayload,
+        bands: [...validMusicalSpectrumPayload.bands].reverse(),
+      }),
+    ).toBe(false);
+  });
+
+  it("delivers and acknowledges only valid musical spectrum payloads", async () => {
+    const handler = vi.fn();
+    await onMusicalSpectrumFrame(handler);
+    const emit = eventHandlers.get("visualization:musical-spectrum");
+
+    emit?.({ payload: validMusicalSpectrumPayload });
+    emit?.({
+      payload: { ...validMusicalSpectrumPayload, tuning_reference_hz: 0 },
+    });
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledWith(validMusicalSpectrumPayload);
+    expect(invoke).toHaveBeenCalledWith("subscribe_musical_spectrum_events");
+    expect(invoke).toHaveBeenCalledWith("acknowledge_musical_spectrum_frame");
+  });
+
+  it("unsubscribes the native musical stream with its listener", async () => {
+    const unlisten = await onMusicalSpectrumFrame(vi.fn());
+
+    unlisten();
+
+    expect(invoke).toHaveBeenCalledWith("unsubscribe_musical_spectrum_events");
   });
 });
 

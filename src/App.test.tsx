@@ -252,6 +252,18 @@ describe("application shell", () => {
     expect(
       screen.getByRole("slider", { name: "Linear analyzer seek" }),
     ).toBeInTheDocument();
+
+    fireEvent.change(selector, { target: { value: "musical" } });
+
+    expect(
+      screen.getByRole("img", { name: "Musical spectrum" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("img", { name: "Linear frequency analyzer" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("slider", { name: "Musical spectrum seek" }),
+    ).toBeInTheDocument();
   });
 });
 

@@ -5,6 +5,7 @@ mod engine;
 mod error;
 mod event;
 mod fft;
+mod musical_spectrum;
 mod visualization;
 mod worker;
 
@@ -13,6 +14,7 @@ pub use engine::*;
 pub use error::*;
 pub use event::*;
 pub use fft::*;
+pub use musical_spectrum::*;
 pub use visualization::*;
 pub use worker::*;
 

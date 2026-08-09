@@ -20,5 +20,12 @@ describe("VisualizationSelector", () => {
     expect(screen.getByRole("option", { name: "Linear analyzer" })).toHaveValue(
       "linear",
     );
+
+    fireEvent.change(selector, { target: { value: "musical" } });
+
+    expect(onChange).toHaveBeenCalledWith("musical");
+    expect(
+      screen.getByRole("option", { name: "Musical spectrum" }),
+    ).toHaveValue("musical");
   });
 });

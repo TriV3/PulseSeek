@@ -7,14 +7,20 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use pulseseek_domain::visualization::{
-    SpectrumFrame, VisualizationFrameError, MAX_VISUALIZATION_FRAME_SAMPLES,
+    MusicalSpectrumFrame, SpectrumFrame, VisualizationFrameError, MAX_VISUALIZATION_FRAME_SAMPLES,
 };
 use pulseseek_playback::{
-    visualization_channel, FftError, FftWorker, SpectrumReceiver, VisualizationTap,
+    visualization_channel, FftError, FftWorker, MusicalSpectrumAnalyzer, SpectrumReceiver,
+    VisualizationTap, DEFAULT_TUNING_REFERENCE_HZ,
 };
 
-use crate::playback_events::types::{SpectrumFramePayload, SPECTRUM_FORMAT_VERSION};
-use crate::playback_events::{PlaybackEventEmitter, EVENT_SPECTRUM_FRAME};
+use crate::playback_events::types::{
+    MusicalBandPayload, MusicalSpectrumFramePayload, SpectrumFramePayload,
+    MUSICAL_SPECTRUM_FORMAT_VERSION, SPECTRUM_FORMAT_VERSION,
+};
+use crate::playback_events::{
+    PlaybackEventEmitter, EVENT_MUSICAL_SPECTRUM_FRAME, EVENT_SPECTRUM_FRAME,
+};
 
 const INPUT_CAPACITY: usize = 4;
 const OUTPUT_CAPACITY: usize = 2;
@@ -97,6 +103,8 @@ fn report_spectra(
     stop: Arc<AtomicBool>,
     events: Arc<dyn PlaybackEventEmitter>,
 ) {
+    let musical_analyzer = MusicalSpectrumAnalyzer::new(DEFAULT_TUNING_REFERENCE_HZ)
+        .expect("the built-in tuning reference is valid");
     while !stop.load(Ordering::Acquire) {
         let mut frame = match spectra.recv_timeout(REPORTER_POLL_INTERVAL) {
             Ok(frame) => frame,
@@ -106,17 +114,51 @@ fn report_spectra(
         if let Some(latest) = spectra.try_receive_latest() {
             frame = latest.frame;
         }
-        if !events.try_begin_spectrum_delivery() {
-            continue;
+        if events.try_begin_spectrum_delivery() {
+            let payload = spectrum_payload(&frame);
+            let Ok(value) = serde_json::to_value(payload) else {
+                events.acknowledge_spectrum();
+                continue;
+            };
+            if events.emit(EVENT_SPECTRUM_FRAME, value).is_err() {
+                events.acknowledge_spectrum();
+            }
         }
-        let payload = spectrum_payload(&frame);
-        let Ok(value) = serde_json::to_value(payload) else {
-            events.acknowledge_spectrum();
-            continue;
-        };
-        if events.emit(EVENT_SPECTRUM_FRAME, value).is_err() {
-            events.acknowledge_spectrum();
+        if events.try_begin_musical_spectrum_delivery() {
+            let Ok(musical_frame) = musical_analyzer.analyze(&frame) else {
+                events.acknowledge_musical_spectrum();
+                continue;
+            };
+            let payload = musical_spectrum_payload(&musical_frame);
+            let Ok(value) = serde_json::to_value(payload) else {
+                events.acknowledge_musical_spectrum();
+                continue;
+            };
+            if events.emit(EVENT_MUSICAL_SPECTRUM_FRAME, value).is_err() {
+                events.acknowledge_musical_spectrum();
+            }
         }
+    }
+}
+
+fn musical_spectrum_payload(frame: &MusicalSpectrumFrame) -> MusicalSpectrumFramePayload {
+    MusicalSpectrumFramePayload {
+        format_version: MUSICAL_SPECTRUM_FORMAT_VERSION,
+        sequence: frame.sequence(),
+        position_frames: frame.position_frames(),
+        sample_rate: frame.sample_rate(),
+        tuning_reference_hz: frame.tuning_reference_hz(),
+        bands: frame
+            .bands()
+            .iter()
+            .map(|band| MusicalBandPayload {
+                note_number: band.note_number(),
+                lower_frequency_hz: band.lower_frequency_hz(),
+                center_frequency_hz: band.center_frequency_hz(),
+                upper_frequency_hz: band.upper_frequency_hz(),
+                magnitude: band.magnitude(),
+            })
+            .collect(),
     }
 }
 
@@ -177,6 +219,26 @@ mod tests {
         assert_eq!(payload.sample_rate, 48_000);
         assert_eq!(payload.fft_size, 8);
         assert_eq!(payload.magnitudes, frame.magnitudes());
+    }
+
+    #[test]
+    fn musical_payload_preserves_analysis_metadata_and_bands() {
+        let frame = SpectrumFrame::new(9, 4_096, 48_000, 8, vec![0.0, 0.1, 0.8, 0.2, 0.0])
+            .expect("valid spectrum");
+        let musical = MusicalSpectrumAnalyzer::new(DEFAULT_TUNING_REFERENCE_HZ)
+            .unwrap()
+            .analyze(&frame)
+            .unwrap();
+
+        let payload = musical_spectrum_payload(&musical);
+
+        assert_eq!(payload.format_version, 1);
+        assert_eq!(payload.sequence, 9);
+        assert_eq!(payload.position_frames, 4_096);
+        assert_eq!(payload.sample_rate, 48_000);
+        assert_eq!(payload.tuning_reference_hz, 440.0);
+        assert_eq!(payload.bands.len(), musical.bands().len());
+        assert_eq!(payload.bands[0].note_number, musical.bands()[0].note_number());
     }
 
     #[test]
