@@ -13,5 +13,12 @@ describe("VisualizationSelector", () => {
     fireEvent.change(selector, { target: { value: "logarithmic" } });
 
     expect(onChange).toHaveBeenCalledWith("logarithmic");
+
+    fireEvent.change(selector, { target: { value: "linear" } });
+
+    expect(onChange).toHaveBeenCalledWith("linear");
+    expect(screen.getByRole("option", { name: "Linear analyzer" })).toHaveValue(
+      "linear",
+    );
   });
 });

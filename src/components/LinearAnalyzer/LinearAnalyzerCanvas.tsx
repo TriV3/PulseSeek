@@ -6,13 +6,13 @@ import {
 import type { ResolvedTheme } from "../../hooks/useTheme";
 import { WaveformCanvas } from "../Waveform/WaveformCanvas";
 import {
-  drawLogAnalyzer,
-  type AnalyzerCanvas2D,
-  type AnalyzerTokens,
-} from "./logAnalyzerRenderer";
-import "./LogAnalyzerCanvas.css";
+  drawLinearAnalyzer,
+  type LinearAnalyzerCanvas2D,
+  type LinearAnalyzerTokens,
+} from "./linearAnalyzerRenderer";
+import "./LinearAnalyzerCanvas.css";
 
-export interface LogAnalyzerCanvasProps {
+export interface LinearAnalyzerCanvasProps {
   enabled: boolean;
   theme: ResolvedTheme;
   durationMs?: number | null;
@@ -21,14 +21,14 @@ export interface LogAnalyzerCanvasProps {
   onSeek?: (positionMs: number) => void | Promise<void>;
 }
 
-export function LogAnalyzerCanvas({
+export function LinearAnalyzerCanvas({
   enabled,
   theme,
   durationMs = null,
   restoredPositionMs = 0,
   resetRevision = 0,
   onSeek,
-}: LogAnalyzerCanvasProps) {
+}: LinearAnalyzerCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const frameRef = useRef<SpectrumFramePayload | null>(null);
   const widthRef = useRef(0);
@@ -40,9 +40,9 @@ export function LogAnalyzerCanvas({
     if (!canvas || widthRef.current <= 0 || heightRef.current <= 0) return;
     const context = canvas.getContext(
       "2d",
-    ) as unknown as AnalyzerCanvas2D | null;
+    ) as unknown as LinearAnalyzerCanvas2D | null;
     if (!context) return;
-    drawLogAnalyzer(
+    drawLinearAnalyzer(
       context,
       frameRef.current,
       widthRef.current,
@@ -75,9 +75,8 @@ export function LogAnalyzerCanvas({
     void onSpectrumFrame((payload) => {
       if (disposed) return;
       frameRef.current = payload;
-      // WKWebView may defer animation frames while pointer events are being
-      // tracked. Spectrum events are already bounded upstream, so paint the
-      // accepted frame immediately instead of letting the graph freeze.
+      // Do not depend on requestAnimationFrame here: WKWebView can defer it
+      // during pointer tracking, which makes the analyzer appear frozen.
       draw();
     })
       .then((cleanup) => {
@@ -134,13 +133,13 @@ export function LogAnalyzerCanvas({
   );
 
   const label = enabled
-    ? "Logarithmic frequency analyzer"
-    : "Logarithmic frequency analyzer disabled";
+    ? "Linear frequency analyzer"
+    : "Linear frequency analyzer disabled";
   return (
-    <div className="log-analyzer" data-enabled={enabled}>
+    <div className="linear-analyzer" data-enabled={enabled}>
       <canvas
         ref={canvasRef}
-        className="log-analyzer-canvas"
+        className="linear-analyzer-canvas"
         role="img"
         aria-label={label}
       />
@@ -151,17 +150,17 @@ export function LogAnalyzerCanvas({
           restoredPositionMs={restoredPositionMs}
           resetRevision={resetRevision}
           onSeek={onSeek}
-          ariaLabel="Log analyzer seek"
+          ariaLabel="Linear analyzer seek"
         />
       )}
       {!enabled && (
-        <span className="log-analyzer-disabled">Analyzer disabled</span>
+        <span className="linear-analyzer-disabled">Analyzer disabled</span>
       )}
     </div>
   );
 }
 
-function analyzerTokens(element: Element): AnalyzerTokens {
+function analyzerTokens(element: Element): LinearAnalyzerTokens {
   const style = getComputedStyle(element);
   const token = (name: string) => style.getPropertyValue(name).trim();
   return {

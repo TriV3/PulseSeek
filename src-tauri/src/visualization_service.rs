@@ -19,6 +19,7 @@ use crate::playback_events::{PlaybackEventEmitter, EVENT_SPECTRUM_FRAME};
 const INPUT_CAPACITY: usize = 4;
 const OUTPUT_CAPACITY: usize = 2;
 const REPORTER_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const TARGET_SPECTRUM_FPS: u32 = 30;
 
 /// Owns the off-callback FFT and event reporter threads for one playback stream.
 pub(crate) struct VisualizationPipeline {
@@ -41,8 +42,15 @@ impl VisualizationPipeline {
             .checked_mul(channels)
             .ok_or(VisualizationPipelineError::UnsupportedChannels(channels))?;
         let (publisher, subscriber) = visualization_channel(INPUT_CAPACITY);
-        let tap = VisualizationTap::new(publisher, sample_rate, channel_count, sample_count)
-            .map_err(VisualizationPipelineError::InvalidTap)?;
+        let hop_frames = spectrum_hop_frames(sample_rate, fft_size);
+        let tap = VisualizationTap::new_with_hop_frames(
+            publisher,
+            sample_rate,
+            channel_count,
+            sample_count,
+            hop_frames,
+        )
+        .map_err(VisualizationPipelineError::InvalidTap)?;
         let (fft_worker, spectra) = FftWorker::start(subscriber, fft_size, OUTPUT_CAPACITY)
             .map_err(VisualizationPipelineError::Fft)?;
         let stop = Arc::new(AtomicBool::new(false));
@@ -80,6 +88,10 @@ fn fft_size_for_channels(channels: usize) -> Option<usize> {
     Some(1_usize << available_frames.ilog2())
 }
 
+fn spectrum_hop_frames(sample_rate: u32, fft_size: usize) -> usize {
+    usize::try_from(sample_rate / TARGET_SPECTRUM_FPS).unwrap_or(fft_size).clamp(1, fft_size)
+}
+
 fn report_spectra(
     spectra: SpectrumReceiver,
     stop: Arc<AtomicBool>,
@@ -94,11 +106,17 @@ fn report_spectra(
         if let Some(latest) = spectra.try_receive_latest() {
             frame = latest.frame;
         }
+        if !events.try_begin_spectrum_delivery() {
+            continue;
+        }
         let payload = spectrum_payload(&frame);
         let Ok(value) = serde_json::to_value(payload) else {
+            events.acknowledge_spectrum();
             continue;
         };
-        let _ = events.emit(EVENT_SPECTRUM_FRAME, value);
+        if events.emit(EVENT_SPECTRUM_FRAME, value).is_err() {
+            events.acknowledge_spectrum();
+        }
     }
 }
 
@@ -183,5 +201,11 @@ mod tests {
     #[test]
     fn stereo_pipeline_uses_enough_bins_for_low_frequency_detail() {
         assert_eq!(fft_size_for_channels(2), Some(4_096));
+    }
+
+    #[test]
+    fn spectrum_hop_targets_thirty_updates_per_second() {
+        assert_eq!(spectrum_hop_frames(48_000, 4_096), 1_600);
+        assert_eq!(spectrum_hop_frames(44_100, 4_096), 1_470);
     }
 }

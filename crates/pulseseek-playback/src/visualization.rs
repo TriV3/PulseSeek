@@ -101,6 +101,7 @@ pub struct VisualizationTap {
     sample_rate: u32,
     channels: u16,
     samples_per_frame: usize,
+    hop_samples: usize,
     pending_position_frames: u64,
     pending_len: usize,
     pending: [f32; MAX_VISUALIZATION_FRAME_SAMPLES],
@@ -114,12 +115,44 @@ impl VisualizationTap {
         channels: u16,
         samples_per_frame: usize,
     ) -> Result<Self, VisualizationFrameError> {
+        let channels_usize = usize::from(channels);
+        let hop_frames = samples_per_frame / channels_usize.max(1);
+        Self::new_with_hop_frames(publisher, sample_rate, channels, samples_per_frame, hop_frames)
+    }
+
+    /// Creates a fixed-storage tap that publishes overlapping full windows.
+    ///
+    /// `hop_frames` controls how many audio frames advance between windows;
+    /// all copies remain bounded and allocation-free in the audio callback.
+    pub fn new_with_hop_frames(
+        publisher: VisualizationPublisher,
+        sample_rate: u32,
+        channels: u16,
+        samples_per_frame: usize,
+        hop_frames: usize,
+    ) -> Result<Self, VisualizationFrameError> {
         VisualizationFrame::validate_layout(sample_rate, channels, samples_per_frame)?;
+        if hop_frames == 0 {
+            return Err(VisualizationFrameError::EmptyFrame);
+        }
+        let hop_samples = hop_frames.checked_mul(usize::from(channels)).ok_or(
+            VisualizationFrameError::FrameTooLarge {
+                sample_count: usize::MAX,
+                maximum: samples_per_frame,
+            },
+        )?;
+        if hop_samples > samples_per_frame {
+            return Err(VisualizationFrameError::FrameTooLarge {
+                sample_count: hop_samples,
+                maximum: samples_per_frame,
+            });
+        }
         Ok(Self {
             publisher,
             sample_rate,
             channels,
             samples_per_frame,
+            hop_samples,
             pending_position_frames: 0,
             pending_len: 0,
             pending: [0.0; MAX_VISUALIZATION_FRAME_SAMPLES],
@@ -137,6 +170,14 @@ impl VisualizationTap {
         if output_channels != channels {
             self.pending_len = 0;
             return;
+        }
+        if self.pending_len > 0 {
+            let expected_position = self
+                .pending_position_frames
+                .saturating_add(u64::try_from(self.pending_len / channels).unwrap_or(u64::MAX));
+            if position_frames != expected_position {
+                self.pending_len = 0;
+            }
         }
         let mut consumed = 0;
         while consumed < samples.len() {
@@ -162,7 +203,14 @@ impl VisualizationTap {
                 .expect("visualization tap preserves validated frame shape");
                 let _ = self.publisher.try_publish(frame);
                 self.sequence = self.sequence.wrapping_add(1);
-                self.pending_len = 0;
+                let retained = self.samples_per_frame - self.hop_samples;
+                if retained > 0 {
+                    self.pending.copy_within(self.hop_samples..self.samples_per_frame, 0);
+                }
+                self.pending_len = retained;
+                self.pending_position_frames = self
+                    .pending_position_frames
+                    .saturating_add(u64::try_from(self.hop_samples / channels).unwrap_or(u64::MAX));
             }
         }
     }
@@ -199,5 +247,34 @@ mod tests {
         let frame = subscriber.try_receive().unwrap();
         assert_eq!(frame.position_frames(), 2);
         assert_eq!(frame.samples(), &[0.3, 0.4]);
+    }
+
+    #[test]
+    fn overlapping_capture_publishes_full_windows_at_the_configured_hop() {
+        let (publisher, mut subscriber) = visualization_channel(4);
+        let mut tap = VisualizationTap::new_with_hop_frames(publisher, 48_000, 1, 8, 2).unwrap();
+
+        tap.capture(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], 0, 1);
+
+        let first = subscriber.try_receive().expect("first full FFT window");
+        let second = subscriber.try_receive().expect("overlapping FFT window");
+        assert_eq!(first.position_frames(), 0);
+        assert_eq!(first.samples(), &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]);
+        assert_eq!(second.position_frames(), 2);
+        assert_eq!(second.samples(), &[2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+    }
+
+    #[test]
+    fn overlapping_capture_keeps_hops_aligned_to_stereo_frames() {
+        let (publisher, mut subscriber) = visualization_channel(3);
+        let mut tap = VisualizationTap::new_with_hop_frames(publisher, 48_000, 2, 8, 2).unwrap();
+
+        tap.capture(&[0.0, 0.1, 1.0, 1.1, 2.0, 2.1, 3.0, 3.1, 4.0, 4.1, 5.0, 5.1], 10, 2);
+
+        let first = subscriber.try_receive().expect("first stereo window");
+        let second = subscriber.try_receive().expect("second stereo window");
+        assert_eq!(first.position_frames(), 10);
+        assert_eq!(second.position_frames(), 12);
+        assert_eq!(second.samples(), &[2.0, 2.1, 3.0, 3.1, 4.0, 4.1, 5.0, 5.1]);
     }
 }

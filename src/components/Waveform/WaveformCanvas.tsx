@@ -32,6 +32,7 @@ export interface WaveformCanvasProps {
 const REFETCH_DEBOUNCE_MS = 200;
 const DEFAULT_SEEK_STEP_MS = 5_000;
 const TIME_LABEL_HALF_WIDTH_PX = 24;
+const POINTER_UPDATE_INTERVAL_MS = 1_000 / 60;
 
 function timeLabelX(markerX: number, width: number): number {
   if (width <= TIME_LABEL_HALF_WIDTH_PX * 2) return width / 2;
@@ -41,13 +42,17 @@ function timeLabelX(markerX: number, width: number): number {
   );
 }
 
+function setSeekX(element: HTMLElement, positionPx: number): void {
+  element.style.setProperty("--seek-x", `${positionPx}px`);
+}
+
 /**
  * Canvas 2D waveform renderer with an imperative playhead.
  *
  * Playback position is consumed directly from the throttled position event
- * stream and drawn through `requestAnimationFrame`; it is never stored in
- * React state, so the high-frequency position updates do not re-render the
- * component. Resize re-requests a resolution level that fits the new width.
+ * stream and is never stored in React state, so high-frequency position
+ * updates do not re-render the component. Resize re-requests a resolution
+ * level that fits the new width.
  */
 export function WaveformCanvas({
   waveform,
@@ -72,14 +77,14 @@ export function WaveformCanvas({
   const widthRef = useRef(0);
   const heightRef = useRef(0);
   const drawRafRef = useRef<number | null>(null);
-  const playheadRafRef = useRef<number | null>(null);
-  const hoverRafRef = useRef<number | null>(null);
-  const hoverClientXRef = useRef<number | null>(null);
   const interactionRectRef = useRef<DOMRect | null>(null);
   const geometryRef = useRef<CachedGeometry | null>(null);
   const refetchTimer = useRef<number | null>(null);
   const draggingRef = useRef(false);
   const dragTargetRef = useRef<number | null>(null);
+  const pendingPointerXRef = useRef<number | null>(null);
+  const pointerTimerRef = useRef<number | null>(null);
+  const lastPointerUpdateAtRef = useRef(Number.NEGATIVE_INFINITY);
 
   const propsRef = useRef({
     waveform,
@@ -147,11 +152,14 @@ export function WaveformCanvas({
       return;
     }
     currentTime.hidden = false;
-    currentTime.textContent = formatWaveformTime(positionMs);
-    currentTime.style.left = `${timeLabelX(playheadX, width)}px`;
+    const formattedPosition = formatWaveformTime(positionMs);
+    if (currentTime.textContent !== formattedPosition) {
+      currentTime.textContent = formattedPosition;
+    }
+    setSeekX(currentTime, timeLabelX(playheadX, width));
     if (currentMarker) {
       currentMarker.hidden = false;
-      currentMarker.style.left = `${playheadX}px`;
+      setSeekX(currentMarker, playheadX);
     }
   }, []);
 
@@ -201,29 +209,21 @@ export function WaveformCanvas({
     });
   }, [draw]);
 
-  const schedulePlayhead = useCallback(() => {
-    if (playheadRafRef.current !== null) return;
-    playheadRafRef.current = window.requestAnimationFrame(() => {
-      playheadRafRef.current = null;
-      renderPlayhead();
-    });
-  }, [renderPlayhead]);
-
   const commitSeek = useCallback(
     (targetMs: number) => {
       positionRef.current = targetMs;
-      schedulePlayhead();
+      renderPlayhead();
       propsRef.current.onSeek?.(targetMs);
     },
-    [schedulePlayhead],
+    [renderPlayhead],
   );
 
   const previewSeek = useCallback(
     (targetMs: number) => {
       positionRef.current = targetMs;
-      schedulePlayhead();
+      renderPlayhead();
     },
-    [schedulePlayhead],
+    [renderPlayhead],
   );
 
   const targetFromPointer = useCallback((clientX: number): number | null => {
@@ -262,23 +262,69 @@ export function WaveformCanvas({
     const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
     marker.hidden = false;
     label.hidden = false;
-    marker.style.left = `${x}px`;
-    label.style.left = `${timeLabelX(x, rect.width)}px`;
-    label.textContent = formatWaveformTime(target);
+    setSeekX(marker, x);
+    setSeekX(label, timeLabelX(x, rect.width));
+    const formattedTarget = formatWaveformTime(target);
+    if (label.textContent !== formattedTarget) {
+      label.textContent = formattedTarget;
+    }
   }, []);
 
-  const scheduleHover = useCallback(
+  const updatePointer = useCallback(
     (clientX: number) => {
-      hoverClientXRef.current = clientX;
-      if (hoverRafRef.current !== null) return;
-      hoverRafRef.current = window.requestAnimationFrame(() => {
-        hoverRafRef.current = null;
-        const nextX = hoverClientXRef.current;
-        if (nextX !== null) updateHover(nextX);
-      });
+      updateHover(clientX);
+      if (!draggingRef.current) return;
+      const target = targetFromPointer(clientX);
+      if (target === null) return;
+      dragTargetRef.current = target;
+      previewSeek(target);
     },
-    [updateHover],
+    [previewSeek, targetFromPointer, updateHover],
   );
+
+  const schedulePointerUpdate = useCallback(
+    (clientX: number) => {
+      pendingPointerXRef.current = clientX;
+      const now = performance.now();
+      const elapsed = now - lastPointerUpdateAtRef.current;
+
+      if (
+        pointerTimerRef.current === null &&
+        elapsed >= POINTER_UPDATE_INTERVAL_MS
+      ) {
+        pendingPointerXRef.current = null;
+        lastPointerUpdateAtRef.current = now;
+        updatePointer(clientX);
+        return;
+      }
+
+      if (pointerTimerRef.current !== null) return;
+      pointerTimerRef.current = window.setTimeout(
+        () => {
+          pointerTimerRef.current = null;
+          const latestClientX = pendingPointerXRef.current;
+          pendingPointerXRef.current = null;
+          if (latestClientX === null) return;
+          lastPointerUpdateAtRef.current = performance.now();
+          updatePointer(latestClientX);
+        },
+        Math.max(0, POINTER_UPDATE_INTERVAL_MS - elapsed),
+      );
+    },
+    [updatePointer],
+  );
+
+  const flushPointerUpdate = useCallback(() => {
+    if (pointerTimerRef.current !== null) {
+      window.clearTimeout(pointerTimerRef.current);
+      pointerTimerRef.current = null;
+    }
+    const latestClientX = pendingPointerXRef.current;
+    pendingPointerXRef.current = null;
+    if (latestClientX === null) return;
+    lastPointerUpdateAtRef.current = performance.now();
+    updatePointer(latestClientX);
+  }, [updatePointer]);
 
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -301,18 +347,22 @@ export function WaveformCanvas({
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
-      scheduleHover(event.clientX);
-      if (!draggingRef.current) return;
-      const target = targetFromPointer(event.clientX);
-      if (target === null) return;
-      dragTargetRef.current = target;
-      previewSeek(target);
+      // Slow movement remains immediate. During a fast pointer stream, keep
+      // only the latest coordinate and update at most once per display frame.
+      // A timer is used instead of requestAnimationFrame because WKWebView can
+      // defer animation frames while it is dispatching pointer events.
+      schedulePointerUpdate(event.clientX);
     },
-    [previewSeek, scheduleHover, targetFromPointer],
+    [schedulePointerUpdate],
   );
 
   const handlePointerLeave = useCallback(() => {
     if (draggingRef.current) return;
+    pendingPointerXRef.current = null;
+    if (pointerTimerRef.current !== null) {
+      window.clearTimeout(pointerTimerRef.current);
+      pointerTimerRef.current = null;
+    }
     if (hoverMarkerRef.current) hoverMarkerRef.current.hidden = true;
     if (hoverTimeRef.current) hoverTimeRef.current.hidden = true;
   }, []);
@@ -320,6 +370,9 @@ export function WaveformCanvas({
   const finishPointerInteraction = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>, shouldCommit: boolean) => {
       if (!draggingRef.current) return;
+      // Pointer-up can arrive before the 60 Hz timer. Apply the latest queued
+      // coordinate first so the committed seek never trails behind the cursor.
+      flushPointerUpdate();
       draggingRef.current = false;
       const target = dragTargetRef.current;
       dragTargetRef.current = null;
@@ -330,7 +383,7 @@ export function WaveformCanvas({
       }
       if (shouldCommit && target !== null) commitSeek(target);
     },
-    [commitSeek],
+    [commitSeek, flushPointerUpdate],
   );
 
   const handleKeyDown = useCallback(
@@ -416,7 +469,9 @@ export function WaveformCanvas({
       if (payload.duration_ms !== null) {
         durationRef.current = payload.duration_ms;
       }
-      schedulePlayhead();
+      // Keep the progress bar independent from WebKit's animation-frame
+      // scheduling during pointer tracking.
+      renderPlayhead();
     })
       .then((cleanup) => {
         if (disposed) cleanup();
@@ -429,7 +484,7 @@ export function WaveformCanvas({
       disposed = true;
       unlisten?.();
     };
-  }, [schedulePlayhead]);
+  }, [renderPlayhead]);
 
   // Measure the canvas and request a fitting resolution level on resize.
   useEffect(() => {
@@ -484,10 +539,13 @@ export function WaveformCanvas({
   // make every later `scheduleDraw` skip, permanently freezing the playhead.
   useEffect(() => {
     return () => {
-      for (const frame of [drawRafRef, playheadRafRef, hoverRafRef]) {
-        if (frame.current !== null) window.cancelAnimationFrame(frame.current);
-        frame.current = null;
-      }
+      if (drawRafRef.current !== null)
+        window.cancelAnimationFrame(drawRafRef.current);
+      drawRafRef.current = null;
+      if (pointerTimerRef.current !== null)
+        window.clearTimeout(pointerTimerRef.current);
+      pointerTimerRef.current = null;
+      pendingPointerXRef.current = null;
     };
   }, []);
 

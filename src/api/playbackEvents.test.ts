@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
 import {
   isCopyItemResultData,
   isCopyProgressPayload,
@@ -24,6 +25,10 @@ vi.mock("@tauri-apps/api/event", () => ({
       eventHandlers.delete(event);
     };
   }),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(async () => undefined),
 }));
 
 describe("folder chunk payload validation", () => {
@@ -194,6 +199,16 @@ describe("spectrum frame events", () => {
 
     expect(handler).toHaveBeenCalledOnce();
     expect(handler).toHaveBeenCalledWith(validSpectrumPayload);
+    expect(invoke).toHaveBeenCalledWith("subscribe_spectrum_events");
+    expect(invoke).toHaveBeenCalledWith("acknowledge_spectrum_frame");
+  });
+
+  it("unsubscribes the native stream when its listener is removed", async () => {
+    const unlisten = await onSpectrumFrame(vi.fn());
+
+    unlisten();
+
+    expect(invoke).toHaveBeenCalledWith("unsubscribe_spectrum_events");
   });
 });
 

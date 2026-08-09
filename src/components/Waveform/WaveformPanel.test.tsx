@@ -135,6 +135,54 @@ describe("WaveformPanel", () => {
     expect(getWaveform).not.toHaveBeenCalled();
   });
 
+  it("shows the linear analyzer with the same seek overlay instead of the waveform", async () => {
+    const onSeek = vi.fn();
+    render(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+        theme="high-contrast"
+        visualization="linear"
+        onSeek={onSeek}
+      />,
+    );
+
+    expect(
+      screen.getByRole("img", { name: "Linear frequency analyzer" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("img", { name: "Logarithmic frequency analyzer" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("slider", { name: "Waveform seek" }),
+    ).not.toBeInTheDocument();
+    const analyzerSeek = screen.getByRole("slider", {
+      name: "Linear analyzer seek",
+    });
+    vi.spyOn(analyzerSeek, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 100,
+      bottom: 40,
+      width: 100,
+      height: 40,
+      toJSON: () => ({}),
+    } as DOMRect);
+    fireEvent.pointerMove(analyzerSeek, { clientX: 25, pointerId: 1 });
+    fireEvent.pointerDown(analyzerSeek, { clientX: 75, pointerId: 1 });
+    fireEvent.pointerUp(analyzerSeek, { pointerId: 1 });
+    await waitFor(() =>
+      expect(screen.getByTestId("waveform-hover-marker")).toHaveStyle(
+        "--seek-x: 25px",
+      ),
+    );
+    expect(onSeek).toHaveBeenCalledWith(1500);
+    expect(getWaveform).not.toHaveBeenCalled();
+  });
+
   it("shows the selected file's actual audio metadata", () => {
     render(
       <WaveformPanel

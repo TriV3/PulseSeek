@@ -22,6 +22,9 @@ const confirmDialogCss = readCss(
 const logAnalyzerCss = readCss(
   "../components/LogAnalyzer/LogAnalyzerCanvas.css",
 );
+const linearAnalyzerCss = readCss(
+  "../components/LinearAnalyzer/LinearAnalyzerCanvas.css",
+);
 
 // Vite rewrites `new URL(<literal>, import.meta.url)` into an http:// dev
 // URL, so resolve through a variable to keep a file: URL for readdirSync.
@@ -105,7 +108,11 @@ const featureStyles = [
   playerTransportCss,
   confirmDialogCss,
   logAnalyzerCss,
+  linearAnalyzerCss,
 ];
+
+/** Component-local properties written imperatively at runtime, not theme tokens. */
+const runtimeProperties = new Set(["seek-x"]);
 
 const rawColorPattern =
   /(?:#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|\bcolor\(|transparent)/;
@@ -131,6 +138,19 @@ function referencedTokens(css: string): Set<string> {
 }
 
 describe("semantic design tokens", () => {
+  it("moves seek overlays through compositor transforms instead of layout", () => {
+    expect(appCss).toMatch(
+      /\.waveform-current-marker\s*\{[^}]*transform:\s*translate3d/s,
+    );
+    expect(appCss).toMatch(
+      /\.waveform-hover-marker\s*\{[^}]*transform:\s*translate3d/s,
+    );
+    expect(appCss).toMatch(
+      /\.waveform-time\s*\{[^}]*transform:\s*translate3d/s,
+    );
+    expect(appCss).not.toMatch(/transition:\s*left/);
+  });
+
   it.each(themeFiles)(
     "$name distinguishes current and hover seek indicators",
     ({ css }) => {
@@ -182,7 +202,9 @@ describe("semantic design tokens", () => {
         referenced.add(token);
       }
     }
-    const dangling = [...referenced].filter((token) => !defined.has(token));
+    const dangling = [...referenced].filter(
+      (token) => !defined.has(token) && !runtimeProperties.has(token),
+    );
     expect(dangling).toEqual([]);
   });
 
