@@ -198,6 +198,67 @@ export async function savePlayerPreferences(
   return preferencesFromResponse(response);
 }
 
+// ── Visualization settings ──────────────────────────────────────────
+
+export type VisualizationMode =
+  "waveform" | "logarithmic" | "linear" | "musical";
+export type VisualizationQuality = "low" | "balanced" | "high";
+
+export interface VisualizationSettings {
+  enabled: boolean;
+  mode: VisualizationMode;
+  quality: VisualizationQuality;
+}
+
+interface VisualizationSettingsResponse {
+  version: number;
+  settings: VisualizationSettings;
+}
+
+function isVisualizationSettings(
+  value: unknown,
+): value is VisualizationSettings {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.enabled === "boolean" &&
+    ["waveform", "logarithmic", "linear", "musical"].includes(
+      String(candidate.mode),
+    ) &&
+    ["low", "balanced", "high"].includes(String(candidate.quality))
+  );
+}
+
+function visualizationSettingsFromResponse(
+  response: VisualizationSettingsResponse,
+): VisualizationSettings {
+  if (!isVisualizationSettings(response?.settings)) {
+    throw new Error("Invalid visualization settings response.");
+  }
+  return response.settings;
+}
+
+export async function loadVisualizationSettings(
+  reducedMotion: boolean,
+): Promise<VisualizationSettings> {
+  const response = await invoke<VisualizationSettingsResponse>(
+    "load_visualization_settings",
+    { reducedMotion },
+  );
+  return visualizationSettingsFromResponse(response);
+}
+
+export async function saveVisualizationSettings(
+  settings: VisualizationSettings,
+  reducedMotion: boolean,
+): Promise<VisualizationSettings> {
+  const response = await invoke<VisualizationSettingsResponse>(
+    "save_visualization_settings",
+    { settings, reducedMotion },
+  );
+  return visualizationSettingsFromResponse(response);
+}
+
 export type SelectDeviceResponse = Record<string, never>;
 
 // ── Typed invoke wrapper ──────────────────────────────────────────────

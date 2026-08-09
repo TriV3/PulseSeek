@@ -9,6 +9,7 @@ use pulseseek_domain::decoder::StreamMetadata;
 use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContext, ErrorCategory};
 use pulseseek_domain::playback::mode::PlaybackMode;
 use pulseseek_domain::playback::position::Position;
+use pulseseek_domain::visualization::{VisualizationMode, VisualizationSettings};
 use pulseseek_playback::{PlaybackControl, PlaybackWorker};
 
 use crate::playback_events::{NoopEventEmitter, PlaybackEventEmitter, EVENT_COMPLETED};
@@ -27,6 +28,7 @@ pub struct NativePlaybackService {
     output_sample_rate: Option<u32>,
     position_reporter: Option<PositionReporter>,
     visualization: Option<VisualizationPipeline>,
+    visualization_settings: VisualizationSettings,
 }
 
 struct PositionReporter {
@@ -108,6 +110,7 @@ impl NativePlaybackService {
             output_sample_rate: None,
             position_reporter: None,
             visualization: None,
+            visualization_settings: VisualizationSettings::default(),
         }
     }
 
@@ -199,9 +202,10 @@ impl PlaybackService for NativePlaybackService {
             return Err(Self::unavailable(&format!("failed to set playback mode: {mode_result}")));
         }
 
-        let visualization = match VisualizationPipeline::start(
+        let visualization = match VisualizationPipeline::start_with_settings(
             output_sample_rate,
             channels,
+            self.visualization_settings,
             Arc::clone(&self.events),
         ) {
             Ok((pipeline, tap)) => {
@@ -334,6 +338,18 @@ impl PlaybackService for NativePlaybackService {
         Ok(())
     }
 
+    fn set_visualization_settings(
+        &mut self,
+        mut settings: VisualizationSettings,
+    ) -> Result<(), ApplicationError> {
+        settings.enabled = settings.enabled && settings.mode != VisualizationMode::Waveform;
+        self.visualization_settings = settings;
+        if let Some(pipeline) = &self.visualization {
+            pipeline.configure(settings.enabled, settings.quality);
+        }
+        Ok(())
+    }
+
     fn set_mode(&mut self, mode: PlaybackMode) -> Result<PlaybackMode, ApplicationError> {
         if let Some(ref worker) = self.worker {
             if let Err(error) = worker.set_mode(mode) {
@@ -439,6 +455,15 @@ mod tests {
     fn output_frames_are_converted_to_wall_clock_milliseconds() {
         assert_eq!(frames_to_millis(48_000, 48_000), 1_000);
         assert_eq!(frames_to_millis(44_100, 44_100), 1_000);
+    }
+
+    #[test]
+    fn waveform_settings_never_enable_native_fft_work() {
+        let mut service = service();
+
+        service.set_visualization_settings(VisualizationSettings::default()).unwrap();
+
+        assert!(!service.visualization_settings.enabled);
     }
 
     #[test]

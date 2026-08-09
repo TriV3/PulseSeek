@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContext, ErrorCategory};
 use pulseseek_domain::playback::mode::PlaybackMode;
+use pulseseek_domain::visualization::VisualizationSettings;
 
 use crate::playback_events::PlaybackEventEmitter;
 
@@ -33,6 +34,14 @@ pub trait PlaybackService: Send {
 
     /// Changes end-of-file playback mode.
     fn set_mode(&mut self, mode: PlaybackMode) -> Result<PlaybackMode, ApplicationError>;
+
+    /// Applies optional visualization work without restarting playback.
+    fn set_visualization_settings(
+        &mut self,
+        _settings: VisualizationSettings,
+    ) -> Result<(), ApplicationError> {
+        Ok(())
+    }
 
     /// Reconciles the tracked current path after an external rename.
     ///
@@ -81,6 +90,7 @@ pub struct FakePlaybackService {
     /// When set, seek returns this position.
     pub seek_result: Option<u64>,
     pub mode: PlaybackMode,
+    pub visualization_settings: VisualizationSettings,
 }
 
 impl FakePlaybackService {
@@ -105,6 +115,7 @@ impl FakePlaybackService {
             fail_with: None,
             seek_result: None,
             mode: PlaybackMode::OneShot,
+            visualization_settings: VisualizationSettings::default(),
         }
     }
 
@@ -160,6 +171,14 @@ impl PlaybackService for FakePlaybackService {
         self.check_fail()?;
         self.mode = mode;
         Ok(self.mode)
+    }
+
+    fn set_visualization_settings(
+        &mut self,
+        settings: VisualizationSettings,
+    ) -> Result<(), ApplicationError> {
+        self.visualization_settings = settings;
+        self.check_fail()
     }
 
     fn reconcile_path(&mut self, old_path: &str, new_path: &str) -> Result<bool, ApplicationError> {

@@ -17,10 +17,10 @@ fn mapping(action: ShortcutAction, key: &str, primary: bool) -> ShortcutMapping 
 }
 
 #[test]
-fn fresh_schema_is_v4_and_reset_loads_complete_defaults() {
+fn latest_schema_keeps_shortcut_defaults_available() {
     let dir = tempfile::tempdir().unwrap();
     let cache = TechnicalCache::start(cache_path(&dir)).expect("start cache");
-    assert_eq!(CACHE_SCHEMA_VERSION, 4);
+    assert_eq!(CACHE_SCHEMA_VERSION, 5);
 
     cache.reset_shortcut_mappings(Platform::Linux).expect("reset defaults");
     assert_eq!(cache.load_shortcut_mappings().expect("load defaults"), default_shortcut_mappings());
@@ -110,7 +110,7 @@ fn database_unique_chord_constraint_defends_direct_writes() {
 }
 
 #[test]
-fn v3_upgrades_to_v4_without_losing_existing_data() {
+fn v3_upgrades_to_latest_without_losing_existing_data() {
     let dir = tempfile::tempdir().unwrap();
     let path = cache_path(&dir);
     open_or_recover(&path, &CACHE_MIGRATIONS[..3])
@@ -123,7 +123,7 @@ fn v3_upgrades_to_v4_without_losing_existing_data() {
         .expect("seed v3 data");
 
     let mut upgraded = open_or_recover(&path, &CACHE_MIGRATIONS).expect("upgrade to v4");
-    assert_eq!(upgraded.schema_version(), 4);
+    assert_eq!(upgraded.schema_version(), 5);
     let recent_count: i64 = upgraded
         .connection()
         .query_row("SELECT COUNT(*) FROM recent_folders", [], |row| row.get(0))

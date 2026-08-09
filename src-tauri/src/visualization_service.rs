@@ -7,11 +7,12 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use pulseseek_domain::visualization::{
-    MusicalSpectrumFrame, SpectrumFrame, VisualizationFrameError, MAX_VISUALIZATION_FRAME_SAMPLES,
+    MusicalSpectrumFrame, SpectrumFrame, VisualizationFrameError, VisualizationMode,
+    VisualizationQuality, VisualizationSettings, MAX_VISUALIZATION_FRAME_SAMPLES,
 };
 use pulseseek_playback::{
     visualization_channel, FftError, FftWorker, MusicalSpectrumAnalyzer, SpectrumReceiver,
-    VisualizationTap, DEFAULT_TUNING_REFERENCE_HZ,
+    VisualizationControl, VisualizationTap, DEFAULT_TUNING_REFERENCE_HZ,
 };
 
 use crate::playback_events::types::{
@@ -25,19 +26,22 @@ use crate::playback_events::{
 const INPUT_CAPACITY: usize = 4;
 const OUTPUT_CAPACITY: usize = 2;
 const REPORTER_POLL_INTERVAL: Duration = Duration::from_millis(20);
-const TARGET_SPECTRUM_FPS: u32 = 30;
 
 /// Owns the off-callback FFT and event reporter threads for one playback stream.
 pub(crate) struct VisualizationPipeline {
     stop: Arc<AtomicBool>,
     reporter: Option<JoinHandle<()>>,
     fft_worker: Option<FftWorker>,
+    control: VisualizationControl,
+    sample_rate: u32,
+    fft_size: usize,
 }
 
 impl VisualizationPipeline {
-    pub(crate) fn start(
+    pub(crate) fn start_with_settings(
         sample_rate: u32,
         channels: usize,
+        settings: VisualizationSettings,
         events: Arc<dyn PlaybackEventEmitter>,
     ) -> Result<(Self, VisualizationTap), VisualizationPipelineError> {
         let fft_size = fft_size_for_channels(channels)
@@ -48,24 +52,48 @@ impl VisualizationPipeline {
             .checked_mul(channels)
             .ok_or(VisualizationPipelineError::UnsupportedChannels(channels))?;
         let (publisher, subscriber) = visualization_channel(INPUT_CAPACITY);
-        let hop_frames = spectrum_hop_frames(sample_rate, fft_size);
-        let tap = VisualizationTap::new_with_hop_frames(
+        let hop_frames = spectrum_hop_frames(sample_rate, fft_size, settings.quality.target_fps());
+        let control = VisualizationControl::new(
+            settings.enabled && settings.mode != VisualizationMode::Waveform,
+            hop_frames,
+        );
+        let tap = VisualizationTap::new_controlled(
             publisher,
             sample_rate,
             channel_count,
             sample_count,
-            hop_frames,
+            control.clone(),
         )
         .map_err(VisualizationPipelineError::InvalidTap)?;
-        let (fft_worker, spectra) = FftWorker::start(subscriber, fft_size, OUTPUT_CAPACITY)
-            .map_err(VisualizationPipelineError::Fft)?;
+        let (fft_worker, spectra) =
+            FftWorker::start_controlled(subscriber, fft_size, OUTPUT_CAPACITY, control.clone())
+                .map_err(VisualizationPipelineError::Fft)?;
         let stop = Arc::new(AtomicBool::new(false));
         let reporter_stop = Arc::clone(&stop);
         let reporter = thread::Builder::new()
             .name("pulseseek-spectrum-events".to_string())
             .spawn(move || report_spectra(spectra, reporter_stop, events))
             .map_err(|_| VisualizationPipelineError::ReporterStartFailed)?;
-        Ok((Self { stop, reporter: Some(reporter), fft_worker: Some(fft_worker) }, tap))
+        Ok((
+            Self {
+                stop,
+                reporter: Some(reporter),
+                fft_worker: Some(fft_worker),
+                control,
+                sample_rate,
+                fft_size,
+            },
+            tap,
+        ))
+    }
+
+    pub(crate) fn configure(&self, enabled: bool, quality: VisualizationQuality) {
+        self.control.set_hop_frames(spectrum_hop_frames(
+            self.sample_rate,
+            self.fft_size,
+            quality.target_fps(),
+        ));
+        self.control.set_enabled(enabled);
     }
 
     fn stop(&mut self) {
@@ -94,8 +122,8 @@ fn fft_size_for_channels(channels: usize) -> Option<usize> {
     Some(1_usize << available_frames.ilog2())
 }
 
-fn spectrum_hop_frames(sample_rate: u32, fft_size: usize) -> usize {
-    usize::try_from(sample_rate / TARGET_SPECTRUM_FPS).unwrap_or(fft_size).clamp(1, fft_size)
+fn spectrum_hop_frames(sample_rate: u32, fft_size: usize, target_fps: u32) -> usize {
+    usize::try_from(sample_rate / target_fps.max(1)).unwrap_or(fft_size).clamp(1, fft_size)
 }
 
 fn report_spectra(
@@ -245,17 +273,41 @@ mod tests {
     fn pipeline_starts_and_stops_for_stereo_output() {
         let events = Arc::new(FakeEventEmitter::new());
 
-        let (pipeline, _tap) =
-            VisualizationPipeline::start(48_000, 2, events).expect("stereo visualization pipeline");
+        let (pipeline, _tap) = VisualizationPipeline::start_with_settings(
+            48_000,
+            2,
+            VisualizationSettings::default(),
+            events,
+        )
+        .expect("stereo visualization pipeline");
 
         drop(pipeline);
+    }
+
+    #[test]
+    fn waveform_default_keeps_fft_input_inactive_before_frontend_settings_load() {
+        let events = Arc::new(FakeEventEmitter::new());
+        let (pipeline, _tap) = VisualizationPipeline::start_with_settings(
+            48_000,
+            2,
+            VisualizationSettings::default(),
+            events,
+        )
+        .expect("stereo visualization pipeline");
+
+        assert!(!pipeline.control.is_enabled());
     }
 
     #[test]
     fn pipeline_rejects_channel_layout_larger_than_fixed_frame_storage() {
         let events = Arc::new(FakeEventEmitter::new());
 
-        let result = VisualizationPipeline::start(48_000, 8_193, events);
+        let result = VisualizationPipeline::start_with_settings(
+            48_000,
+            8_193,
+            VisualizationSettings::default(),
+            events,
+        );
 
         assert!(matches!(result, Err(VisualizationPipelineError::UnsupportedChannels(8_193))));
     }
@@ -267,7 +319,9 @@ mod tests {
 
     #[test]
     fn spectrum_hop_targets_thirty_updates_per_second() {
-        assert_eq!(spectrum_hop_frames(48_000, 4_096), 1_600);
-        assert_eq!(spectrum_hop_frames(44_100, 4_096), 1_470);
+        assert_eq!(spectrum_hop_frames(48_000, 4_096, 30), 1_600);
+        assert_eq!(spectrum_hop_frames(44_100, 4_096, 30), 1_470);
+        assert_eq!(spectrum_hop_frames(48_000, 4_096, 15), 3_200);
+        assert_eq!(spectrum_hop_frames(48_000, 4_096, 60), 800);
     }
 }

@@ -60,6 +60,7 @@ pub enum DiagnosticCode {
     PlaybackControl,
     FileOperation,
     ShortcutPreferences,
+    VisualizationPreferences,
 }
 
 impl DiagnosticCode {
@@ -70,6 +71,7 @@ impl DiagnosticCode {
             Self::PlaybackControl => "playback.control",
             Self::FileOperation => "file.operation",
             Self::ShortcutPreferences => "shortcut.preferences",
+            Self::VisualizationPreferences => "visualization.preferences",
         }
     }
 }

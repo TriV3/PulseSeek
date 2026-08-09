@@ -45,8 +45,9 @@ import { WaveformStyleSelector } from "./components/WaveformStyleSelector/Wavefo
 import { WaveformPanel } from "./components/Waveform/WaveformPanel";
 import {
   VisualizationSelector,
-  type VisualizationMode,
+  VisualizationSettingsControls,
 } from "./components/VisualizationSelector/VisualizationSelector";
+import { useVisualizationSettings } from "./hooks/useVisualizationSettings";
 import "./styles/tokens.css";
 import "./styles/themes/light.css";
 import "./styles/themes/dark.css";
@@ -70,13 +71,12 @@ function App() {
   >("browser");
   const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
   const [focusSearchRevision, setFocusSearchRevision] = useState(0);
-  const [visualization, setVisualization] =
-    useState<VisualizationMode>("waveform");
   const [folderPickerError, setFolderPickerError] = useState<string | null>(
     null,
   );
   const sessionMarks = useSessionMarks();
   const playerPreferences = usePlayerPreferences();
+  const visualizationSettings = useVisualizationSettings();
   const folderTree = useFolderTree(
     playerPreferences.preferences.show_hidden_folders,
   );
@@ -503,7 +503,7 @@ function App() {
           onSeek={seekAndRemember}
           style={playerPreferences.preferences.waveform_style}
           theme={resolvedTheme}
-          visualization={visualization}
+          visualization={visualizationSettings.effectiveMode}
         />
         <div
           className="splitter splitter--horizontal"
@@ -588,16 +588,19 @@ function App() {
                   }}
                 />
                 <VisualizationSelector
-                  value={visualization}
-                  onChange={setVisualization}
+                  value={visualizationSettings.settings.mode}
+                  onChange={(mode) => visualizationSettings.update({ mode })}
                 />
-                {visualization === "waveform" && (
+                {visualizationSettings.effectiveMode === "waveform" && (
                   <WaveformStyleSelector
                     style={playerPreferences.preferences.waveform_style}
                     onChange={(waveform_style) => {
                       playerPreferences.update({ waveform_style });
                     }}
                   />
+                )}
+                {visualizationSettings.error && (
+                  <span role="alert">{visualizationSettings.error}</span>
                 )}
                 {shortcutMappings.isLoading && (
                   <span role="status">Loading shortcuts…</span>
@@ -629,6 +632,17 @@ function App() {
                     onChange={(theme) => {
                       playerPreferences.update({ theme });
                     }}
+                  />
+                  <VisualizationSettingsControls
+                    enabled={visualizationSettings.settings.enabled}
+                    quality={visualizationSettings.settings.quality}
+                    reducedMotion={visualizationSettings.reducedMotion}
+                    onEnabledChange={(enabled) =>
+                      visualizationSettings.update({ enabled })
+                    }
+                    onQualityChange={(quality) =>
+                      visualizationSettings.update({ quality })
+                    }
                   />
                   <div className="browser-hidden-option">
                     <label htmlFor="show-hidden-folders">

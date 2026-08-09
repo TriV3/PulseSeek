@@ -16,13 +16,18 @@ use crate::shortcut_mappings::{
     ShortcutMappingsCachePort, ShortcutMappingsError,
 };
 use crate::sqlite::{now_ms, open_or_recover, Migration, OpenedDatabase, SqliteError};
+use crate::visualization_settings::{
+    load_visualization_settings_db, save_visualization_settings_db, VisualizationSettingsCachePort,
+    VisualizationSettingsError,
+};
 use crate::waveform_cache::{
     delete_waveform_db, encode, load_waveform_db, store_waveform_db, WaveformCacheError,
     WaveformCachePort, WaveformIdentity,
 };
+use pulseseek_domain::visualization::VisualizationSettings;
 
 /// Schema version of the technical cache database.
-pub const CACHE_SCHEMA_VERSION: u32 = 4;
+pub const CACHE_SCHEMA_VERSION: u32 = 5;
 
 /// Migrations for `app-cache.sqlite`.
 ///
@@ -31,7 +36,7 @@ pub const CACHE_SCHEMA_VERSION: u32 = 4;
 /// them. Version 2 adds the waveform cache owned by PR-063. Version 3 adds
 /// the recent-folder history owned by PR-074. Version 4 adds configurable
 /// shortcut mappings owned by PR-080.
-pub const CACHE_MIGRATIONS: [Migration; 4] = [
+pub const CACHE_MIGRATIONS: [Migration; 5] = [
     Migration {
         version: 1,
         sql: "CREATE TABLE cache_meta (\
@@ -65,6 +70,14 @@ pub const CACHE_MIGRATIONS: [Migration; 4] = [
               shift_modifier INTEGER NOT NULL CHECK (shift_modifier IN (0, 1)), \
               alt_modifier INTEGER NOT NULL CHECK (alt_modifier IN (0, 1)), \
               UNIQUE (key, primary_modifier, shift_modifier, alt_modifier));",
+    },
+    Migration {
+        version: 5,
+        sql: "CREATE TABLE visualization_settings (\
+              singleton INTEGER PRIMARY KEY CHECK (singleton = 1), \
+              enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)), \
+              mode TEXT NOT NULL CHECK (mode IN ('waveform', 'logarithmic', 'linear', 'musical')), \
+              quality TEXT NOT NULL CHECK (quality IN ('low', 'balanced', 'high')));",
     },
 ];
 
@@ -181,6 +194,13 @@ enum WorkerCommand {
     ResetShortcutMappings {
         platform: Platform,
         reply: SyncSender<Result<(), ShortcutMappingsError>>,
+    },
+    LoadVisualizationSettings {
+        reply: SyncSender<Result<Option<VisualizationSettings>, VisualizationSettingsError>>,
+    },
+    SaveVisualizationSettings {
+        settings: VisualizationSettings,
+        reply: SyncSender<Result<(), VisualizationSettingsError>>,
     },
 }
 
@@ -360,6 +380,29 @@ impl ShortcutMappingsCachePort for TechnicalCache {
     }
 }
 
+impl VisualizationSettingsCachePort for TechnicalCache {
+    fn load_visualization_settings(
+        &self,
+    ) -> Result<Option<VisualizationSettings>, VisualizationSettingsError> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::LoadVisualizationSettings { reply: reply_tx })
+            .map_err(|_| VisualizationSettingsError::WorkerStopped)?;
+        reply_rx.recv().map_err(|_| VisualizationSettingsError::WorkerStopped)?
+    }
+
+    fn save_visualization_settings(
+        &self,
+        settings: VisualizationSettings,
+    ) -> Result<(), VisualizationSettingsError> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::SaveVisualizationSettings { settings, reply: reply_tx })
+            .map_err(|_| VisualizationSettingsError::WorkerStopped)?;
+        reply_rx.recv().map_err(|_| VisualizationSettingsError::WorkerStopped)?
+    }
+}
+
 fn worker_loop(receiver: Receiver<WorkerCommand>, mut database: OpenedDatabase) {
     while let Ok(command) = receiver.recv() {
         match command {
@@ -401,6 +444,12 @@ fn worker_loop(receiver: Receiver<WorkerCommand>, mut database: OpenedDatabase) 
             },
             WorkerCommand::ResetShortcutMappings { platform, reply } => {
                 let _ = reply.send(reset_shortcut_mappings_db(&mut database, platform));
+            },
+            WorkerCommand::LoadVisualizationSettings { reply } => {
+                let _ = reply.send(load_visualization_settings_db(&mut database));
+            },
+            WorkerCommand::SaveVisualizationSettings { settings, reply } => {
+                let _ = reply.send(save_visualization_settings_db(&mut database, settings));
             },
         }
     }

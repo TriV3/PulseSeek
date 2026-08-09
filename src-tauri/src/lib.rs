@@ -20,6 +20,7 @@ pub mod rename_service;
 pub mod shortcut_mappings_service;
 pub mod trash_service;
 mod visualization_service;
+pub mod visualization_settings_service;
 pub mod waveform_service;
 
 use std::sync::{Arc, Mutex};
@@ -38,6 +39,10 @@ use crate::shortcut_mappings_service::{
     InMemoryShortcutMappingsService, NativeShortcutMappingsService, ShortcutMappingsService,
 };
 use crate::trash_service::{NativeTrashService, TrashService};
+use crate::visualization_settings_service::{
+    InMemoryVisualizationSettingsService, NativeVisualizationSettingsService,
+    SharedVisualizationSettingsService,
+};
 use crate::waveform_service::{NativeWaveformService, WaveformService};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -107,6 +112,8 @@ pub fn run() {
             playback_events::subscribe_musical_spectrum_events,
             playback_events::unsubscribe_musical_spectrum_events,
             playback_events::acknowledge_musical_spectrum_frame,
+            visualization_settings_service::load_visualization_settings,
+            visualization_settings_service::save_visualization_settings,
             command_handlers::waveform::get_waveform
         ])
         .setup(|app| {
@@ -155,6 +162,9 @@ pub fn run() {
             ));
             let mut shortcut_service: std::sync::Mutex<Box<dyn ShortcutMappingsService>> =
                 std::sync::Mutex::new(Box::new(InMemoryShortcutMappingsService::new()));
+            let visualization_service: SharedVisualizationSettingsService = Arc::new(Mutex::new(
+                Box::new(InMemoryVisualizationSettingsService::new()),
+            ));
             if let Ok(config_dir) = app.path().app_config_dir() {
                 let cache_path = config_dir.join("app-cache.sqlite");
                 match pulseseek_cache::technical_cache::TechnicalCache::start(&cache_path) {
@@ -170,6 +180,9 @@ pub fn run() {
                         let shortcut_port: Arc<
                             dyn pulseseek_cache::shortcut_mappings::ShortcutMappingsCachePort,
                         > = Arc::new(cache.clone());
+                        let visualization_port: Arc<
+                            dyn pulseseek_cache::visualization_settings::VisualizationSettingsCachePort,
+                        > = Arc::new(cache.clone());
                         let waveform_port: Arc<dyn WaveformCachePort> = Arc::new(cache);
                         watcher_cache = Some(Arc::clone(&waveform_port));
                         tracing::info!(status = ?status, "technical cache ready");
@@ -183,6 +196,11 @@ pub fn run() {
                         shortcut_service = std::sync::Mutex::new(Box::new(
                             NativeShortcutMappingsService::new(shortcut_port),
                         ));
+                        *visualization_service
+                            .lock()
+                            .expect("visualization settings lock poisoned") = Box::new(
+                            NativeVisualizationSettingsService::new(visualization_port),
+                        );
                         waveform_service = Some(Arc::new(
                             NativeWaveformService::new(Some(waveform_port))
                                 .with_events(Arc::clone(&event_emitter)),
@@ -202,6 +220,7 @@ pub fn run() {
             }
             app.manage(recent_service);
             app.manage(shortcut_service);
+            app.manage(visualization_service);
 
             // Rename service with the opened cache so a PulseSeek rename
             // proactively invalidates the old waveform row (FR-FM-010).
