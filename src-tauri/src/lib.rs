@@ -101,6 +101,9 @@ pub fn run() {
             command_envelope::pick_folder_dialog,
             player_preferences::load_player_preferences,
             player_preferences::save_player_preferences,
+            playback_events::subscribe_spectrum_events,
+            playback_events::unsubscribe_spectrum_events,
+            playback_events::acknowledge_spectrum_frame,
             command_handlers::waveform::get_waveform
         ])
         .setup(|app| {

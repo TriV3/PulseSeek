@@ -5,21 +5,21 @@ import {
   onSpectrumFrame,
   type SpectrumFramePayload,
 } from "../../api/playbackEvents";
-import { LogAnalyzerCanvas } from "./LogAnalyzerCanvas";
-import { drawLogAnalyzer } from "./logAnalyzerRenderer";
+import { LinearAnalyzerCanvas } from "./LinearAnalyzerCanvas";
+import { drawLinearAnalyzer } from "./linearAnalyzerRenderer";
 
 vi.mock("../../api/playbackEvents", () => ({
   onPosition: vi.fn(),
   onSpectrumFrame: vi.fn(),
 }));
 vi.mock("../Waveform/WaveformCanvas", () => ({
-  WaveformCanvas: () => null,
+  WaveformCanvas: () => <div data-testid="linear-seek-overlay" />,
 }));
-vi.mock("./logAnalyzerRenderer", async () => {
-  const actual = await vi.importActual<typeof import("./logAnalyzerRenderer")>(
-    "./logAnalyzerRenderer",
-  );
-  return { ...actual, drawLogAnalyzer: vi.fn() };
+vi.mock("./linearAnalyzerRenderer", async () => {
+  const actual = await vi.importActual<
+    typeof import("./linearAnalyzerRenderer")
+  >("./linearAnalyzerRenderer");
+  return { ...actual, drawLinearAnalyzer: vi.fn() };
 });
 
 let spectrumHandler: ((payload: SpectrumFramePayload) => void) | undefined;
@@ -65,74 +65,52 @@ beforeEach(() => {
     unobserve() {}
   }
   window.ResizeObserver = Observer as unknown as typeof ResizeObserver;
-  vi.mocked(drawLogAnalyzer).mockClear();
+  vi.mocked(drawLinearAnalyzer).mockClear();
 });
 
-describe("LogAnalyzerCanvas", () => {
-  it("does not subscribe or draw while disabled", () => {
-    render(<LogAnalyzerCanvas enabled={false} theme="dark" />);
+describe("LinearAnalyzerCanvas", () => {
+  it("does not subscribe, draw, or expose seek while disabled", () => {
+    render(<LinearAnalyzerCanvas enabled={false} theme="dark" />);
 
     expect(
-      screen.getByRole("img", {
-        name: "Logarithmic frequency analyzer disabled",
-      }),
+      screen.getByRole("img", { name: "Linear frequency analyzer disabled" }),
     ).toBeInTheDocument();
+    expect(screen.queryByTestId("linear-seek-overlay")).not.toBeInTheDocument();
     expect(onSpectrumFrame).not.toHaveBeenCalled();
-    expect(drawLogAnalyzer).not.toHaveBeenCalled();
+    expect(drawLinearAnalyzer).not.toHaveBeenCalled();
   });
 
   it("draws spectrum events without waiting for an animation frame", async () => {
-    const { container } = render(<LogAnalyzerCanvas enabled theme="dark" />);
+    const { container } = render(
+      <LinearAnalyzerCanvas enabled theme="dark" durationMs={2_000} />,
+    );
     await act(async () => undefined);
     const canvas = container.querySelector("canvas") as HTMLCanvasElement;
 
+    expect(screen.getByTestId("linear-seek-overlay")).toBeInTheDocument();
     act(() => resize?.(240, 120));
     expect(canvas.width).toBe(240);
     expect(canvas.height).toBe(120);
     act(() => animationCallbacks.shift()?.(0));
-    vi.mocked(drawLogAnalyzer).mockClear();
+    vi.mocked(drawLinearAnalyzer).mockClear();
 
     act(() => spectrumHandler?.(FIRST));
 
-    expect(drawLogAnalyzer).toHaveBeenCalledOnce();
+    expect(drawLinearAnalyzer).toHaveBeenCalledOnce();
     expect(animationCallbacks).toHaveLength(0);
   });
 
   it("repaints the current frame when the semantic theme changes", async () => {
-    const { rerender } = render(<LogAnalyzerCanvas enabled theme="dark" />);
+    const { rerender } = render(<LinearAnalyzerCanvas enabled theme="dark" />);
     await act(async () => undefined);
     act(() => resize?.(240, 120));
     act(() => spectrumHandler?.(FIRST));
+    vi.mocked(drawLinearAnalyzer).mockClear();
+
+    rerender(<LinearAnalyzerCanvas enabled theme="midnight" />);
     act(() => animationCallbacks.shift()?.(0));
-    vi.mocked(drawLogAnalyzer).mockClear();
 
-    rerender(<LogAnalyzerCanvas enabled theme="midnight" />);
-    act(() => animationCallbacks.shift()?.(0));
-
-    expect(drawLogAnalyzer).toHaveBeenCalledOnce();
-    expect(vi.mocked(drawLogAnalyzer).mock.calls[0]?.[1]).toEqual(FIRST);
-  });
-
-  it("draws successive audio frames instead of freezing the first spectrum", async () => {
-    render(<LogAnalyzerCanvas enabled theme="dark" />);
-    await act(async () => undefined);
-    act(() => resize?.(240, 120));
-
-    act(() => spectrumHandler?.(FIRST));
-    act(() =>
-      spectrumHandler?.({
-        ...FIRST,
-        sequence: 2,
-        magnitudes: [0, 0.8, 0.15, 0.6, 0],
-      }),
-    );
-    expect(drawLogAnalyzer).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(drawLogAnalyzer).mock.calls[0]?.[1]).toMatchObject({
-      sequence: 1,
-    });
-    expect(vi.mocked(drawLogAnalyzer).mock.calls[1]?.[1]).toMatchObject({
-      sequence: 2,
-      magnitudes: [0, 0.8, 0.15, 0.6, 0],
-    });
+    expect(drawLinearAnalyzer).toHaveBeenCalledOnce();
+    expect(vi.mocked(drawLinearAnalyzer).mock.calls[0]?.[1]).toEqual(FIRST);
   });
 });

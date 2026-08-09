@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useWaveform } from "../../hooks/useWaveform";
 import type { PlayableFileMetadata } from "../FolderTree/folderTreeTypes";
+import { LinearAnalyzerCanvas } from "../LinearAnalyzer/LinearAnalyzerCanvas";
 import { LogAnalyzerCanvas } from "../LogAnalyzer/LogAnalyzerCanvas";
 import type { ResolvedTheme } from "../../hooks/useTheme";
 import type { VisualizationMode } from "../VisualizationSelector/VisualizationSelector";
@@ -134,8 +135,17 @@ export function WaveformPanel({
               />
             )}
           </div>
-        ) : (
+        ) : visualization === "logarithmic" ? (
           <LogAnalyzerCanvas
+            enabled
+            theme={theme}
+            durationMs={durationMs}
+            restoredPositionMs={restoredPositionMs}
+            resetRevision={resetRevision}
+            onSeek={onSeek}
+          />
+        ) : (
+          <LinearAnalyzerCanvas
             enabled
             theme={theme}
             durationMs={durationMs}

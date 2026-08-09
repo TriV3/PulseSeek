@@ -4,6 +4,32 @@ use std::time::Duration;
 use super::*;
 
 #[test]
+fn spectrum_delivery_never_queues_more_than_one_unacknowledged_frame() {
+    let gate = SpectrumDeliveryGate::new();
+
+    gate.subscribe();
+    assert!(gate.try_begin_delivery());
+    assert!(!gate.try_begin_delivery());
+
+    gate.acknowledge();
+    assert!(gate.try_begin_delivery());
+}
+
+#[test]
+fn spectrum_delivery_stops_without_a_subscriber_and_resets_on_resubscribe() {
+    let gate = SpectrumDeliveryGate::new();
+
+    assert!(!gate.try_begin_delivery());
+    gate.subscribe();
+    assert!(gate.try_begin_delivery());
+    gate.unsubscribe();
+    assert!(!gate.try_begin_delivery());
+
+    gate.subscribe();
+    assert!(gate.try_begin_delivery());
+}
+
+#[test]
 fn fake_emitter_records_state_events() {
     let emitter = FakeEventEmitter::new();
     emitter.emit_state("playing").unwrap();

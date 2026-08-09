@@ -1,4 +1,5 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 
 // ── Event envelope ────────────────────────────────────────────────────
 
@@ -347,11 +348,34 @@ export function onWaveformReady(
 export function onSpectrumFrame(
   handler: (payload: SpectrumFramePayload) => void,
 ): Promise<UnlistenFn> {
-  return listen<SpectrumFramePayload>(EVENT_SPECTRUM_FRAME, (event) => {
-    if (isSpectrumFramePayload(event.payload)) {
-      handler(event.payload);
-    }
-  });
+  return subscribeToSpectrumFrames(handler);
+}
+
+async function subscribeToSpectrumFrames(
+  handler: (payload: SpectrumFramePayload) => void,
+): Promise<UnlistenFn> {
+  const unlisten = await listen<SpectrumFramePayload>(
+    EVENT_SPECTRUM_FRAME,
+    (event) => {
+      try {
+        if (isSpectrumFramePayload(event.payload)) {
+          handler(event.payload);
+        }
+      } finally {
+        void invoke("acknowledge_spectrum_frame");
+      }
+    },
+  );
+  try {
+    await invoke("subscribe_spectrum_events");
+  } catch (error) {
+    unlisten();
+    throw error;
+  }
+  return () => {
+    unlisten();
+    void invoke("unsubscribe_spectrum_events");
+  };
 }
 
 /**

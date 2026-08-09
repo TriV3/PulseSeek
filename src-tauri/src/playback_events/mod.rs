@@ -2,8 +2,8 @@ pub mod types;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::Emitter;
 
@@ -43,6 +43,70 @@ pub trait PlaybackEventEmitter: Send + Sync {
     fn emit_position(&self, position_ms: u64, duration_ms: Option<u64>) -> Result<(), EmitError>;
     fn emit(&self, event: &str, payload: Value) -> Result<(), EmitError>;
     fn is_disconnected(&self) -> bool;
+
+    fn subscribe_spectrum(&self) {}
+
+    fn unsubscribe_spectrum(&self) {}
+
+    fn try_begin_spectrum_delivery(&self) -> bool {
+        true
+    }
+
+    fn acknowledge_spectrum(&self) {}
+}
+
+/// Bounds native-to-webview spectrum delivery to one unconsumed frame.
+///
+/// The FFT pipeline already drops stale frames before IPC. This gate extends
+/// that guarantee across Tauri/WKWebView, where emitting faster than JavaScript
+/// can consume would otherwise create a second, unbounded queue.
+pub(crate) struct SpectrumDeliveryGate {
+    subscribers: AtomicUsize,
+    pending: AtomicBool,
+}
+
+impl SpectrumDeliveryGate {
+    pub(crate) fn new() -> Self {
+        Self { subscribers: AtomicUsize::new(0), pending: AtomicBool::new(false) }
+    }
+
+    pub(crate) fn subscribe(&self) {
+        if self.subscribers.fetch_add(1, Ordering::AcqRel) == 0 {
+            self.pending.store(false, Ordering::Release);
+        }
+    }
+
+    pub(crate) fn unsubscribe(&self) {
+        let mut current = self.subscribers.load(Ordering::Acquire);
+        while current > 0 {
+            match self.subscribers.compare_exchange_weak(
+                current,
+                current - 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    if current == 1 {
+                        self.pending.store(false, Ordering::Release);
+                    }
+                    return;
+                },
+                Err(observed) => current = observed,
+            }
+        }
+    }
+
+    pub(crate) fn try_begin_delivery(&self) -> bool {
+        self.subscribers.load(Ordering::Acquire) > 0
+            && self
+                .pending
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+    }
+
+    pub(crate) fn acknowledge(&self) {
+        self.pending.store(false, Ordering::Release);
+    }
 }
 
 pub struct NoopEventEmitter;
@@ -183,11 +247,12 @@ impl PlaybackEventEmitter for ThrottledEventEmitter {
 
 pub struct TauriEventEmitter {
     app: tauri::AppHandle,
+    spectrum_gate: SpectrumDeliveryGate,
 }
 
 impl TauriEventEmitter {
     pub fn new(app: tauri::AppHandle) -> Self {
-        Self { app }
+        Self { app, spectrum_gate: SpectrumDeliveryGate::new() }
     }
 }
 
@@ -215,6 +280,37 @@ impl PlaybackEventEmitter for TauriEventEmitter {
         // Tauri does not expose a reliable disconnected API.
         false
     }
+
+    fn subscribe_spectrum(&self) {
+        self.spectrum_gate.subscribe();
+    }
+
+    fn unsubscribe_spectrum(&self) {
+        self.spectrum_gate.unsubscribe();
+    }
+
+    fn try_begin_spectrum_delivery(&self) -> bool {
+        self.spectrum_gate.try_begin_delivery()
+    }
+
+    fn acknowledge_spectrum(&self) {
+        self.spectrum_gate.acknowledge();
+    }
+}
+
+#[tauri::command]
+pub fn subscribe_spectrum_events(events: tauri::State<'_, Arc<dyn PlaybackEventEmitter>>) {
+    events.subscribe_spectrum();
+}
+
+#[tauri::command]
+pub fn unsubscribe_spectrum_events(events: tauri::State<'_, Arc<dyn PlaybackEventEmitter>>) {
+    events.unsubscribe_spectrum();
+}
+
+#[tauri::command]
+pub fn acknowledge_spectrum_frame(events: tauri::State<'_, Arc<dyn PlaybackEventEmitter>>) {
+    events.acknowledge_spectrum();
 }
 
 #[cfg(test)]

@@ -160,25 +160,18 @@ describe("WaveformCanvas", () => {
     const strokesBefore = mockContext.state.strokes;
 
     emitPosition(500);
-    flushRaf();
     emitPosition(1000);
-    flushRaf();
     emitPosition(1500);
-    flushRaf();
     expect(mockContext.state.strokes).toBe(strokesBefore);
     expect(
       container.querySelector("[data-testid='waveform-current-marker']"),
-    ).toHaveStyle({
-      left: "75px",
-    });
+    ).toHaveStyle("--seek-x: 75px");
 
     // The progress marker is composited above the static canvas; 1500 / 2000
     // ms maps to 75px of the 100px waveform.
     expect(
       container.querySelector("[data-testid='waveform-current-marker']"),
-    ).toHaveStyle({
-      left: "75px",
-    });
+    ).toHaveStyle("--seek-x: 75px");
 
     // High-frequency position updates never re-render React: the canvas node
     // is stable and the slider value is written imperatively instead.
@@ -272,9 +265,7 @@ describe("WaveformCanvas", () => {
     flushRaf();
     expect(
       container.querySelector("[data-testid='waveform-current-marker']"),
-    ).toHaveStyle({
-      left: "25px",
-    });
+    ).toHaveStyle("--seek-x: 25px");
 
     mockContext.state.dashes.length = 0;
     rerender(<WaveformCanvas waveform={LEVEL_STEREO} durationMs={2000} />);
@@ -310,9 +301,9 @@ describe("WaveformCanvas", () => {
     flushRaf();
 
     expect(getByTestId("waveform-current-time")).toHaveTextContent("0:01");
-    expect(getByTestId("waveform-current-time")).toHaveStyle({
-      left: "62.5px",
-    });
+    expect(getByTestId("waveform-current-time")).toHaveStyle(
+      "--seek-x: 62.5px",
+    );
   });
 
   it("shows the hovered time next to the pointer bar", () => {
@@ -326,14 +317,50 @@ describe("WaveformCanvas", () => {
     flushRaf();
 
     expect(getByTestId("waveform-hover-time")).toHaveTextContent("0:01");
-    expect(getByTestId("waveform-hover-time")).toHaveStyle({ left: "75px" });
-    expect(getByTestId("waveform-hover-marker")).toHaveStyle({ left: "75px" });
+    expect(getByTestId("waveform-hover-time")).toHaveStyle("--seek-x: 75px");
+    expect(getByTestId("waveform-hover-marker")).toHaveStyle("--seek-x: 75px");
 
     fireEvent.pointerLeave(canvas);
     expect(getByTestId("waveform-hover-time")).not.toBeVisible();
   });
 
+  it("renders pointer updates without waiting for an animation frame", () => {
+    const { container, getByTestId } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={2000} />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+    flushRaf();
+
+    fireEvent.pointerMove(canvas, { clientX: 100, pointerId: 1 });
+
+    expect(rafCallbacks).toHaveLength(0);
+    expect(getByTestId("waveform-hover-marker")).toHaveStyle("--seek-x: 100px");
+  });
+
+  it("coalesces fast pointer events to the latest position without using animation frames", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const { container, getByTestId } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={2000} />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+    flushRaf();
+
+    fireEvent.pointerMove(canvas, { clientX: 10, pointerId: 1 });
+    for (let clientX = 11; clientX <= 100; clientX += 1) {
+      fireEvent.pointerMove(canvas, { clientX, pointerId: 1 });
+    }
+
+    expect(rafCallbacks).toHaveLength(0);
+    expect(getByTestId("waveform-hover-marker")).toHaveStyle("--seek-x: 10px");
+
+    vi.advanceTimersByTime(17);
+    expect(getByTestId("waveform-hover-marker")).toHaveStyle("--seek-x: 100px");
+  });
+
   it("keeps time labels fully inside the waveform at both edges", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     const { container, getByTestId } = render(
       <WaveformCanvas
         waveform={LEVEL}
@@ -345,17 +372,17 @@ describe("WaveformCanvas", () => {
     stubCanvasRect(canvas, 100);
     flushRaf();
 
-    expect(getByTestId("waveform-current-time")).toHaveStyle({ left: "24px" });
+    expect(getByTestId("waveform-current-time")).toHaveStyle("--seek-x: 24px");
 
     fireEvent.pointerMove(canvas, { clientX: 0, pointerId: 1 });
     flushRaf();
-    expect(getByTestId("waveform-hover-marker")).toHaveStyle({ left: "0px" });
-    expect(getByTestId("waveform-hover-time")).toHaveStyle({ left: "24px" });
+    expect(getByTestId("waveform-hover-marker")).toHaveStyle("--seek-x: 0px");
+    expect(getByTestId("waveform-hover-time")).toHaveStyle("--seek-x: 24px");
 
     fireEvent.pointerMove(canvas, { clientX: 100, pointerId: 1 });
-    flushRaf();
-    expect(getByTestId("waveform-hover-marker")).toHaveStyle({ left: "100px" });
-    expect(getByTestId("waveform-hover-time")).toHaveStyle({ left: "76px" });
+    vi.advanceTimersByTime(17);
+    expect(getByTestId("waveform-hover-marker")).toHaveStyle("--seek-x: 100px");
+    expect(getByTestId("waveform-hover-time")).toHaveStyle("--seek-x: 76px");
   });
 
   it("shows a restored position before native playback events arrive", () => {
@@ -385,7 +412,7 @@ describe("WaveformCanvas", () => {
     );
     flushRaf();
 
-    expect(getByTestId("waveform-current-marker")).toHaveStyle({ left: "0px" });
+    expect(getByTestId("waveform-current-marker")).toHaveStyle("--seek-x: 0px");
     expect(getByTestId("waveform-current-time")).toHaveTextContent("0:00");
   });
 
@@ -421,6 +448,7 @@ describe("WaveformCanvas", () => {
   });
 
   it("previews continuously while dragging and seeks once on release", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     const onSeek = vi.fn();
     const { container } = render(
       <WaveformCanvas waveform={LEVEL} durationMs={2000} onSeek={onSeek} />,
@@ -431,7 +459,7 @@ describe("WaveformCanvas", () => {
     fireEvent.pointerDown(canvas, { clientX: 25, pointerId: 1 });
     fireEvent.pointerMove(canvas, { clientX: 75, pointerId: 1 });
     fireEvent.pointerMove(canvas, { clientX: 10, pointerId: 1 });
-    flushRaf();
+    vi.advanceTimersByTime(17);
 
     expect(onSeek).not.toHaveBeenCalled();
     expect(canvas.getAttribute("aria-valuenow")).toBe("200");

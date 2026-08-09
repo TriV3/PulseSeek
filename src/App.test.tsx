@@ -219,7 +219,7 @@ describe("application shell", () => {
     ).toBe(true);
   });
 
-  it("switches exclusively between the waveform and logarithmic analyzer", () => {
+  it("switches exclusively between waveform and both frequency analyzers", () => {
     render(<App />);
 
     const selector = screen.getByLabelText("Visualization");
@@ -240,6 +240,18 @@ describe("application shell", () => {
       screen.queryByRole("slider", { name: "Waveform seek" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Waveform style")).not.toBeInTheDocument();
+
+    fireEvent.change(selector, { target: { value: "linear" } });
+
+    expect(
+      screen.getByRole("img", { name: "Linear frequency analyzer" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("img", { name: "Logarithmic frequency analyzer" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("slider", { name: "Linear analyzer seek" }),
+    ).toBeInTheDocument();
   });
 });
 
