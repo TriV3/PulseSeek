@@ -92,7 +92,8 @@ pub fn dispatch_with_shortcuts(
             };
             CommandResponse::ok(serde_json::to_value(HealthResponse { ready: true }).unwrap())
         },
-        "play" | "pause" | "resume" | "stop" | "seek" | "volume" | "set_playback_mode" => {
+        "play" | "pause" | "resume" | "stop" | "seek" | "volume" | "set_playback_mode"
+        | "set_loop_region" | "clear_loop_region" => {
             playback::handle(&envelope.command, envelope.payload, service, events)
         },
         "list_devices" | "current_device" | "select_device" => {

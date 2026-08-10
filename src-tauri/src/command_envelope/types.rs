@@ -94,6 +94,23 @@ pub struct SetPlaybackModeResponse {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SetLoopRegionRequest {
+    pub start_ms: u64,
+    pub end_ms: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SetLoopRegionResponse {
+    pub start_ms: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ClearLoopRegionRequest {}
+
+#[derive(Debug, Serialize)]
+pub struct ClearLoopRegionResponse {}
+
+#[derive(Debug, Deserialize)]
 pub struct ListDevicesRequest {}
 
 #[derive(Debug, Serialize)]

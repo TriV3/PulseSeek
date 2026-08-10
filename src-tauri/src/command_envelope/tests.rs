@@ -527,6 +527,149 @@ fn set_playback_mode_maps_service_failure() {
     assert_eq!(service.mode, PlaybackMode::OneShot);
 }
 
+// ── Loop region command tests ─────────────────────────────────────
+#[test]
+fn set_loop_region_dispatches_and_returns_confirmed_start() {
+    let mut service = FakePlaybackService::new();
+    let envelope = CommandEnvelope {
+        version: CURRENT_COMMAND_VERSION,
+        command: "set_loop_region".to_string(),
+        payload: serde_json::json!({"start_ms": 1_000, "end_ms": 5_000}),
+    };
+    let response = dispatch(
+        envelope,
+        &mut service,
+        &mut noop_device(),
+        &mut noop_enum(),
+        &noop_trash(),
+        &noop_rename(),
+        &noop_move(),
+        &noop_copy(),
+        &noop_external(),
+        &noop_drag_out(),
+        &noop_active(),
+        &noop_recent(),
+        &noop_events(),
+    );
+    assert!(response.ok);
+    assert_eq!(response.data.unwrap()["start_ms"], 1_000);
+    assert_eq!(service.set_loop_region_call_count, 1);
+    assert_eq!(service.last_loop_region_start, Some(1_000));
+    assert_eq!(service.last_loop_region_end, Some(5_000));
+}
+
+#[test]
+fn set_loop_region_rejects_reversed_points() {
+    let mut service = FakePlaybackService::new();
+    let envelope = CommandEnvelope {
+        version: CURRENT_COMMAND_VERSION,
+        command: "set_loop_region".to_string(),
+        payload: serde_json::json!({"start_ms": 5_000, "end_ms": 1_000}),
+    };
+    let response = dispatch(
+        envelope,
+        &mut service,
+        &mut noop_device(),
+        &mut noop_enum(),
+        &noop_trash(),
+        &noop_rename(),
+        &noop_move(),
+        &noop_copy(),
+        &noop_external(),
+        &noop_drag_out(),
+        &noop_active(),
+        &noop_recent(),
+        &noop_events(),
+    );
+    assert!(!response.ok);
+    let error = response.error.unwrap();
+    assert_eq!(error.category, "InvalidInput");
+    assert_eq!(error.diagnostic_code, "playback.control");
+    assert_eq!(service.set_loop_region_call_count, 1);
+}
+
+#[test]
+fn set_loop_region_rejects_out_of_bounds_points() {
+    let mut service = FakePlaybackService::new();
+    let envelope = CommandEnvelope {
+        version: CURRENT_COMMAND_VERSION,
+        command: "set_loop_region".to_string(),
+        payload: serde_json::json!({"start_ms": 200_000, "end_ms": 210_000}),
+    };
+    let response = dispatch(
+        envelope,
+        &mut service,
+        &mut noop_device(),
+        &mut noop_enum(),
+        &noop_trash(),
+        &noop_rename(),
+        &noop_move(),
+        &noop_copy(),
+        &noop_external(),
+        &noop_drag_out(),
+        &noop_active(),
+        &noop_recent(),
+        &noop_events(),
+    );
+    assert!(!response.ok);
+    assert_eq!(response.error.unwrap().category, "InvalidInput");
+}
+
+#[test]
+fn set_loop_region_maps_service_failure() {
+    let mut service = FakePlaybackService::new();
+    service.fail_with = Some(ErrorCategory::Unavailable);
+    let envelope = CommandEnvelope {
+        version: CURRENT_COMMAND_VERSION,
+        command: "set_loop_region".to_string(),
+        payload: serde_json::json!({"start_ms": 1_000, "end_ms": 5_000}),
+    };
+    let response = dispatch(
+        envelope,
+        &mut service,
+        &mut noop_device(),
+        &mut noop_enum(),
+        &noop_trash(),
+        &noop_rename(),
+        &noop_move(),
+        &noop_copy(),
+        &noop_external(),
+        &noop_drag_out(),
+        &noop_active(),
+        &noop_recent(),
+        &noop_events(),
+    );
+    assert!(!response.ok);
+    assert_eq!(response.error.unwrap().category, "Unavailable");
+}
+
+#[test]
+fn clear_loop_region_dispatches_to_service() {
+    let mut service = FakePlaybackService::new();
+    let envelope = CommandEnvelope {
+        version: CURRENT_COMMAND_VERSION,
+        command: "clear_loop_region".to_string(),
+        payload: serde_json::json!({}),
+    };
+    let response = dispatch(
+        envelope,
+        &mut service,
+        &mut noop_device(),
+        &mut noop_enum(),
+        &noop_trash(),
+        &noop_rename(),
+        &noop_move(),
+        &noop_copy(),
+        &noop_external(),
+        &noop_drag_out(),
+        &noop_active(),
+        &noop_recent(),
+        &noop_events(),
+    );
+    assert!(response.ok);
+    assert_eq!(service.clear_loop_region_call_count, 1);
+}
+
 // ── Pause command tests ───────────────────────────────────────────
 
 #[test]

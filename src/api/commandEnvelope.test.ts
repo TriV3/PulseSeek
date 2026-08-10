@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import type { CommandResponse } from "./commandEnvelope";
 import {
   CommandError,
+  clearLoopRegion,
   healthCheck,
   invokeCommand,
   loadPlayerPreferences,
+  setLoopRegion,
   setPlaybackMode,
   loadShortcuts,
   resetShortcuts,
@@ -240,6 +242,58 @@ describe("setPlaybackMode", () => {
         version: 1,
         command: "set_playback_mode",
         payload: { mode: "random" },
+      },
+    });
+  });
+});
+
+describe("setLoopRegion", () => {
+  it("returns the confirmed start position from Rust", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: true,
+      data: { start_ms: 1_000 },
+    });
+
+    await expect(setLoopRegion(1_000, 5_000)).resolves.toBe(1_000);
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: {
+        version: 1,
+        command: "set_loop_region",
+        payload: { start_ms: 1_000, end_ms: 5_000 },
+      },
+    });
+  });
+
+  it("throws CommandError when the backend rejects the region", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: false,
+      error: {
+        category: "InvalidInput",
+        message: "loop region start 5000ms must be before end 1000ms",
+        diagnostic_code: "playback.control",
+      },
+    });
+
+    await expect(setLoopRegion(5_000, 1_000)).rejects.toThrow(CommandError);
+  });
+});
+
+describe("clearLoopRegion", () => {
+  it("sends the clear command and resolves", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: true,
+      data: {},
+    });
+
+    await expect(clearLoopRegion()).resolves.toBeUndefined();
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: {
+        version: 1,
+        command: "clear_loop_region",
+        payload: {},
       },
     });
   });

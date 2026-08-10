@@ -89,6 +89,18 @@ export interface SetPlaybackModeResponse {
   mode: PlaybackMode;
 }
 
+export interface SetLoopRegionRequest {
+  start_ms: number;
+  end_ms: number;
+}
+
+export interface SetLoopRegionResponse {
+  start_ms: number;
+}
+
+export type ClearLoopRegionRequest = Record<string, never>;
+export type ClearLoopRegionResponse = Record<string, never>;
+
 // ── Audio device command types ─────────────────────────────────────────
 
 export interface DeviceInfoData {
@@ -348,6 +360,23 @@ export async function setPlaybackMode(
     { mode } satisfies SetPlaybackModeRequest,
   );
   return response.mode;
+}
+
+/** Activates an A–B repeat region and returns the confirmed start. */
+export async function setLoopRegion(
+  start_ms: number,
+  end_ms: number,
+): Promise<number> {
+  const response = await invokeCommand<SetLoopRegionResponse>(
+    "set_loop_region",
+    { start_ms, end_ms } satisfies SetLoopRegionRequest,
+  );
+  return response.start_ms;
+}
+
+/** Deactivates the active A–B repeat region. */
+export async function clearLoopRegion(): Promise<void> {
+  await invokeCommand<ClearLoopRegionResponse>("clear_loop_region", {});
 }
 
 // ── Shortcut mappings ─────────────────────────────────────────────────
