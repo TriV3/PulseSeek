@@ -1,5 +1,7 @@
 use crate::*;
 use pulseseek_domain::decoder::{DecodeError, Decoder};
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// A fake decoder that produces a ramp of known values.
@@ -94,6 +96,33 @@ impl Decoder for RejectingSeekDecoder {
             ),
             std::io::Error::other("seek unsupported"),
         ))
+    }
+}
+
+struct RecordingSeekDecoder {
+    inner: RampDecoder,
+    seeks: Arc<AtomicU64>,
+}
+
+impl Decoder for RecordingSeekDecoder {
+    fn probe(&self) -> pulseseek_domain::decoder::ProbeResult {
+        self.inner.probe()
+    }
+
+    fn metadata(&mut self) -> Result<pulseseek_domain::decoder::StreamMetadata, DecodeError> {
+        unimplemented!("not used in tests")
+    }
+
+    fn read(&mut self, buf: &mut [f32]) -> Result<usize, DecodeError> {
+        self.inner.read(buf)
+    }
+
+    fn seek(
+        &mut self,
+        target: pulseseek_domain::playback::position::SeekTarget,
+    ) -> Result<pulseseek_domain::playback::position::Position, DecodeError> {
+        self.seeks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.inner.seek(target)
     }
 }
 
@@ -898,6 +927,280 @@ fn stop_race_does_not_emit_completion() {
 
     assert!(worker.poll_event().is_none());
     worker.join().unwrap();
+}
+
+// ── A–B repeat (PR-088) ───────────────────────────────────────────────
+
+fn loop_region(start_ms: u64, end_ms: u64) -> pulseseek_domain::playback::loop_region::LoopRegion {
+    pulseseek_domain::playback::loop_region::LoopRegion::new(
+        pulseseek_domain::playback::position::Position::from_millis(start_ms),
+        pulseseek_domain::playback::position::Position::from_millis(end_ms),
+        pulseseek_domain::playback::position::Duration::from_millis(1_000_000),
+    )
+    .expect("valid loop region")
+}
+
+#[test]
+fn ab_repeat_wraps_at_region_end_without_advancing() {
+    let (worker, mut consumer) = PlaybackWorker::start_with_mode(
+        Box::new(RampDecoder::new(1_000)),
+        4,
+        pulseseek_domain::playback::mode::PlaybackMode::OneShot,
+    );
+    worker.set_loop_region(Some(loop_region(2, 6))).unwrap();
+
+    let mut output = [0.0f32; 16];
+    let mut produced = 0;
+    for _ in 0..100_000 {
+        let count = consumer.consume_channels(&mut output[produced..], 1, 1);
+        produced += count;
+        if produced == output.len() {
+            break;
+        }
+        std::thread::yield_now();
+    }
+
+    // Region [2, 6) is half-open: samples 2, 3, 4, 5 repeat; 6 is excluded
+    // and the region never advances past B.
+    assert_eq!(produced, output.len());
+    assert_eq!(
+        output,
+        [2.0, 3.0, 4.0, 5.0, 2.0, 3.0, 4.0, 5.0, 2.0, 3.0, 4.0, 5.0, 2.0, 3.0, 4.0, 5.0]
+    );
+    // Each cycle resets the playback clock to the region start (A = 2ms), so
+    // after four cycles the clock sits at B = 6ms — the absolute position
+    // matches the audio, which loops 2..6.
+    assert_eq!(consumer.control().position_frames(), 6);
+    assert!(worker.poll_event().is_none(), "A–B repeat must never complete or fail");
+    control_stop_and_join(worker, consumer);
+}
+
+#[test]
+fn ab_repeat_short_region_replays_without_decoder_seek() {
+    let seeks = Arc::new(AtomicU64::new(0));
+    let (worker, mut consumer) = PlaybackWorker::start_with_mode(
+        Box::new(RecordingSeekDecoder {
+            inner: RampDecoder::new(1_000),
+            seeks: Arc::clone(&seeks),
+        }),
+        8,
+        pulseseek_domain::playback::mode::PlaybackMode::OneShot,
+    );
+    worker.set_loop_region(Some(loop_region(0, 4))).unwrap();
+    let seeks_before = seeks.load(std::sync::atomic::Ordering::Relaxed);
+
+    let mut output = [0.0f32; 16];
+    let mut produced = 0;
+    for _ in 0..100_000 {
+        let count = consumer.consume_channels(&mut output[produced..], 1, 1);
+        produced += count;
+        assert!(worker.poll_event().is_none(), "A–B repeat terminated early");
+        if produced == output.len() {
+            break;
+        }
+        std::thread::yield_now();
+    }
+
+    assert_eq!(produced, output.len());
+    assert_eq!(
+        output,
+        [0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0]
+    );
+    // Short regions replay from the prebuffer: wrapping never seeks the
+    // decoder. At most the initial positioning seek may have run when the
+    // worker produced frames before the region command arrived.
+    assert_eq!(
+        seeks.load(std::sync::atomic::Ordering::Relaxed),
+        seeks_before,
+        "wrapping a short region must not seek the decoder"
+    );
+    assert!(worker.poll_event().is_none());
+    control_stop_and_join(worker, consumer);
+}
+
+#[test]
+fn ab_repeat_seek_into_region_keeps_looping() {
+    let (worker, mut consumer) = PlaybackWorker::start_with_mode(
+        Box::new(RampDecoder::new(1_000)),
+        8,
+        pulseseek_domain::playback::mode::PlaybackMode::OneShot,
+    );
+    worker.set_loop_region(Some(loop_region(10, 20))).unwrap();
+
+    let mut first = [0.0f32; 8];
+    while consumer.consume(&mut first) != 8 {
+        std::thread::yield_now();
+    }
+
+    worker.seek(seek_target(12)).unwrap();
+
+    let mut output = [0.0f32; 16];
+    let mut produced = 0;
+    for _ in 0..100_000 {
+        let count = consumer.consume(&mut output[produced..]);
+        produced += count;
+        assert!(worker.poll_event().is_none(), "A–B repeat terminated after seek");
+        if produced == output.len() {
+            break;
+        }
+        std::thread::yield_now();
+    }
+
+    // From 12 the region plays to its end (19), then wraps back to 10.
+    assert_eq!(produced, output.len());
+    assert_eq!(&output[..8], &[12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0]);
+    assert_eq!(&output[8..16], &[10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0]);
+    control_stop_and_join(worker, consumer);
+}
+
+#[test]
+fn ab_repeat_seek_before_region_disables_loop() {
+    let (worker, mut consumer) = PlaybackWorker::start_with_mode(
+        Box::new(RampDecoder::new(1_000)),
+        8,
+        pulseseek_domain::playback::mode::PlaybackMode::OneShot,
+    );
+    worker.set_loop_region(Some(loop_region(10, 20))).unwrap();
+
+    let mut first = [0.0f32; 8];
+    while consumer.consume(&mut first) != 8 {
+        std::thread::yield_now();
+    }
+
+    worker.seek(seek_target(5)).unwrap();
+
+    let mut output = [0.0f32; 8];
+    let mut produced = 0;
+    for _ in 0..100_000 {
+        let count = consumer.consume(&mut output[produced..]);
+        produced += count;
+        if produced == output.len() {
+            break;
+        }
+        std::thread::yield_now();
+    }
+
+    // Seeking before A disables A–B repeat: playback continues from 5
+    // without ever wrapping back to 10.
+    assert_eq!(produced, output.len());
+    assert_eq!(output, [5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0]);
+    assert!(worker.poll_event().is_none(), "no terminal event while playback continues");
+    control_stop_and_join(worker, consumer);
+}
+
+#[test]
+fn ab_repeat_seek_at_region_end_disables_loop_and_completes() {
+    let (worker, mut consumer) = PlaybackWorker::start_with_mode(
+        Box::new(RampDecoder::new(1_000)),
+        8,
+        pulseseek_domain::playback::mode::PlaybackMode::OneShot,
+    );
+    worker.set_loop_region(Some(loop_region(10, 20))).unwrap();
+
+    let mut first = [0.0f32; 8];
+    while consumer.consume(&mut first) != 8 {
+        std::thread::yield_now();
+    }
+
+    // B is exclusive, so 20 is outside the region: the loop is disabled.
+    worker.seek(seek_target(20)).unwrap();
+
+    let mut output = [0.0f32; 8];
+    let mut produced = 0;
+    for _ in 0..100_000 {
+        let count = consumer.consume(&mut output[produced..]);
+        produced += count;
+        if produced == output.len() {
+            break;
+        }
+        std::thread::yield_now();
+    }
+    assert_eq!(produced, output.len());
+    assert_eq!(output, [20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0]);
+
+    // Consume the remainder while watching for the terminal event. One-shot
+    // mode: playback completes at the end of the file without wrapping,
+    // proving the file was never advanced past its region.
+    let mut scratch = [0.0f32; 64];
+    let mut terminal = None;
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
+        let _ = consumer.consume(&mut scratch);
+        if let Some(event) = worker.poll_event() {
+            terminal = Some(event);
+            break;
+        }
+        std::thread::yield_now();
+    }
+    assert!(matches!(terminal, Some(PlaybackEvent::Completed)));
+    let _ = worker.join();
+}
+
+#[test]
+fn clear_loop_region_stops_wrapping_and_follows_mode() {
+    let (worker, mut consumer) = PlaybackWorker::start_with_mode(
+        Box::new(RampDecoder::new(1_000)),
+        8,
+        pulseseek_domain::playback::mode::PlaybackMode::OneShot,
+    );
+    worker.set_loop_region(Some(loop_region(2, 6))).unwrap();
+
+    let mut first = [0.0f32; 8];
+    while consumer.consume(&mut first) != 8 {
+        std::thread::yield_now();
+    }
+    assert_eq!(&first[..4], &[2.0, 3.0, 4.0, 5.0], "region loops before the clear");
+
+    worker.clear_loop_region().unwrap();
+
+    // Playback continues through B (6) and beyond without wrapping, then
+    // completes at the end of the file (OneShot mode).
+    let mut output = Vec::new();
+    let mut scratch = [0.0f32; 8];
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
+        let count = consumer.consume(&mut scratch);
+        output.extend_from_slice(&scratch[..count]);
+        if matches!(worker.poll_event(), Some(PlaybackEvent::Completed)) {
+            break;
+        }
+        std::thread::yield_now();
+    }
+    assert!(output.contains(&6.0), "playback must continue past B after clearing");
+    assert!(output.contains(&999.0), "playback must reach the end of the file after clearing");
+    let _ = worker.join();
+}
+
+#[test]
+fn ab_repeat_region_longer_than_buffer_seeks_back_to_start() {
+    let (worker, mut consumer) = PlaybackWorker::start_with_mode(
+        Box::new(RampDecoder::new(1_000)),
+        4,
+        pulseseek_domain::playback::mode::PlaybackMode::OneShot,
+    );
+    worker.set_loop_region(Some(loop_region(10, 18))).unwrap();
+
+    let mut output = Vec::new();
+    let mut scratch = [0.0f32; 8];
+    for _ in 0..100_000 {
+        let count = consumer.consume(&mut scratch);
+        output.extend_from_slice(&scratch[..count]);
+        if output.len() >= 16 {
+            break;
+        }
+        std::thread::yield_now();
+    }
+    output.truncate(16);
+
+    assert_eq!(
+        output,
+        vec![
+            10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0,
+            16.0, 17.0
+        ]
+    );
+    assert!(worker.poll_event().is_none());
+    control_stop_and_join(worker, consumer);
 }
 
 fn wait_for_event(worker: &PlaybackWorker) -> PlaybackEvent {

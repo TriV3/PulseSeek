@@ -4,8 +4,9 @@ use pulseseek_domain::playback::mode::PlaybackMode;
 use serde_json::Value;
 
 use crate::command_envelope::types::{
-    PauseRequest, PauseResponse, PlayRequest, PlayResponse, ResumeRequest, ResumeResponse,
-    SeekRequest, SeekResponse, SetPlaybackModeRequest, SetPlaybackModeResponse, StopRequest,
+    ClearLoopRegionRequest, ClearLoopRegionResponse, PauseRequest, PauseResponse, PlayRequest,
+    PlayResponse, ResumeRequest, ResumeResponse, SeekRequest, SeekResponse, SetLoopRegionRequest,
+    SetLoopRegionResponse, SetPlaybackModeRequest, SetPlaybackModeResponse, StopRequest,
     StopResponse, VolumeRequest, VolumeResponse,
 };
 use crate::command_envelope::{from_application_error, BoundaryError, CommandResponse};
@@ -119,6 +120,31 @@ pub(crate) fn handle(
                     })
                     .unwrap(),
                 ),
+                Err(e) => CommandResponse::err(from_application_error(&e)),
+            }
+        },
+        "set_loop_region" => {
+            let request: SetLoopRegionRequest = match parse_payload("set_loop_region", payload) {
+                Ok(request) => request,
+                Err(response) => return response,
+            };
+            match service.set_loop_region(request.start_ms, request.end_ms) {
+                Ok(start_ms) => CommandResponse::ok(
+                    serde_json::to_value(SetLoopRegionResponse { start_ms }).unwrap(),
+                ),
+                Err(e) => CommandResponse::err(from_application_error(&e)),
+            }
+        },
+        "clear_loop_region" => {
+            let _request: ClearLoopRegionRequest = match parse_payload("clear_loop_region", payload)
+            {
+                Ok(request) => request,
+                Err(response) => return response,
+            };
+            match service.clear_loop_region() {
+                Ok(()) => {
+                    CommandResponse::ok(serde_json::to_value(ClearLoopRegionResponse {}).unwrap())
+                },
                 Err(e) => CommandResponse::err(from_application_error(&e)),
             }
         },

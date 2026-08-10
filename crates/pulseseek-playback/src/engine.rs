@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8};
 use std::sync::Arc;
 
 use pulseseek_domain::decoder::Decoder;
+use pulseseek_domain::playback::loop_region::LoopRegion;
 use pulseseek_domain::playback::mode::PlaybackMode;
 use pulseseek_domain::playback::position::Position;
 use ringbuf::traits::{Observer, Producer, Split};
@@ -24,6 +25,16 @@ pub struct PlaybackEngine {
     pub(crate) resampler: Option<SampleRateConverter>,
     pub(crate) pending: VecDeque<f32>,
     pub(crate) mode: PlaybackMode,
+    pub(crate) sample_rate: u32,
+    pub(crate) loop_region: Option<LoopRegion>,
+    pub(crate) region_produced_frames: u64,
+    pub(crate) region_boundary_reached: bool,
+    /// Position reset marker to attach to the next produced sample, used to
+    /// return the consumer clock to the region start after a wrap.
+    pub(crate) pending_position_reset: Option<u64>,
+    /// Decoder position in milliseconds, tracked so the region fast path can
+    /// skip a redundant seek deterministically.
+    pub(crate) decoder_position_ms: u64,
     pub(crate) cycle_produced: bool,
     pub(crate) loop_cache: Vec<f32>,
     pub(crate) loop_cache_overflowed: bool,
@@ -36,13 +47,21 @@ pub struct PlaybackEngine {
 pub(crate) struct BufferedSample {
     pub(crate) value: f32,
     pub(crate) generation: u64,
-    pub(crate) resets_position: bool,
+    /// When `Some(frames)`, the consumer resets its position clock to
+    /// `frames` when this sample is consumed (A–B wrap marker).
+    pub(crate) position_reset: Option<u64>,
 }
 
 impl PlaybackEngine {
     /// Creates a new playback engine.
     ///
     /// `buffer_frames` is the capacity of the internal ring buffer in frames.
+    ///
+    /// The engine defaults to a 1000 Hz frame clock so that one produced
+    /// frame equals one millisecond, which matches the hand-written fakes
+    /// used by the crate tests. Production sessions start through
+    /// [`PlaybackWorker::start_resampled_with_mode`], which supplies the real
+    /// output sample rate for millisecond-to-frame conversion.
     pub fn new(decoder: Box<dyn Decoder>, buffer_frames: usize) -> (Self, PlaybackConsumer) {
         Self::new_with_mode(decoder, buffer_frames, PlaybackMode::OneShot)
     }
@@ -52,7 +71,7 @@ impl PlaybackEngine {
         buffer_frames: usize,
         mode: PlaybackMode,
     ) -> (Self, PlaybackConsumer) {
-        Self::new_with_resampler_mode(decoder, buffer_frames, None, mode)
+        Self::new_with_resampler_mode(decoder, buffer_frames, None, mode, 1_000)
     }
 
     pub(crate) fn new_with_resampler_mode(
@@ -60,6 +79,7 @@ impl PlaybackEngine {
         buffer_frames: usize,
         resampler: Option<SampleRateConverter>,
         mode: PlaybackMode,
+        sample_rate: u32,
     ) -> (Self, PlaybackConsumer) {
         assert!(buffer_frames > 0, "playback buffer must contain at least one frame");
         let (producer, consumer) = HeapRb::new(buffer_frames).split();
@@ -85,6 +105,12 @@ impl PlaybackEngine {
                 resampler,
                 pending: VecDeque::new(),
                 mode,
+                sample_rate,
+                loop_region: None,
+                region_produced_frames: 0,
+                region_boundary_reached: false,
+                pending_position_reset: None,
+                decoder_position_ms: 0,
                 cycle_produced: false,
                 loop_cache: Vec::new(),
                 loop_cache_overflowed: false,
@@ -106,13 +132,69 @@ impl PlaybackEngine {
         )
     }
 
+    /// Returns the length of the active loop region in produced frames.
+    fn region_length_frames(&self) -> u64 {
+        let Some(region) = self.loop_region else { return 0 };
+        if self.sample_rate == 0 {
+            return 0;
+        }
+        let length_ms = region.end().as_millis().saturating_sub(region.start().as_millis());
+        length_ms.saturating_mul(u64::from(self.sample_rate)) / 1_000
+    }
+
+    /// Returns the region start in produced frames.
+    fn region_start_frames(&self) -> u64 {
+        let Some(region) = self.loop_region else { return 0 };
+        if self.sample_rate == 0 {
+            return 0;
+        }
+        region.start().as_millis().saturating_mul(u64::from(self.sample_rate)) / 1_000
+    }
+
+    /// Pushes produced samples into the ring buffer, honoring the active
+    /// A–B region: production stops at the region end so the worker can wrap
+    /// back to the region start.
+    fn push_buffered(&mut self, samples: &[f32]) -> usize {
+        let generation = self.control.generation();
+        let mut pushed = 0;
+        for &value in samples {
+            if self.region_boundary_reached {
+                break;
+            }
+            let region_len = self.region_length_frames();
+            if self.loop_region.is_some() && self.region_produced_frames >= region_len {
+                self.region_boundary_reached = true;
+                break;
+            }
+            let position_reset = self.pending_position_reset.take();
+            if self.producer.try_push(BufferedSample { value, generation, position_reset }).is_err()
+            {
+                if position_reset.is_some() {
+                    self.pending_position_reset = position_reset;
+                }
+                break;
+            }
+            pushed += 1;
+            self.frames_written += 1;
+            if self.loop_region.is_some() {
+                self.region_produced_frames += 1;
+                if self.region_produced_frames >= region_len {
+                    self.region_boundary_reached = true;
+                }
+            }
+            self.cache_cycle_sample(value);
+        }
+        pushed
+    }
+
     /// Reads one chunk from the decoder and pushes frames into the ring buffer.
     ///
     /// Returns `Ok(true)` if more data may be available,
-    /// `Ok(false)` if the decoder is exhausted (EOF).
+    /// `Ok(false)` if the decoder is exhausted (EOF) or the active A–B
+    /// region boundary was reached.
     /// On EOF the ring buffer may still hold unread frames.
     pub fn process_chunk(&mut self) -> Result<bool, PlaybackError> {
-        if self.eof {
+        if self.eof || self.region_boundary_reached {
             return Ok(false);
         }
 
@@ -128,14 +210,26 @@ impl PlaybackEngine {
 
         if let Some(resampler) = &mut self.resampler {
             match resampler.next_chunk(&mut *self.decoder)? {
-                Some(samples) => self.pending.extend(samples),
+                Some(samples) => {
+                    self.decoder_position_ms = resampler.source_position_ms();
+                    self.pending.extend(samples);
+                },
                 None => self.eof = true,
             }
             self.drain_pending();
-            return Ok(!self.eof || !self.pending.is_empty());
+            return Ok(!self.eof && !self.region_boundary_reached || !self.pending.is_empty());
         }
 
-        let mut buf = vec![0.0f32; self.buffer_size.min(available)];
+        // Cap decoder reads at the region boundary so a wrap or a clear never
+        // discards an unbounded read-ahead beyond B.
+        let capacity = self.buffer_size.min(available);
+        let read_cap = if self.loop_region.is_some() {
+            let remaining = self.region_length_frames().saturating_sub(self.region_produced_frames);
+            capacity.min(remaining as usize)
+        } else {
+            capacity
+        };
+        let mut buf = vec![0.0f32; read_cap];
         let frames = self.decoder.read(&mut buf)?;
 
         if frames > buf.len() {
@@ -152,19 +246,17 @@ impl PlaybackEngine {
             return Ok(false);
         }
 
-        // Push available frames into the ring buffer (non-blocking).
-        let generation = self.control.generation();
-        let pushed =
-            self.producer.push_iter(buf[..frames].iter().copied().map(|value| BufferedSample {
-                value,
-                generation,
-                resets_position: false,
-            }));
-        self.cache_cycle_samples(&buf[..pushed]);
-        self.frames_written += pushed as u64;
+        if self.sample_rate != 0 {
+            self.decoder_position_ms +=
+                (frames as u64).saturating_mul(1_000) / u64::from(self.sample_rate);
+        }
+
+        // Push available frames into the ring buffer (non-blocking),
+        // stopping at the region boundary when one is active.
+        let pushed = self.push_buffered(&buf[..frames]);
         self.cycle_produced |= pushed > 0;
 
-        Ok(true)
+        Ok(!self.region_boundary_reached)
     }
 
     /// Returns the number of frames the decoder has made available.
@@ -182,16 +274,12 @@ impl PlaybackEngine {
     }
 
     fn drain_pending(&mut self) {
-        let generation = self.control.generation();
-        while self.producer.vacant_len() > 0 {
+        while self.producer.vacant_len() > 0 && !self.region_boundary_reached {
             let Some(value) = self.pending.pop_front() else { break };
-            let _ = self.producer.try_push(BufferedSample {
-                value,
-                generation,
-                resets_position: false,
-            });
-            self.cache_cycle_sample(value);
-            self.frames_written += 1;
+            let pushed = self.push_buffered(std::slice::from_ref(&value));
+            if pushed == 0 {
+                break;
+            }
             self.cycle_produced = true;
         }
     }
@@ -223,10 +311,11 @@ impl PlaybackEngine {
         let generation = self.control.generation();
         let mut pushed = false;
         while self.producer.vacant_len() > 0 {
-            let resets_position = self.loop_cache_offset == 0;
+            let position_reset =
+                if self.loop_cache_offset == 0 { Some(self.region_start_frames()) } else { None };
             let value = self.loop_cache[self.loop_cache_offset];
             self.loop_cache_offset = (self.loop_cache_offset + 1) % self.loop_cache.len();
-            let _ = self.producer.try_push(BufferedSample { value, generation, resets_position });
+            let _ = self.producer.try_push(BufferedSample { value, generation, position_reset });
             self.frames_written += 1;
             pushed = true;
         }
@@ -254,6 +343,121 @@ impl PlaybackEngine {
                 self.control.cancel_seek();
                 Err(PlaybackError::from(error))
             },
+        }
+    }
+
+    /// Activates an A–B region and positions the decoder at its start.
+    ///
+    /// The initial positioning seek is skipped when the decoder is already
+    /// at the region start (a fresh worker with `A == 0`), which lets short
+    /// regions replay purely from the prebuffer without any decoder seek.
+    pub(crate) fn set_loop_region(&mut self, region: LoopRegion) -> Result<(), PlaybackError> {
+        self.loop_region = Some(region);
+        self.region_produced_frames = 0;
+        self.region_boundary_reached = false;
+        self.cycle_produced = false;
+        self.loop_cache.clear();
+        self.loop_cache_overflowed = false;
+        self.loop_cache_offset = 0;
+        self.eof = false;
+        self.pending.clear();
+        if region.start().as_millis() == 0 && self.decoder_position_ms == 0 {
+            if let Some(resampler) = &mut self.resampler {
+                resampler.reset();
+            }
+            return Ok(());
+        }
+        let target = pulseseek_domain::playback::position::Duration::Unknown
+            .seek_to(region.start())
+            .expect("region start is a valid seek target");
+        self.control.begin_seek();
+        self.control.wait_for_seek_fade();
+        match self.decoder.seek(target) {
+            Ok(position) => {
+                self.decoder_position_ms = position.as_millis();
+                self.control.set_position_frames(self.region_start_frames());
+                self.control.complete_seek();
+                if let Some(resampler) = &mut self.resampler {
+                    resampler.reset();
+                }
+                Ok(())
+            },
+            Err(error) => {
+                self.loop_region = None;
+                self.control.cancel_seek();
+                Err(PlaybackError::from(error))
+            },
+        }
+    }
+
+    /// Deactivates the A–B region without repositioning the decoder.
+    ///
+    /// Playback continues from the current position under the selected
+    /// end-of-file mode.
+    pub(crate) fn clear_loop_region(&mut self) {
+        self.loop_region = None;
+        self.region_produced_frames = 0;
+        self.region_boundary_reached = false;
+    }
+
+    /// Rebases region progress after a user seek to a position inside the
+    /// region. The prebuffer is invalidated so the next wrap returns to the
+    /// true region start instead of the seek point.
+    pub(crate) fn rebase_loop_region(&mut self, seek_position_ms: u64) {
+        let Some(region) = self.loop_region else { return };
+        let start_ms = region.start().as_millis();
+        let offset_ms = seek_position_ms.saturating_sub(start_ms);
+        let frames = if self.sample_rate == 0 {
+            0
+        } else {
+            offset_ms.saturating_mul(u64::from(self.sample_rate)) / 1_000
+        };
+        self.region_produced_frames = frames;
+        self.region_boundary_reached = false;
+        self.loop_cache.clear();
+        self.loop_cache_overflowed = true;
+        self.loop_cache_offset = 0;
+    }
+
+    /// Returns whether a seek target lies inside the active region
+    /// (half-open `[A, B)`).
+    pub(crate) fn loop_region_contains_ms(&self, position_ms: u64) -> bool {
+        self.loop_region.is_some_and(|region| {
+            let position = Position::from_millis(position_ms);
+            region.contains(position)
+        })
+    }
+
+    /// Seeks the decoder back to the region start after a wrap when the
+    /// region is too long to replay from the prebuffer.
+    ///
+    /// Unlike a user seek, the wrap does not bump the generation: the ring
+    /// buffer may still hold the tail of the previous cycle, and the callback
+    /// consumes it contiguously before the refill resumes at the region
+    /// start.
+    pub(crate) fn restart_region(&mut self) -> Result<(), PlaybackError> {
+        let Some(region) = self.loop_region else {
+            return Err(PlaybackError { kind: PlaybackErrorKind::NoFrames });
+        };
+        let target = pulseseek_domain::playback::position::Duration::Unknown
+            .seek_to(region.start())
+            .expect("region start is a valid seek target");
+        match self.decoder.seek(target) {
+            Ok(position) => {
+                self.eof = false;
+                self.pending.clear();
+                self.cycle_produced = false;
+                self.region_produced_frames = 0;
+                self.region_boundary_reached = false;
+                self.decoder_position_ms = position.as_millis();
+                if let Some(resampler) = &mut self.resampler {
+                    resampler.reset();
+                }
+                self.control.set_position_frames(self.region_start_frames());
+                self.pending_position_reset = Some(self.region_start_frames());
+                Ok(())
+            },
+            Err(error) => Err(PlaybackError::from(error)),
         }
     }
 }

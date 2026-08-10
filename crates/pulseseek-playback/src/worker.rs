@@ -5,6 +5,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use pulseseek_domain::decoder::{DecodeError, Decoder};
+use pulseseek_domain::playback::loop_region::LoopRegion;
 use pulseseek_domain::playback::mode::PlaybackMode;
 use pulseseek_domain::playback::position::{Position, SeekTarget};
 
@@ -26,6 +27,7 @@ pub struct PlaybackWorker {
 enum WorkerCommand {
     Seek { target: SeekTarget, response: SyncSender<Result<Position, PlaybackError>> },
     SetMode { mode: PlaybackMode, response: SyncSender<Result<(), PlaybackError>> },
+    SetLoopRegion { region: Option<LoopRegion>, response: SyncSender<Result<(), PlaybackError>> },
 }
 
 fn execute_worker_command(engine: &mut PlaybackEngine, command: WorkerCommand) -> bool {
@@ -42,8 +44,20 @@ fn execute_worker_command(engine: &mut PlaybackEngine, command: WorkerCommand) -
                     engine.loop_cache.clear();
                     engine.loop_cache_overflowed = false;
                     engine.loop_cache_offset = 0;
+                    engine.decoder_position_ms = position.as_millis();
                     if let Some(resampler) = &mut engine.resampler {
                         resampler.reset();
+                    }
+                    // A seek inside the active A–B region keeps the loop and
+                    // rebases its progress; a seek outside it disables the
+                    // region so the user is never trapped inside the loop.
+                    if engine.loop_region.is_some() {
+                        let position_ms = position.as_millis();
+                        if engine.loop_region_contains_ms(position_ms) {
+                            engine.rebase_loop_region(position_ms);
+                        } else {
+                            engine.clear_loop_region();
+                        }
                     }
                     engine.control.complete_user_seek();
                     Ok(position)
@@ -60,6 +74,17 @@ fn execute_worker_command(engine: &mut PlaybackEngine, command: WorkerCommand) -
             engine.mode = mode;
             let _ = response.send(Ok(()));
             mode == PlaybackMode::LoopCurrent
+        },
+        WorkerCommand::SetLoopRegion { region, response } => {
+            let result = match region {
+                Some(region) => engine.set_loop_region(region),
+                None => {
+                    engine.clear_loop_region();
+                    Ok(())
+                },
+            };
+            let _ = response.send(result);
+            true
         },
     }
 }
@@ -113,8 +138,13 @@ impl PlaybackWorker {
         } else {
             Some(SampleRateConverter::new(channels, source_rate, target_rate)?)
         };
-        let (engine, consumer) =
-            PlaybackEngine::new_with_resampler_mode(decoder, buffer_frames, resampler, mode);
+        let (engine, consumer) = PlaybackEngine::new_with_resampler_mode(
+            decoder,
+            buffer_frames,
+            resampler,
+            mode,
+            target_rate,
+        );
         Ok(Self::start_engine(engine, consumer))
     }
 
@@ -141,6 +171,41 @@ impl PlaybackWorker {
                     }
                 }
                 if reached_eof {
+                    if engine.loop_region.is_some() && !engine.eof {
+                        // A–B region boundary: wrap back to the region start.
+                        // Short regions replay from the prebuffer; long ones
+                        // seek the decoder back to A.
+                        if engine.has_cached_cycle() {
+                            worker_finished.store(false, Ordering::Release);
+                            if !engine.replay_cached_cycle() {
+                                thread::yield_now();
+                            }
+                            continue;
+                        }
+                        if !engine.cycle_produced {
+                            if engine.control.claim_failure() {
+                                let _ = event_tx.send(PlaybackEvent::Failed);
+                                *worker_error.lock().expect("playback error mutex poisoned") =
+                                    Some(PlaybackError { kind: PlaybackErrorKind::NoFrames });
+                            }
+                            break;
+                        }
+                        match engine.restart_region() {
+                            Ok(()) => {
+                                reached_eof = false;
+                                worker_finished.store(false, Ordering::Release);
+                            },
+                            Err(playback_error) => {
+                                if engine.control.claim_failure() {
+                                    let _ = event_tx.send(PlaybackEvent::Failed);
+                                    *worker_error.lock().expect("playback error mutex poisoned") =
+                                        Some(playback_error);
+                                }
+                                break;
+                            },
+                        }
+                        continue;
+                    }
                     if engine.mode == PlaybackMode::LoopCurrent {
                         if engine.has_cached_cycle() {
                             worker_finished.store(false, Ordering::Release);
@@ -284,6 +349,25 @@ impl PlaybackWorker {
             .send(WorkerCommand::SetMode { mode, response: response_tx })
             .map_err(|_| PlaybackError { kind: PlaybackErrorKind::WorkerStopped })?;
         response_rx.recv().map_err(|_| PlaybackError { kind: PlaybackErrorKind::WorkerStopped })?
+    }
+
+    /// Activates an A–B region on the worker thread, or deactivates it when
+    /// `None` is passed.
+    ///
+    /// Activating a region positions the decoder at its start and loops the
+    /// selected region without advancing to another file. Deactivating
+    /// resumes the selected end-of-file mode from the current position.
+    pub fn set_loop_region(&self, region: Option<LoopRegion>) -> Result<(), PlaybackError> {
+        let (response_tx, response_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::SetLoopRegion { region, response: response_tx })
+            .map_err(|_| PlaybackError { kind: PlaybackErrorKind::WorkerStopped })?;
+        response_rx.recv().map_err(|_| PlaybackError { kind: PlaybackErrorKind::WorkerStopped })?
+    }
+
+    /// Deactivates the active A–B region without repositioning playback.
+    pub fn clear_loop_region(&self) -> Result<(), PlaybackError> {
+        self.set_loop_region(None)
     }
 }
 

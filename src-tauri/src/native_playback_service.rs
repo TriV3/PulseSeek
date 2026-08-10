@@ -7,8 +7,9 @@ use pulseseek_audio_cpal::CpalAudioOutput;
 use pulseseek_domain::audio_output::{AudioOutput, DeviceId, StreamState};
 use pulseseek_domain::decoder::StreamMetadata;
 use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContext, ErrorCategory};
+use pulseseek_domain::playback::loop_region::LoopRegion;
 use pulseseek_domain::playback::mode::PlaybackMode;
-use pulseseek_domain::playback::position::Position;
+use pulseseek_domain::playback::position::{Duration, Position};
 use pulseseek_domain::visualization::{VisualizationMode, VisualizationSettings};
 use pulseseek_playback::{PlaybackControl, PlaybackWorker};
 
@@ -118,6 +119,14 @@ impl NativePlaybackService {
         ApplicationError::new(
             ErrorCategory::Unavailable,
             DiagnosticContext::new(DiagnosticCode::AudioOutput),
+            std::io::Error::other(message),
+        )
+    }
+
+    fn invalid_region(message: &str) -> ApplicationError {
+        ApplicationError::new(
+            ErrorCategory::InvalidInput,
+            DiagnosticContext::new(DiagnosticCode::PlaybackControl),
             std::io::Error::other(message),
         )
     }
@@ -364,6 +373,40 @@ impl PlaybackService for NativePlaybackService {
         Ok(mode)
     }
 
+    fn set_loop_region(&mut self, start_ms: u64, end_ms: u64) -> Result<u64, ApplicationError> {
+        let duration_ms = self
+            .current_metadata
+            .as_ref()
+            .and_then(metadata_duration_ms)
+            .ok_or_else(|| Self::invalid_region("no active playback with a known duration"))?;
+        let region = LoopRegion::new(
+            Position::from_millis(start_ms),
+            Position::from_millis(end_ms),
+            Duration::from_millis(duration_ms),
+        )
+        .map_err(|error| Self::invalid_region(&error.to_string()))?;
+        let worker = self.worker.as_ref().ok_or_else(|| Self::unavailable("no active playback"))?;
+        worker
+            .set_loop_region(Some(region))
+            .map_err(|error| Self::unavailable(&format!("set loop region failed: {error}")))?;
+        let confirmed = region.start().as_millis();
+        if let (Some(control), Some(sample_rate)) = (&self.control, self.output_sample_rate) {
+            let frames = confirmed.saturating_mul(u64::from(sample_rate)) / 1_000;
+            control.set_position_frames(frames);
+        }
+        let _ = self.events.emit_position(confirmed, Some(duration_ms));
+        Ok(confirmed)
+    }
+
+    fn clear_loop_region(&mut self) -> Result<(), ApplicationError> {
+        if let Some(ref worker) = self.worker {
+            worker.clear_loop_region().map_err(|error| {
+                Self::unavailable(&format!("clear loop region failed: {error}"))
+            })?;
+        }
+        Ok(())
+    }
+
     fn reconcile_path(&mut self, old_path: &str, new_path: &str) -> Result<bool, ApplicationError> {
         let Some(current) = self.current_path.as_deref() else {
             return Ok(false);
@@ -444,6 +487,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use pulseseek_audio_cpal::CpalAudioOutput;
+    use pulseseek_domain::error::ErrorContract;
 
     use super::*;
 
@@ -499,5 +543,60 @@ mod tests {
             .expect("reconcile succeeds");
         assert!(!reconciled, "no active session means no reconciliation");
         assert!(service.current_path.is_none());
+    }
+
+    fn metadata_with_duration(ms: u64) -> StreamMetadata {
+        StreamMetadata {
+            sample_rate: 44_100,
+            channels: 2,
+            duration: Duration::from_millis(ms),
+            bit_depth: Some(16),
+            codec: "PCM",
+        }
+    }
+
+    #[test]
+    fn set_loop_region_rejects_reversed_points_before_touching_worker() {
+        let mut service = service();
+        service.current_metadata = Some(metadata_with_duration(10_000));
+
+        let error = service.set_loop_region(5_000, 2_000).expect_err("reversed region is rejected");
+        assert_eq!(error.user_descriptor().category(), ErrorCategory::InvalidInput);
+        assert_eq!(error.diagnostic_context().code(), "playback.control");
+    }
+
+    #[test]
+    fn set_loop_region_rejects_points_beyond_duration() {
+        let mut service = service();
+        service.current_metadata = Some(metadata_with_duration(10_000));
+
+        let error =
+            service.set_loop_region(9_000, 11_000).expect_err("out-of-bounds end is rejected");
+        assert_eq!(error.user_descriptor().category(), ErrorCategory::InvalidInput);
+    }
+
+    #[test]
+    fn set_loop_region_requires_an_active_session() {
+        let mut service = service();
+
+        let error =
+            service.set_loop_region(1_000, 5_000).expect_err("no session means no duration");
+        assert_eq!(error.user_descriptor().category(), ErrorCategory::InvalidInput);
+    }
+
+    #[test]
+    fn set_loop_region_requires_a_running_worker() {
+        let mut service = service();
+        service.current_metadata = Some(metadata_with_duration(10_000));
+
+        let error = service.set_loop_region(1_000, 5_000).expect_err("no worker means no engine");
+        assert_eq!(error.user_descriptor().category(), ErrorCategory::Unavailable);
+    }
+
+    #[test]
+    fn clear_loop_region_is_a_noop_without_an_active_worker() {
+        let mut service = service();
+
+        service.clear_loop_region().expect("clearing without a worker succeeds");
     }
 }

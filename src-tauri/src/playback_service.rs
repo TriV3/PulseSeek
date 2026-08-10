@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContext, ErrorCategory};
+use pulseseek_domain::playback::loop_region::LoopRegion;
 use pulseseek_domain::playback::mode::PlaybackMode;
+use pulseseek_domain::playback::position::{Duration, Position};
 use pulseseek_domain::visualization::VisualizationSettings;
 
 use crate::playback_events::PlaybackEventEmitter;
@@ -34,6 +36,14 @@ pub trait PlaybackService: Send {
 
     /// Changes end-of-file playback mode.
     fn set_mode(&mut self, mode: PlaybackMode) -> Result<PlaybackMode, ApplicationError>;
+
+    /// Activates an A–B repeat region and returns the confirmed start
+    /// position. Invalid regions (reversed, equal, or out-of-bounds points)
+    /// are rejected before they can reach the audio engine.
+    fn set_loop_region(&mut self, start_ms: u64, end_ms: u64) -> Result<u64, ApplicationError>;
+
+    /// Deactivates the active A–B repeat region.
+    fn clear_loop_region(&mut self) -> Result<(), ApplicationError>;
 
     /// Applies optional visualization work without restarting playback.
     fn set_visualization_settings(
@@ -72,11 +82,15 @@ pub struct FakePlaybackService {
     pub seek_call_count: u64,
     pub set_volume_call_count: u64,
     pub select_output_device_call_count: u64,
+    pub set_loop_region_call_count: u64,
+    pub clear_loop_region_call_count: u64,
     pub last_play_path: Option<String>,
     pub last_seek_position: Option<u64>,
     pub last_volume_gain: Option<f64>,
     pub last_volume_muted: Option<bool>,
     pub last_output_device_id: Option<String>,
+    pub last_loop_region_start: Option<u64>,
+    pub last_loop_region_end: Option<u64>,
     /// Number of `reconcile_path` calls.
     pub reconcile_path_call_count: u64,
     /// Last `old_path` passed to `reconcile_path`.
@@ -89,6 +103,9 @@ pub struct FakePlaybackService {
     pub fail_with: Option<ErrorCategory>,
     /// When set, seek returns this position.
     pub seek_result: Option<u64>,
+    /// Track duration used to validate loop regions. `None` makes the fake
+    /// reject every region with an unknown-duration error.
+    pub loop_region_duration_ms: Option<u64>,
     pub mode: PlaybackMode,
     pub visualization_settings: VisualizationSettings,
 }
@@ -103,17 +120,22 @@ impl FakePlaybackService {
             seek_call_count: 0,
             set_volume_call_count: 0,
             select_output_device_call_count: 0,
+            set_loop_region_call_count: 0,
+            clear_loop_region_call_count: 0,
             last_play_path: None,
             last_seek_position: None,
             last_volume_gain: None,
             last_volume_muted: None,
             last_output_device_id: None,
+            last_loop_region_start: None,
+            last_loop_region_end: None,
             reconcile_path_call_count: 0,
             last_reconcile_old_path: None,
             last_reconcile_new_path: None,
             reconcile_path_result: None,
             fail_with: None,
             seek_result: None,
+            loop_region_duration_ms: Some(100_000),
             mode: PlaybackMode::OneShot,
             visualization_settings: VisualizationSettings::default(),
         }
@@ -128,6 +150,14 @@ impl FakePlaybackService {
             )),
             None => Ok(()),
         }
+    }
+
+    fn invalid_region(&self, message: &str) -> ApplicationError {
+        ApplicationError::new(
+            ErrorCategory::InvalidInput,
+            DiagnosticContext::new(DiagnosticCode::PlaybackControl),
+            std::io::Error::other(message),
+        )
     }
 }
 
@@ -171,6 +201,33 @@ impl PlaybackService for FakePlaybackService {
         self.check_fail()?;
         self.mode = mode;
         Ok(self.mode)
+    }
+
+    fn set_loop_region(&mut self, start_ms: u64, end_ms: u64) -> Result<u64, ApplicationError> {
+        self.set_loop_region_call_count += 1;
+        self.last_loop_region_start = Some(start_ms);
+        self.last_loop_region_end = Some(end_ms);
+        self.check_fail()?;
+        let duration = match self.loop_region_duration_ms {
+            Some(ms) => Duration::from_millis(ms),
+            None => {
+                return Err(
+                    self.invalid_region("loop region cannot be validated without a known duration")
+                );
+            },
+        };
+        let region = LoopRegion::new(
+            Position::from_millis(start_ms),
+            Position::from_millis(end_ms),
+            duration,
+        )
+        .map_err(|error| self.invalid_region(&error.to_string()))?;
+        Ok(region.start().as_millis())
+    }
+
+    fn clear_loop_region(&mut self) -> Result<(), ApplicationError> {
+        self.clear_loop_region_call_count += 1;
+        self.check_fail()
     }
 
     fn set_visualization_settings(

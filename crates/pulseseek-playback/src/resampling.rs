@@ -116,6 +116,15 @@ impl SampleRateConverter {
         self.pending.drain(..).collect()
     }
 
+    /// Decoder (source) position in milliseconds.
+    pub(crate) fn source_position_ms(&self) -> u64 {
+        if self.source_rate == 0 || self.channels == 0 {
+            return 0;
+        }
+        let source_frames = self.source_samples / self.channels as u64;
+        source_frames.saturating_mul(1_000) / u64::from(self.source_rate)
+    }
+
     pub(crate) fn reset(&mut self) {
         self.resampler.reset();
         self.input.fill(0.0);

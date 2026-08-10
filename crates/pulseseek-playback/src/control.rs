@@ -179,8 +179,7 @@ impl PlaybackConsumer {
         }
         let mut written = 0;
         for sample in buf.iter_mut() {
-            let mut buffered =
-                [BufferedSample { value: 0.0, generation: 0, resets_position: false }];
+            let mut buffered = [BufferedSample { value: 0.0, generation: 0, position_reset: None }];
             if self.consume_current(&mut buffered) == 0 {
                 break;
             }
@@ -350,8 +349,8 @@ impl PlaybackConsumer {
         if self.consumer.pop_slice(output) != 1 || output[0].generation != generation {
             return 0;
         }
-        if output[0].resets_position {
-            self.control.set_position_frames(0);
+        if let Some(frames) = output[0].position_reset {
+            self.control.set_position_frames(frames);
         }
         1
     }
