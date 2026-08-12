@@ -60,7 +60,7 @@ export function usePlaybackTransport({
   const loopRegionRef = useRef(loopRegion);
   const abOperationRef = useRef(0);
   const activeSessionRef = useRef(
-    playbackStatus !== "idle" && playbackStatus !== "failed",
+    playbackStatus === "playing" || playbackStatus === "paused",
   );
   const regionNeedsRestoreRef = useRef(false);
 
@@ -324,7 +324,14 @@ export function usePlaybackTransport({
     void Promise.resolve(
       onCompleted(() => {
         if (disposed) return;
+        if (!activeSessionRef.current) return;
         const context = playbackContext.current;
+        if (
+          context.playbackGeneration !== playbackGeneration ||
+          context.selectedEntryId !== selectedEntryId
+        ) {
+          return;
+        }
         const index = context.entries.findIndex(
           (entry) => entry.id === context.selectedEntryId,
         );
@@ -353,12 +360,16 @@ export function usePlaybackTransport({
       unlistenPosition?.();
       unlistenCompleted?.();
     };
-  }, [resetABLocal]);
+  }, [playbackGeneration, resetABLocal, selectedEntryId]);
 
   useEffect(() => {
-    if (playbackStatus === "loading" || playbackStatus === "playing") {
+    if (playbackStatus === "playing" || playbackStatus === "paused") {
       activeSessionRef.current = true;
-    } else if (playbackStatus === "idle" || playbackStatus === "failed") {
+    } else if (
+      playbackStatus === "loading" ||
+      playbackStatus === "idle" ||
+      playbackStatus === "failed"
+    ) {
       activeSessionRef.current = false;
     }
   }, [playbackGeneration, playbackStatus]);
@@ -452,8 +463,9 @@ export function usePlaybackTransport({
       const selected = playableEntries[selectedIndex];
       return selected ? onSelectEntry(selected) : Promise.resolve();
     },
-    handleStop: () =>
-      runCommand(async () => {
+    handleStop: async () => {
+      activeSessionRef.current = false;
+      const succeeded = await runCommand(async () => {
         await stop();
         activeSessionRef.current = false;
         regionNeedsRestoreRef.current = loopRegionRef.current !== null;
@@ -465,7 +477,12 @@ export function usePlaybackTransport({
             generation: playbackGeneration,
           });
         }
-      }).then(() => undefined),
+      });
+      if (!succeeded) {
+        activeSessionRef.current =
+          playbackStatus === "playing" || playbackStatus === "paused";
+      }
+    },
     handlePrevious: () => {
       if (canPrevious) {
         return onSelectEntry(playableEntries[selectedIndex - 1]);

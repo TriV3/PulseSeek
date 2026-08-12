@@ -6,8 +6,11 @@ selection when the command fails. Supported values are one-shot, loop-current,
 sequential, and random.
 
 The selector configures end-of-file behavior already modeled by the playback
-domain and worker. Automatic sequential and random file selection remain
-separate follow-up behavior.
+domain and worker. In sequential mode, natural completion advances through the
+current visible, playable, sorted file list. Folders, filtered-out entries, and
+entries removed before completion are never selected. Completion at the last
+visible item stops normally, and explicit Stop never advances playback.
+Automatic random file selection remains separate follow-up behavior.
 
 The current desktop bootstrap still uses `FakePlaybackService`, as established
 by the pre-existing Tauri bootstrap. The command contract returns the mode
