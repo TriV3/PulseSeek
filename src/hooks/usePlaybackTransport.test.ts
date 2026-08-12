@@ -181,6 +181,201 @@ describe("usePlaybackTransport", () => {
     random.mockRestore();
   });
 
+  it("does not advance after stop when a stale completion arrives", async () => {
+    let complete: (() => void) | undefined;
+    onCompletedMock.mockImplementationOnce(async (handler: () => void) => {
+      complete = handler;
+      return () => undefined;
+    });
+    const onSelectEntry = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        playbackMode: "sequential",
+        onSelectEntry,
+      }),
+    );
+
+    stopMock.mockResolvedValue(undefined);
+    await act(async () => result.current.handleStop());
+    await act(async () => complete?.());
+
+    expect(onSelectEntry).not.toHaveBeenCalled();
+  });
+
+  it("does not advance a newer session from an older completion", async () => {
+    let complete: (() => void) | undefined;
+    onCompletedMock.mockImplementation(async (handler: () => void) => {
+      complete = handler;
+      return () => undefined;
+    });
+    const onSelectEntry = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = renderHook(
+      ({
+        selectedEntryId,
+        generation,
+      }: {
+        selectedEntryId: string;
+        generation: number;
+      }) =>
+        usePlaybackTransport({
+          entries,
+          selectedEntryId,
+          playbackGeneration: generation,
+          playbackStatus: "playing",
+          playbackMode: "sequential",
+          onSelectEntry,
+        }),
+      { initialProps: { selectedEntryId: "a.wav", generation: 1 } },
+    );
+
+    rerender({ selectedEntryId: "b.wav", generation: 2 });
+    await act(async () => complete?.());
+
+    expect(onSelectEntry).not.toHaveBeenCalled();
+  });
+
+  it("invalidates completion before an in-flight Stop command resolves", async () => {
+    let complete: (() => void) | undefined;
+    onCompletedMock.mockImplementationOnce(async (handler: () => void) => {
+      complete = handler;
+      return () => undefined;
+    });
+    let resolveStop: (() => void) | undefined;
+    stopMock.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveStop = resolve;
+      }),
+    );
+    const onSelectEntry = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        playbackMode: "sequential",
+        onSelectEntry,
+      }),
+    );
+
+    let stopping: Promise<void>;
+    act(() => {
+      stopping = result.current.handleStop();
+    });
+    await act(async () => complete?.());
+    expect(onSelectEntry).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveStop?.();
+      await stopping!;
+    });
+  });
+
+  it("follows the supplied browser ordering rather than entry identifiers", async () => {
+    let complete: (() => void) | undefined;
+    onCompletedMock.mockImplementationOnce(async (handler: () => void) => {
+      complete = handler;
+      return () => undefined;
+    });
+    const orderedEntries = [entries[1], entries[0]];
+    const onSelectEntry = vi.fn().mockResolvedValue(undefined);
+    renderHook(() =>
+      usePlaybackTransport({
+        entries: orderedEntries,
+        selectedEntryId: "b.wav",
+        playbackStatus: "playing",
+        playbackMode: "sequential",
+        onSelectEntry,
+      }),
+    );
+
+    await act(async () => complete?.());
+
+    expect(onSelectEntry).toHaveBeenCalledWith(entries[0]);
+  });
+
+  it("advances through the visible list after filtering removes an entry", async () => {
+    let complete: (() => void) | undefined;
+    onCompletedMock.mockImplementationOnce(async (handler: () => void) => {
+      complete = handler;
+      return () => undefined;
+    });
+    const filteredEntries: BrowserEntry[] = [
+      entries[0],
+      { id: "c.wav", name: "c.wav", kind: "playable" },
+    ];
+    const onSelectEntry = vi.fn().mockResolvedValue(undefined);
+    renderHook(() =>
+      usePlaybackTransport({
+        entries: filteredEntries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        playbackMode: "sequential",
+        onSelectEntry,
+      }),
+    );
+
+    await act(async () => complete?.());
+
+    expect(onSelectEntry).toHaveBeenCalledWith(filteredEntries[1]);
+  });
+
+  it("skips a removed next item and advances to the next visible playable item", async () => {
+    let complete: (() => void) | undefined;
+    onCompletedMock.mockImplementationOnce(async (handler: () => void) => {
+      complete = handler;
+      return () => undefined;
+    });
+    const onSelectEntry = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = renderHook(
+      ({ entries: currentEntries }: { entries: BrowserEntry[] }) =>
+        usePlaybackTransport({
+          entries: currentEntries,
+          selectedEntryId: "a.wav",
+          playbackStatus: "playing",
+          playbackMode: "sequential",
+          onSelectEntry,
+        }),
+      { initialProps: { entries } },
+    );
+
+    rerender({
+      entries: [entries[0], { id: "c.wav", name: "c.wav", kind: "playable" }],
+    });
+    await act(async () => complete?.());
+
+    expect(onSelectEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "c.wav" }),
+    );
+  });
+
+  it("stops at the last visible playable item", async () => {
+    let complete: (() => void) | undefined;
+    onCompletedMock.mockImplementationOnce(async (handler: () => void) => {
+      complete = handler;
+      return () => undefined;
+    });
+    const onSelectEntry = vi.fn().mockResolvedValue(undefined);
+    renderHook(() =>
+      usePlaybackTransport({
+        entries: [
+          { id: "folder", name: "folder", kind: "folder" },
+          { id: "a.wav", name: "a.wav", kind: "playable" },
+        ],
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        playbackMode: "sequential",
+        onSelectEntry,
+      }),
+    );
+
+    await act(async () => complete?.());
+
+    expect(onSelectEntry).not.toHaveBeenCalled();
+  });
+
   it("seeks, changes volume, and mutes", async () => {
     seekMock.mockResolvedValue(12_000);
     setVolumeMock.mockResolvedValue(undefined);
