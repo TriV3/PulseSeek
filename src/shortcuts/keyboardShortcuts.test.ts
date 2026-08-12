@@ -22,6 +22,33 @@ describe("keyboard shortcuts", () => {
     expect(ids).not.toContain("clear_ab_repeat");
   });
 
+  it("enables A-B selection with bracket and toggle defaults", () => {
+    for (const id of ["set_ab_start", "set_ab_end", "toggle_ab_repeat"]) {
+      const entry = SHORTCUT_ACTIONS.find((action) => action.id === id);
+      expect(entry?.available, `${id} must be available`).toBe(true);
+    }
+    expect(DEFAULT_SHORTCUTS.set_ab_start).toEqual({
+      key: "[",
+      primary: false,
+      shift: false,
+      alt: false,
+    });
+    expect(DEFAULT_SHORTCUTS.set_ab_end).toEqual({
+      key: "]",
+      primary: false,
+      shift: false,
+      alt: false,
+    });
+    expect(DEFAULT_SHORTCUTS.toggle_ab_repeat).toEqual({
+      key: "a",
+      primary: false,
+      shift: false,
+      alt: false,
+    });
+    expect(validateShortcutBindings(DEFAULT_SHORTCUTS, "macos")).toEqual({});
+    expect(validateShortcutBindings(DEFAULT_SHORTCUTS, "linux")).toEqual({});
+  });
+
   it("matches logical keys and every modifier exactly", () => {
     const binding = { key: "o", primary: true, shift: false, alt: false };
 

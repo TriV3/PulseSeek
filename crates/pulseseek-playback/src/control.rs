@@ -33,6 +33,8 @@ pub struct PlaybackControl {
     pub(crate) seeking: Arc<AtomicBool>,
     pub(crate) generation: Arc<AtomicU64>,
     pub(crate) seek_generation: Arc<AtomicU64>,
+    pub(crate) buffer_discard_request: Arc<AtomicU64>,
+    pub(crate) buffer_discard_ack: Arc<AtomicU64>,
     pub(crate) seek_fade_requested: Arc<AtomicBool>,
     pub(crate) seek_fade_complete: Arc<AtomicBool>,
     pub(crate) output_active: Arc<AtomicBool>,
@@ -127,6 +129,14 @@ impl PlaybackControl {
         self.complete_seek();
     }
 
+    pub(crate) fn request_buffer_discard(&self) -> u64 {
+        self.buffer_discard_request.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    pub(crate) fn buffer_discarded(&self, request: u64) -> bool {
+        self.buffer_discard_ack.load(Ordering::Acquire) >= request
+    }
+
     pub(crate) fn cancel_seek(&self) {
         self.seek_fade_requested.store(false, Ordering::Release);
         self.seeking.store(false, Ordering::Release);
@@ -170,6 +180,10 @@ impl PlaybackConsumer {
     /// Returns the number of frames actually read (may be less than `buf.len()`).
     /// Intended for the audio callback: no allocation, locking, I/O, or logging.
     pub fn consume(&mut self, buf: &mut [f32]) -> usize {
+        if self.acknowledge_buffer_discard() {
+            buf.fill(0.0);
+            return 0;
+        }
         if self.control.is_stopped()
             || self.control.is_paused()
             || self.control.seeking.load(Ordering::Acquire)
@@ -203,6 +217,10 @@ impl PlaybackConsumer {
         if source_channels == 0 || output_channels == 0 {
             return 0;
         }
+        if self.acknowledge_buffer_discard() {
+            buf.fill(0.0);
+            return 0;
+        }
         if self.control.is_stopped() || self.control.is_paused() {
             buf.fill(0.0);
             return 0;
@@ -213,7 +231,9 @@ impl PlaybackConsumer {
         }
 
         let seek_generation = self.control.seek_generation.load(Ordering::Acquire);
+        let mut replaced_buffer = false;
         if seek_generation != self.observed_seek_generation {
+            replaced_buffer = true;
             self.observed_seek_generation = seek_generation;
             self.seek_ramp_frame = 0;
             // If a large hardware buffer prevented the callback from finishing
@@ -233,7 +253,7 @@ impl PlaybackConsumer {
         // fill remaining frames with silence instead of breaking, so the
         // entire cpal output buffer is properly zeroed and avoids a pop or
         // crackle at the end of the stream.
-        let mut drained = false;
+        let mut drained = replaced_buffer;
         for frame in buf.chunks_mut(output_channels) {
             if drained || self.available() < source_channels {
                 if self.seek_ramp_frame < SEEK_RAMP_FRAMES {
@@ -357,6 +377,21 @@ impl PlaybackConsumer {
 
     fn discard_buffered_samples_fast(&mut self) {
         let count = self.consumer.occupied_len();
+        self.discard_buffered_samples(count);
+    }
+
+    fn acknowledge_buffer_discard(&mut self) -> bool {
+        let request = self.control.buffer_discard_request.load(Ordering::Acquire);
+        if request <= self.control.buffer_discard_ack.load(Ordering::Acquire) {
+            return false;
+        }
+        self.discard_buffered_samples_fast();
+        self.control.buffer_discard_ack.store(request, Ordering::Release);
+        true
+    }
+
+    pub(crate) fn discard_buffered_samples(&mut self, count: usize) {
+        let count = count.min(self.consumer.occupied_len());
         // BufferedSample is Copy and has no destructor. Advancing the SPSC
         // consumer index therefore invalidates the snapshot in constant time
         // without touching every stale sample on the real-time thread.

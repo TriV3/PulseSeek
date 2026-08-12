@@ -306,7 +306,7 @@ describe("shortcut mappings boundary", () => {
         Boolean(entry[1]),
       )
       .map(([action_id, binding]) => ({ action_id, ...binding })),
-    unavailable_action_ids: ["set_ab_start", "set_ab_end", "toggle_ab_repeat"],
+    unavailable_action_ids: [],
   };
 
   it("loads and converts every known backend mapping", async () => {
@@ -332,7 +332,7 @@ describe("shortcut mappings boundary", () => {
 
     await expect(saveShortcuts(DEFAULT_SHORTCUTS)).resolves.toMatchObject({
       open_folder: { key: "p" },
-      set_ab_start: null,
+      set_ab_start: { key: "[", primary: false, shift: false, alt: false },
     });
     expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
       envelope: {

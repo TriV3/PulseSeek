@@ -144,6 +144,7 @@ impl PlaybackWorker {
             resampler,
             mode,
             target_rate,
+            channels,
         );
         Ok(Self::start_engine(engine, consumer))
     }
@@ -271,6 +272,12 @@ impl PlaybackWorker {
                         // interval. A 1ms sleep keeps the worker responsive
                         // to both the callback consuming data and incoming
                         // commands.
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    },
+                    Ok(true) if engine.is_waiting_for_buffer_discard() => {
+                        // Paused or temporarily inactive output may not call
+                        // the consumer immediately. Avoid hot-spinning while
+                        // retaining command responsiveness.
                         std::thread::sleep(std::time::Duration::from_millis(1));
                     },
                     Ok(true) => {},

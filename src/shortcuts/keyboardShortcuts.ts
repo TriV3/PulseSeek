@@ -38,9 +38,9 @@ export const SHORTCUT_ACTIONS = [
   { id: "mark_reject", label: "Mark Reject", available: true },
   { id: "mark_favorite", label: "Mark Favorite", available: true },
   { id: "mark_clear", label: "Clear mark", available: true },
-  { id: "set_ab_start", label: "Set A point", available: false },
-  { id: "set_ab_end", label: "Set B point", available: false },
-  { id: "toggle_ab_repeat", label: "Toggle A-B repeat", available: false },
+  { id: "set_ab_start", label: "Set A point", available: true },
+  { id: "set_ab_end", label: "Set B point", available: true },
+  { id: "toggle_ab_repeat", label: "Toggle A-B repeat", available: true },
 ] as const;
 
 export type ShortcutActionId = (typeof SHORTCUT_ACTIONS)[number]["id"];
@@ -74,9 +74,11 @@ export const DEFAULT_SHORTCUTS: ShortcutBindings = {
   mark_reject: chord("r", true, true),
   mark_favorite: chord("f", true, true),
   mark_clear: chord("u", true, true),
-  set_ab_start: null,
-  set_ab_end: null,
-  toggle_ab_repeat: null,
+  // A-B region selection: bracket keys place A/B at the playhead, "a"
+  // toggles A-B repeat. Unmodified so they are reachable during playback.
+  set_ab_start: chord("["),
+  set_ab_end: chord("]"),
+  toggle_ab_repeat: chord("a"),
 };
 
 function chord(

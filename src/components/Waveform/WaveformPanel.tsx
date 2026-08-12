@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useWaveform } from "../../hooks/useWaveform";
 import type { PlayableFileMetadata } from "../FolderTree/folderTreeTypes";
 import { LinearAnalyzerCanvas } from "../LinearAnalyzer/LinearAnalyzerCanvas";
@@ -7,7 +7,7 @@ import { MusicalSpectrumCanvas } from "../MusicalSpectrum/MusicalSpectrumCanvas"
 import type { ResolvedTheme } from "../../hooks/useTheme";
 import type { VisualizationMode } from "../VisualizationSelector/VisualizationSelector";
 import type { WaveformStyle } from "./waveformRenderer";
-import { WaveformCanvas } from "./WaveformCanvas";
+import { WaveformCanvas, type WaveformCanvasHandle } from "./WaveformCanvas";
 
 export interface WaveformPanelProps {
   /** Path of the selected file, or null when nothing is selected. */
@@ -20,6 +20,8 @@ export interface WaveformPanelProps {
   metadata?: PlayableFileMetadata | null;
   /** Saved position shown before playback starts, without autoplay. */
   restoredPositionMs?: number;
+  /** Current playhead used to place A/B points. Defaults to the restored one. */
+  playheadPositionMs?: number;
   resetRevision?: number;
   /** Seeks playback to a millisecond position (confirmed by the backend). */
   onSeek?: (positionMs: number) => void | Promise<void>;
@@ -29,6 +31,19 @@ export interface WaveformPanelProps {
   theme?: ResolvedTheme;
   /** The single visualization rendered in this workspace. */
   visualization?: VisualizationMode;
+  /** Placed A/B points; a null side is not yet placed. */
+  abPoints?: { startMs: number | null; endMs: number | null };
+  /** Region confirmed by the Rust engine, or null when inactive. */
+  loopRegion?: { startMs: number; endMs: number } | null;
+  /** Placement error from the transport (reversed/equal points, rejection). */
+  abError?: string | null;
+  /** Places the A or B point at the given playhead position. */
+  onSetAbPoint?: (
+    point: "a" | "b",
+    positionMs: number,
+  ) => void | Promise<boolean>;
+  /** Clears the confirmed region and placed points. */
+  onClearAB?: () => void | Promise<boolean>;
 }
 
 /**
@@ -68,6 +83,13 @@ function formatAudioSummary(
   return groups.length > 0 ? groups.join(" · ") : "Audio details unavailable";
 }
 
+function formatAbTime(milliseconds: number | null): string {
+  if (milliseconds === null) return "—";
+  const seconds = Math.max(0, Math.floor(milliseconds / 1_000));
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 /**
  * Exclusive waveform/analyzer workspace region.
  *
@@ -81,22 +103,35 @@ export function WaveformPanel({
   durationMs,
   metadata,
   restoredPositionMs = 0,
+  playheadPositionMs = restoredPositionMs,
   resetRevision = 0,
   onSeek,
   style = "outline",
   theme = "light",
   visualization = "waveform",
+  abPoints = { startMs: null, endMs: null },
+  loopRegion = null,
+  abError = null,
+  onSetAbPoint,
+  onClearAB,
 }: WaveformPanelProps) {
   const [resolution, setResolution] = useState<{
     entryPath: string | null;
     targetPeaks: number;
   }>({ entryPath: null, targetPeaks: INITIAL_TARGET_PEAKS });
+  const waveformHandleRef = useRef<WaveformCanvasHandle | null>(null);
   const targetPeaks =
     resolution.entryPath === entryPath
       ? resolution.targetPeaks
       : INITIAL_TARGET_PEAKS;
   const waveformPath = visualization === "waveform" ? entryPath : null;
   const { status, waveform, error } = useWaveform(waveformPath, targetPeaks);
+
+  // A/B points are placed at the position the waveform canvas currently
+  // displays (including drag previews and live position events), so the
+  // recorded point always matches what the user sees.
+  const placementPlayhead = (): number =>
+    waveformHandleRef.current?.getPlayheadPosition() ?? playheadPositionMs;
 
   return (
     <section className="waveform-panel" aria-label="Audio visualization">
@@ -113,6 +148,57 @@ export function WaveformPanel({
         </div>
       </header>
       <div className="audio-summary">{formatAudioSummary(metadata)}</div>
+      <div className="ab-controls" aria-label="A-B repeat region">
+        <button
+          type="button"
+          className="ab-control"
+          onClick={() => void onSetAbPoint?.("a", placementPlayhead())}
+          disabled={
+            entryPath === null || durationMs === null || durationMs <= 0
+          }
+          title="Set A at the playhead position"
+        >
+          Set A point
+        </button>
+        <button
+          type="button"
+          className="ab-control"
+          onClick={() => void onSetAbPoint?.("b", placementPlayhead())}
+          disabled={
+            entryPath === null || durationMs === null || durationMs <= 0
+          }
+          title="Set B at the playhead position"
+        >
+          Set B point
+        </button>
+        <span className="ab-readout" data-testid="ab-readout-start">
+          A {formatAbTime(abPoints.startMs)}
+        </span>
+        <span className="ab-readout" data-testid="ab-readout-end">
+          B {formatAbTime(abPoints.endMs)}
+        </span>
+        {loopRegion ? (
+          <span className="ab-readout ab-readout--active">Looping A–B</span>
+        ) : null}
+        <button
+          type="button"
+          className="ab-control"
+          onClick={() => void onClearAB?.()}
+          disabled={
+            abPoints.startMs === null &&
+            abPoints.endMs === null &&
+            loopRegion === null
+          }
+          title="Clear the A-B region"
+        >
+          Clear A-B
+        </button>
+        {abError ? (
+          <p className="ab-controls-error" role="alert">
+            {abError}
+          </p>
+        ) : null}
+      </div>
       <div className="visualization-workspace">
         {visualization === "waveform" ? (
           <div className="waveform-canvas">
@@ -122,6 +208,7 @@ export function WaveformPanel({
               </p>
             ) : (
               <WaveformCanvas
+                ref={waveformHandleRef}
                 waveform={waveform}
                 durationMs={durationMs}
                 restoredPositionMs={restoredPositionMs}
@@ -133,6 +220,9 @@ export function WaveformPanel({
                 }}
                 onSeek={onSeek}
                 style={style}
+                abPoints={abPoints}
+                loopRegion={loopRegion}
+                onSetAbPoint={onSetAbPoint}
               />
             )}
           </div>

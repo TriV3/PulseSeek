@@ -1,8 +1,9 @@
 # A–B repeat (play loop region)
 
 A–B repeat loops the audio between two validated points on the current file
-(FR-AU-009). The region is defined by PR-087 (`LoopRegion`) and played by
-PR-088 (`set_loop_region` / `clear_loop_region`).
+(FR-AU-009). The region is defined by PR-087 (`LoopRegion`), played by PR-088
+(`set_loop_region` / `clear_loop_region`), and selected on the waveform by
+PR-089 (Set A / Set B at the playhead).
 
 ## Region model
 
@@ -14,7 +15,9 @@ returns to A at every wrap.
 Regions are validated by `LoopRegion::new` against the current file duration
 before they can reach the audio engine. Reversed, equal, and out-of-bounds
 points are rejected with a typed `InvalidInput` boundary error
-(`playback.control`). A region cannot be set when the duration is unknown.
+(`playback.control`). A region cannot be set when the duration is unknown. The
+frontend mirrors this policy: placing B at or before A is rejected and the
+previous points are kept.
 
 ## Command contract
 
@@ -26,7 +29,35 @@ points are rejected with a typed `InvalidInput` boundary error
 Both commands flow through the typed command envelope
 (`SetLoopRegionRequest`/`Response`, `ClearLoopRegionRequest`/`Response`) and
 the `PlaybackService` trait. React exposes `setLoopRegion(startMs, endMs)` and
-`clearLoopRegion()`; no UI is added in PR-088 (waveform selection is PR-089).
+`clearLoopRegion()`.
+
+## Waveform selection (PR-089)
+
+The waveform panel shows an A–B cluster with **Set A point**, **Set B point**,
+and **Clear A-B** buttons. Each Set button places that point at the position
+the waveform canvas currently displays — the exact visual playhead, including
+live position events and drag previews — so the recorded point always matches
+what the user sees (millisecond precision). Placement is disabled until a file
+with a known duration is selected.
+
+- A lone placed point renders as a ghost marker.
+- Markers are draggable: grab the bar or the A/B chip to reposition that point
+  precisely. The dragged side is clamped so it cannot cross the other
+  (`A ≤ B-1`, `B ≥ A+1`); the committed pair is always valid.
+- When both points form a valid pair (`A < B`) during an active session,
+  `setLoopRegion(A, B)` runs. While stopped, the complete pair remains local
+  per-file state and is applied when that file starts again.
+- Reversed or equal placement is rejected locally and by `LoopRegion::new`; the
+  previous points are kept and an inline notice is shown.
+- While stopped, waveform seeking is local and A or B can be placed without an
+  active Rust worker.
+- **Clear** dismisses the points and the region.
+- Shortcuts: `[` places A, `]` places B at the playhead, `a` toggles A–B
+  repeat (active → clear, pending valid pair → activate).
+
+Markers and the band are DOM overlays positioned by percentage of the duration
+(`--ab-x` / `--ab-width`); they reuse the `wave-selection` theme tokens and
+never force a canvas repaint.
 
 ## Playback behavior
 
@@ -35,18 +66,21 @@ the `PlaybackService` trait. React exposes `setLoopRegion(startMs, endMs)` and
   ring buffer is never cleared, so no stale frames are audible.
 - **Set while playing:** the region takes effect immediately; playback seeks to
   A and loops.
+- **Stop:** playback and playhead return to zero, but A/B points, duration, and
+  region remain visible. Starting the same file creates a fresh worker and
+  reapplies the region before continued playback.
 - **Seek inside the region:** the region stays active; playback continues from
   the seek point and keeps looping. The cycle is rebased so the next wrap
   returns to the true A.
-- **Seek outside the region** (before A, or at/after B): the region is disabled
-  for the current session; playback continues from the seek point under the
-  current mode without wrapping. This is a deliberate, documented semantic:
-  seeking is treated as an explicit escape from the loop.
+- **Seek outside the region** (before A, or at/after B): the engine clears the
+  region. Playback continues from the seek point under the current mode without
+  wrapping. The frontend mirrors this confirmed Rust state by clearing the
+  markers on the same seek.
 - **Clear:** the region is removed; playback continues from the current
   position and follows the current mode's end-of-file behavior (for example,
   OneShot emits `Completed` at file end).
-- **Per-file reset:** each file gets a fresh worker, so a region never carries
-  over to the next file.
+- **Per-file ownership:** a region never carries over to another file. Stop
+  preserves it for the selected file; another selection hides it.
 
 ## Short and long regions
 
@@ -54,7 +88,8 @@ the `PlaybackService` trait. React exposes `setLoopRegion(startMs, endMs)` and
   decoder seek. This is verified with a rejecting-seek fake decoder.
 - A region longer than the ring buffer falls back to a decoder seek back to A.
   The prebuffer is large enough that the seek completes before the consumer
-  drains the remaining frames.
+  drains the remaining frames. The playback clock resets only when the first
+  audible frame at A reaches the callback, never when worker read-ahead seeks.
 
 ## Failure modes
 

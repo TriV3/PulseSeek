@@ -26,8 +26,9 @@ pub struct PlaybackEngine {
     pub(crate) pending: VecDeque<f32>,
     pub(crate) mode: PlaybackMode,
     pub(crate) sample_rate: u32,
+    pub(crate) channels: usize,
     pub(crate) loop_region: Option<LoopRegion>,
-    pub(crate) region_produced_frames: u64,
+    pub(crate) region_produced_samples: u64,
     pub(crate) region_boundary_reached: bool,
     /// Position reset marker to attach to the next produced sample, used to
     /// return the consumer clock to the region start after a wrap.
@@ -36,6 +37,7 @@ pub struct PlaybackEngine {
     /// skip a redundant seek deterministically.
     pub(crate) decoder_position_ms: u64,
     pub(crate) cycle_produced: bool,
+    pub(crate) pending_buffer_discard: Option<u64>,
     pub(crate) loop_cache: Vec<f32>,
     pub(crate) loop_cache_overflowed: bool,
     pub(crate) loop_cache_offset: usize,
@@ -71,7 +73,7 @@ impl PlaybackEngine {
         buffer_frames: usize,
         mode: PlaybackMode,
     ) -> (Self, PlaybackConsumer) {
-        Self::new_with_resampler_mode(decoder, buffer_frames, None, mode, 1_000)
+        Self::new_with_resampler_mode(decoder, buffer_frames, None, mode, 1_000, 1)
     }
 
     pub(crate) fn new_with_resampler_mode(
@@ -80,6 +82,7 @@ impl PlaybackEngine {
         resampler: Option<SampleRateConverter>,
         mode: PlaybackMode,
         sample_rate: u32,
+        channels: usize,
     ) -> (Self, PlaybackConsumer) {
         assert!(buffer_frames > 0, "playback buffer must contain at least one frame");
         let (producer, consumer) = HeapRb::new(buffer_frames).split();
@@ -89,6 +92,8 @@ impl PlaybackEngine {
             seeking: Arc::new(AtomicBool::new(false)),
             generation: Arc::new(AtomicU64::new(0)),
             seek_generation: Arc::new(AtomicU64::new(0)),
+            buffer_discard_request: Arc::new(AtomicU64::new(0)),
+            buffer_discard_ack: Arc::new(AtomicU64::new(0)),
             seek_fade_requested: Arc::new(AtomicBool::new(false)),
             seek_fade_complete: Arc::new(AtomicBool::new(true)),
             output_active: Arc::new(AtomicBool::new(false)),
@@ -106,12 +111,14 @@ impl PlaybackEngine {
                 pending: VecDeque::new(),
                 mode,
                 sample_rate,
+                channels,
                 loop_region: None,
-                region_produced_frames: 0,
+                region_produced_samples: 0,
                 region_boundary_reached: false,
                 pending_position_reset: None,
                 decoder_position_ms: 0,
                 cycle_produced: false,
+                pending_buffer_discard: None,
                 loop_cache: Vec::new(),
                 loop_cache_overflowed: false,
                 loop_cache_offset: 0,
@@ -132,14 +139,15 @@ impl PlaybackEngine {
         )
     }
 
-    /// Returns the length of the active loop region in produced frames.
-    fn region_length_frames(&self) -> u64 {
+    /// Returns the length of the active loop region in interleaved samples.
+    fn region_length_samples(&self) -> u64 {
         let Some(region) = self.loop_region else { return 0 };
         if self.sample_rate == 0 {
             return 0;
         }
         let length_ms = region.end().as_millis().saturating_sub(region.start().as_millis());
-        length_ms.saturating_mul(u64::from(self.sample_rate)) / 1_000
+        let frames = length_ms.saturating_mul(u64::from(self.sample_rate)) / 1_000;
+        frames.saturating_mul(self.channels as u64)
     }
 
     /// Returns the region start in produced frames.
@@ -161,8 +169,8 @@ impl PlaybackEngine {
             if self.region_boundary_reached {
                 break;
             }
-            let region_len = self.region_length_frames();
-            if self.loop_region.is_some() && self.region_produced_frames >= region_len {
+            let region_len = self.region_length_samples();
+            if self.loop_region.is_some() && self.region_produced_samples >= region_len {
                 self.region_boundary_reached = true;
                 break;
             }
@@ -177,8 +185,8 @@ impl PlaybackEngine {
             pushed += 1;
             self.frames_written += 1;
             if self.loop_region.is_some() {
-                self.region_produced_frames += 1;
-                if self.region_produced_frames >= region_len {
+                self.region_produced_samples += 1;
+                if self.region_produced_samples >= region_len {
                     self.region_boundary_reached = true;
                 }
             }
@@ -196,6 +204,13 @@ impl PlaybackEngine {
     pub fn process_chunk(&mut self) -> Result<bool, PlaybackError> {
         if self.eof || self.region_boundary_reached {
             return Ok(false);
+        }
+
+        if let Some(request) = self.pending_buffer_discard {
+            if !self.control.buffer_discarded(request) {
+                return Ok(true);
+            }
+            self.pending_buffer_discard = None;
         }
 
         self.drain_pending();
@@ -224,7 +239,8 @@ impl PlaybackEngine {
         // discards an unbounded read-ahead beyond B.
         let capacity = self.buffer_size.min(available);
         let read_cap = if self.loop_region.is_some() {
-            let remaining = self.region_length_frames().saturating_sub(self.region_produced_frames);
+            let remaining =
+                self.region_length_samples().saturating_sub(self.region_produced_samples);
             capacity.min(remaining as usize)
         } else {
             capacity
@@ -271,6 +287,10 @@ impl PlaybackEngine {
 
     pub(crate) fn is_buffer_full(&self) -> bool {
         self.producer.vacant_len() == 0
+    }
+
+    pub(crate) fn is_waiting_for_buffer_discard(&self) -> bool {
+        self.pending_buffer_discard.is_some_and(|request| !self.control.buffer_discarded(request))
     }
 
     fn drain_pending(&mut self) {
@@ -352,16 +372,8 @@ impl PlaybackEngine {
     /// at the region start (a fresh worker with `A == 0`), which lets short
     /// regions replay purely from the prebuffer without any decoder seek.
     pub(crate) fn set_loop_region(&mut self, region: LoopRegion) -> Result<(), PlaybackError> {
-        self.loop_region = Some(region);
-        self.region_produced_frames = 0;
-        self.region_boundary_reached = false;
-        self.cycle_produced = false;
-        self.loop_cache.clear();
-        self.loop_cache_overflowed = false;
-        self.loop_cache_offset = 0;
-        self.eof = false;
-        self.pending.clear();
         if region.start().as_millis() == 0 && self.decoder_position_ms == 0 {
+            self.commit_loop_region(region);
             if let Some(resampler) = &mut self.resampler {
                 resampler.reset();
             }
@@ -374,6 +386,7 @@ impl PlaybackEngine {
         self.control.wait_for_seek_fade();
         match self.decoder.seek(target) {
             Ok(position) => {
+                self.commit_loop_region(region);
                 self.decoder_position_ms = position.as_millis();
                 self.control.set_position_frames(self.region_start_frames());
                 self.control.complete_seek();
@@ -383,11 +396,23 @@ impl PlaybackEngine {
                 Ok(())
             },
             Err(error) => {
-                self.loop_region = None;
                 self.control.cancel_seek();
                 Err(PlaybackError::from(error))
             },
         }
+    }
+
+    fn commit_loop_region(&mut self, region: LoopRegion) {
+        self.pending_buffer_discard = Some(self.control.request_buffer_discard());
+        self.loop_region = Some(region);
+        self.region_produced_samples = 0;
+        self.region_boundary_reached = false;
+        self.cycle_produced = false;
+        self.loop_cache.clear();
+        self.loop_cache_overflowed = false;
+        self.loop_cache_offset = 0;
+        self.eof = false;
+        self.pending.clear();
     }
 
     /// Deactivates the A–B region without repositioning the decoder.
@@ -396,7 +421,7 @@ impl PlaybackEngine {
     /// end-of-file mode.
     pub(crate) fn clear_loop_region(&mut self) {
         self.loop_region = None;
-        self.region_produced_frames = 0;
+        self.region_produced_samples = 0;
         self.region_boundary_reached = false;
     }
 
@@ -412,7 +437,7 @@ impl PlaybackEngine {
         } else {
             offset_ms.saturating_mul(u64::from(self.sample_rate)) / 1_000
         };
-        self.region_produced_frames = frames;
+        self.region_produced_samples = frames.saturating_mul(self.channels as u64);
         self.region_boundary_reached = false;
         self.loop_cache.clear();
         self.loop_cache_overflowed = true;
@@ -447,13 +472,12 @@ impl PlaybackEngine {
                 self.eof = false;
                 self.pending.clear();
                 self.cycle_produced = false;
-                self.region_produced_frames = 0;
+                self.region_produced_samples = 0;
                 self.region_boundary_reached = false;
                 self.decoder_position_ms = position.as_millis();
                 if let Some(resampler) = &mut self.resampler {
                     resampler.reset();
                 }
-                self.control.set_position_frames(self.region_start_frames());
                 self.pending_position_reset = Some(self.region_start_frames());
                 Ok(())
             },

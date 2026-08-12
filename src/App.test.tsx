@@ -12,7 +12,7 @@ const shortcutProfile = (bindings = DEFAULT_SHORTCUTS) => ({
       Boolean(entry[1]),
     )
     .map(([action_id, binding]) => ({ action_id, ...binding })),
-  unavailable_action_ids: ["set_ab_start", "set_ab_end", "toggle_ab_repeat"],
+  unavailable_action_ids: [],
 });
 
 vi.mock("@tauri-apps/api/core", () => ({

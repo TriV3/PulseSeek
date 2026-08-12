@@ -390,10 +390,6 @@ impl PlaybackService for NativePlaybackService {
             .set_loop_region(Some(region))
             .map_err(|error| Self::unavailable(&format!("set loop region failed: {error}")))?;
         let confirmed = region.start().as_millis();
-        if let (Some(control), Some(sample_rate)) = (&self.control, self.output_sample_rate) {
-            let frames = confirmed.saturating_mul(u64::from(sample_rate)) / 1_000;
-            control.set_position_frames(frames);
-        }
         let _ = self.events.emit_position(confirmed, Some(duration_ms));
         Ok(confirmed)
     }

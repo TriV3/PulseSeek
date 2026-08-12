@@ -13,7 +13,7 @@ pub(crate) struct SampleRateConverter {
     input: Vec<f32>,
     output: Vec<f32>,
     pending: VecDeque<f32>,
-    source_samples: u64,
+    source_frames: u64,
     output_samples: u64,
 }
 
@@ -57,7 +57,7 @@ impl SampleRateConverter {
             input,
             output,
             pending: VecDeque::new(),
-            source_samples: 0,
+            source_frames: 0,
             output_samples: 0,
         })
     }
@@ -87,7 +87,7 @@ impl SampleRateConverter {
         }
 
         let input_frames = filled / self.channels;
-        self.source_samples += input_frames as u64;
+        self.source_frames += input_frames as u64;
         let input =
             InterleavedSlice::new(&self.input, self.channels, self.input.len() / self.channels)
                 .map_err(|error| converter_error(&error.to_string()))?;
@@ -100,7 +100,7 @@ impl SampleRateConverter {
             .process_into_buffer(&input, &mut output, Some(&indexing))
             .map_err(|error| converter_error(&error.to_string()))?;
 
-        let expected_total = ((self.source_samples as u128 * self.target_rate as u128)
+        let expected_total = ((self.source_frames as u128 * self.target_rate as u128)
             / self.source_rate as u128) as u64
             * self.channels as u64;
         let produced = (frames_written * self.channels) as u64;
@@ -121,8 +121,7 @@ impl SampleRateConverter {
         if self.source_rate == 0 || self.channels == 0 {
             return 0;
         }
-        let source_frames = self.source_samples / self.channels as u64;
-        source_frames.saturating_mul(1_000) / u64::from(self.source_rate)
+        self.source_frames.saturating_mul(1_000) / u64::from(self.source_rate)
     }
 
     pub(crate) fn reset(&mut self) {
@@ -130,7 +129,7 @@ impl SampleRateConverter {
         self.input.fill(0.0);
         self.output.fill(0.0);
         self.pending.clear();
-        self.source_samples = 0;
+        self.source_frames = 0;
         self.output_samples = 0;
     }
 }
@@ -142,4 +141,17 @@ fn converter_error(message: &str) -> DecodeError {
         ),
         std::io::Error::other(message.to_owned()),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SampleRateConverter;
+
+    #[test]
+    fn stereo_source_position_counts_frames_once() {
+        let mut converter = SampleRateConverter::new(2, 1_000, 2_000).unwrap();
+        converter.source_frames = 500;
+
+        assert_eq!(converter.source_position_ms(), 500);
+    }
 }
