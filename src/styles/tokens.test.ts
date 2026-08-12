@@ -116,7 +116,7 @@ const featureStyles = [
 ];
 
 /** Component-local properties written imperatively at runtime, not theme tokens. */
-const runtimeProperties = new Set(["seek-x"]);
+const runtimeProperties = new Set(["seek-x", "ab-x", "ab-width"]);
 
 const rawColorPattern =
   /(?:#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|\bcolor\(|transparent)/;

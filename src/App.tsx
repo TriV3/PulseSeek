@@ -472,6 +472,15 @@ function App() {
       onSetPlaybackModeLoopCurrent: () => selectPlaybackMode("loop-current"),
       onSetPlaybackModeSequential: () => selectPlaybackMode("sequential"),
       onSetPlaybackModeRandom: () => selectPlaybackMode("random"),
+      onSetAbStart: () => {
+        void transport.setAbPoint("a", transport.positionMs);
+      },
+      onSetAbEnd: () => {
+        void transport.setAbPoint("b", transport.positionMs);
+      },
+      onToggleAbRepeat: () => {
+        void transport.toggleAbRepeat();
+      },
     },
     shortcutMappings.bindings,
   );
@@ -499,11 +508,19 @@ function App() {
               : null)
           }
           restoredPositionMs={transport.positionMs}
+          playheadPositionMs={transport.positionMs}
           resetRevision={waveformResetRevision}
           onSeek={seekAndRemember}
           style={playerPreferences.preferences.waveform_style}
           theme={resolvedTheme}
           visualization={visualizationSettings.effectiveMode}
+          abPoints={transport.abPoints}
+          loopRegion={transport.loopRegion}
+          abError={transport.abError}
+          onSetAbPoint={(point, positionMs) =>
+            transport.setAbPoint(point, positionMs)
+          }
+          onClearAB={() => transport.clearAB()}
         />
         <div
           className="splitter splitter--horizontal"

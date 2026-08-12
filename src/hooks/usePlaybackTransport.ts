@@ -1,8 +1,17 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   pause,
   resume,
   seek,
+  setLoopRegion,
+  clearLoopRegion,
   setVolume,
   stop,
   type PlaybackMode,
@@ -36,6 +45,192 @@ export function usePlaybackTransport({
   const [volume, setVolumeState] = useState(1);
   const [muted, setMuted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [abPoints, setAbPoints] = useState<{
+    startMs: number | null;
+    endMs: number | null;
+  }>({ startMs: null, endMs: null });
+  const [loopRegion, setLoopRegionState] = useState<{
+    startMs: number;
+    endMs: number;
+  } | null>(null);
+  const [abError, setAbError] = useState<string | null>(null);
+  const [abEntryId, setAbEntryId] = useState<string | null>(null);
+  const abEntryIdRef = useRef<string | null>(null);
+  const abPointsRef = useRef(abPoints);
+  const loopRegionRef = useRef(loopRegion);
+  const abOperationRef = useRef(0);
+  const activeSessionRef = useRef(
+    playbackStatus !== "idle" && playbackStatus !== "failed",
+  );
+  const regionNeedsRestoreRef = useRef(false);
+
+  // A–B points and the confirmed region are display state owned by the
+  // transport. The engine is authoritative: a region is only shown after
+  // `setLoopRegion` resolves, and an out-of-region seek (which clears the
+  // engine region) also clears the markers.
+  const resetABLocal = useCallback(() => {
+    abPointsRef.current = { startMs: null, endMs: null };
+    setAbPoints({ startMs: null, endMs: null });
+    loopRegionRef.current = null;
+    setLoopRegionState(null);
+    abEntryIdRef.current = null;
+    setAbEntryId(null);
+    setAbError(null);
+  }, []);
+
+  const setAbPoint = useCallback(
+    async (point: "a" | "b", positionMs: number): Promise<boolean> => {
+      setAbError(null);
+      const operation = ++abOperationRef.current;
+      const operationEntryId = selectedEntryId;
+      const previous =
+        abEntryIdRef.current === operationEntryId
+          ? abPointsRef.current
+          : { startMs: null, endMs: null };
+      if (abEntryIdRef.current !== operationEntryId) {
+        loopRegionRef.current = null;
+        setLoopRegionState(null);
+      }
+      const next = {
+        ...previous,
+        [point === "a" ? "startMs" : "endMs"]: positionMs,
+      };
+      abPointsRef.current = next;
+      setAbPoints(next);
+      abEntryIdRef.current = operationEntryId;
+      setAbEntryId(operationEntryId);
+      if (next.startMs === null || next.endMs === null) return false;
+      if (next.startMs >= next.endMs) {
+        abPointsRef.current = previous;
+        setAbPoints(previous);
+        setAbError("B point must be after the A point.");
+        return false;
+      }
+      // Stop destroys the Rust playback worker. Keep a complete region as
+      // local per-file state while stopped; it will be applied to the next
+      // worker when playback starts again.
+      if (!activeSessionRef.current) {
+        loopRegionRef.current = { startMs: next.startMs, endMs: next.endMs };
+        setLoopRegionState({ startMs: next.startMs, endMs: next.endMs });
+        regionNeedsRestoreRef.current = true;
+        return true;
+      }
+      try {
+        await setLoopRegion(next.startMs, next.endMs);
+        if (
+          operation !== abOperationRef.current ||
+          abEntryIdRef.current !== operationEntryId
+        ) {
+          return false;
+        }
+        loopRegionRef.current = { startMs: next.startMs, endMs: next.endMs };
+        setLoopRegionState({ startMs: next.startMs, endMs: next.endMs });
+        return true;
+      } catch (cause) {
+        if (
+          operation !== abOperationRef.current ||
+          abEntryIdRef.current !== operationEntryId
+        ) {
+          return false;
+        }
+        abPointsRef.current = previous;
+        setAbPoints(previous);
+        setAbError(
+          cause instanceof Error
+            ? cause.message
+            : "Could not set the A-B region.",
+        );
+        return false;
+      }
+    },
+    [selectedEntryId],
+  );
+
+  const clearAB = useCallback(async (): Promise<boolean> => {
+    const operation = ++abOperationRef.current;
+    const operationEntryId = abEntryIdRef.current;
+    setAbError(null);
+    try {
+      if (activeSessionRef.current) await clearLoopRegion();
+      if (
+        operation !== abOperationRef.current ||
+        abEntryIdRef.current !== operationEntryId
+      ) {
+        return false;
+      }
+      abPointsRef.current = { startMs: null, endMs: null };
+      setAbPoints({ startMs: null, endMs: null });
+      loopRegionRef.current = null;
+      setLoopRegionState(null);
+      abEntryIdRef.current = null;
+      setAbEntryId(null);
+      return true;
+    } catch (cause) {
+      if (
+        operation !== abOperationRef.current ||
+        abEntryIdRef.current !== operationEntryId
+      ) {
+        return false;
+      }
+      setAbError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not clear the A-B region.",
+      );
+      return false;
+    }
+  }, []);
+
+  const toggleAbRepeat = useCallback(async (): Promise<boolean> => {
+    if (loopRegionRef.current) return clearAB();
+    const operation = ++abOperationRef.current;
+    const operationEntryId = abEntryIdRef.current;
+    const points = abPointsRef.current;
+    if (
+      points.startMs !== null &&
+      points.endMs !== null &&
+      points.startMs < points.endMs
+    ) {
+      if (!activeSessionRef.current) {
+        loopRegionRef.current = {
+          startMs: points.startMs,
+          endMs: points.endMs,
+        };
+        setLoopRegionState({ startMs: points.startMs, endMs: points.endMs });
+        regionNeedsRestoreRef.current = true;
+        return true;
+      }
+      try {
+        await setLoopRegion(points.startMs, points.endMs);
+        if (
+          operation !== abOperationRef.current ||
+          abEntryIdRef.current !== operationEntryId
+        ) {
+          return false;
+        }
+        loopRegionRef.current = {
+          startMs: points.startMs,
+          endMs: points.endMs,
+        };
+        setLoopRegionState({ startMs: points.startMs, endMs: points.endMs });
+        return true;
+      } catch (cause) {
+        if (
+          operation !== abOperationRef.current ||
+          abEntryIdRef.current !== operationEntryId
+        ) {
+          return false;
+        }
+        setAbError(
+          cause instanceof Error
+            ? cause.message
+            : "Could not set the A-B region.",
+        );
+        return false;
+      }
+    }
+    return false;
+  }, [clearAB]);
   const [commandStatus, setCommandStatus] = useState<{
     entryId: string;
     status: "idle" | "playing" | "paused";
@@ -48,6 +243,7 @@ export function usePlaybackTransport({
     playbackMode,
     onSelectEntry,
   });
+  const appliedRegionGeneration = useRef<number | null>(null);
   // Folder rows appear in the visible list only while a search is active;
   // playback navigation must never select a folder.
   const playableEntries = useMemo(
@@ -55,6 +251,15 @@ export function usePlaybackTransport({
     [entries],
   );
   useLayoutEffect(() => {
+    if (
+      abEntryIdRef.current !== null &&
+      abEntryIdRef.current !== selectedEntryId
+    ) {
+      abOperationRef.current += 1;
+      resetABLocal();
+      regionNeedsRestoreRef.current = false;
+      appliedRegionGeneration.current = null;
+    }
     playbackContext.current = {
       entries: playableEntries,
       selectedEntryId,
@@ -67,6 +272,7 @@ export function usePlaybackTransport({
     onSelectEntry,
     playbackGeneration,
     playbackMode,
+    resetABLocal,
     selectedEntryId,
   ]);
 
@@ -81,8 +287,9 @@ export function usePlaybackTransport({
         if (disposed) return;
         if (payload.state === "stopped") {
           const context = playbackContext.current;
+          activeSessionRef.current = false;
+          regionNeedsRestoreRef.current = loopRegionRef.current !== null;
           setPositionMs(0);
-          setDurationMs(null);
           setCommandStatus({
             entryId: context.selectedEntryId ?? "",
             status: "idle",
@@ -146,7 +353,41 @@ export function usePlaybackTransport({
       unlistenPosition?.();
       unlistenCompleted?.();
     };
-  }, []);
+  }, [resetABLocal]);
+
+  useEffect(() => {
+    if (playbackStatus === "loading" || playbackStatus === "playing") {
+      activeSessionRef.current = true;
+    } else if (playbackStatus === "idle" || playbackStatus === "failed") {
+      activeSessionRef.current = false;
+    }
+  }, [playbackGeneration, playbackStatus]);
+
+  // Stop destroys the engine but preserves local A-B state. Reapply a complete
+  // region once the selected file gets a fresh playback worker.
+  useEffect(() => {
+    if (
+      playbackStatus !== "playing" ||
+      !regionNeedsRestoreRef.current ||
+      appliedRegionGeneration.current === playbackGeneration ||
+      abEntryId !== selectedEntryId
+    ) {
+      return;
+    }
+    const region = loopRegionRef.current;
+    if (!region) return;
+    regionNeedsRestoreRef.current = false;
+    appliedRegionGeneration.current = playbackGeneration;
+    void setLoopRegion(region.startMs, region.endMs).catch((cause) => {
+      appliedRegionGeneration.current = null;
+      regionNeedsRestoreRef.current = true;
+      setAbError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not restore the A-B region.",
+      );
+    });
+  }, [abEntryId, playbackGeneration, playbackStatus, selectedEntryId]);
 
   const runCommand = async (command: () => Promise<void>) => {
     setError(null);
@@ -214,8 +455,9 @@ export function usePlaybackTransport({
     handleStop: () =>
       runCommand(async () => {
         await stop();
+        activeSessionRef.current = false;
+        regionNeedsRestoreRef.current = loopRegionRef.current !== null;
         setPositionMs(0);
-        setDurationMs(null);
         if (selectedEntryId) {
           setCommandStatus({
             entryId: selectedEntryId,
@@ -235,12 +477,31 @@ export function usePlaybackTransport({
       return Promise.resolve();
     },
     handleSeek: async (nextPositionMs: number) => {
+      if (!activeSessionRef.current) {
+        setPositionMs(nextPositionMs);
+        setPositionEntryId(selectedEntryId);
+        return nextPositionMs;
+      }
       let confirmedPosition: number | null = null;
       const succeeded = await runCommand(async () => {
         const actual = await seek(nextPositionMs);
         setPositionMs(actual);
         confirmedPosition = actual;
       });
+      if (confirmedPosition !== null) {
+        const region = loopRegionRef.current;
+        if (
+          region &&
+          (confirmedPosition < region.startMs ||
+            confirmedPosition >= region.endMs)
+        ) {
+          // The engine cleared the region during this out-of-region seek;
+          // mirror the confirmed Rust state in the markers. The command is
+          // best-effort because the engine already dropped the region.
+          void clearLoopRegion().catch(() => undefined);
+          resetABLocal();
+        }
+      }
       return succeeded ? confirmedPosition : null;
     },
     handleVolume: async (nextVolume: number) => {
@@ -284,6 +545,16 @@ export function usePlaybackTransport({
       setPositionMs(nextPositionMs);
       setDurationMs(nextDurationMs);
     },
+    // A–B selection is per-file: points are only visible for the entry that
+    // placed them. The engine gives each file a fresh worker, so any other
+    // selection simply shows no region.
+    abPoints:
+      abEntryId === selectedEntryId ? abPoints : { startMs: null, endMs: null },
+    loopRegion: abEntryId === selectedEntryId ? loopRegion : null,
+    abError,
+    setAbPoint,
+    clearAB,
+    toggleAbRepeat,
   };
 }
 

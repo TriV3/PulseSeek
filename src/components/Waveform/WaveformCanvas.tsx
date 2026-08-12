@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { onPosition } from "../../api/playbackEvents";
 import type { WaveformLevel } from "../../api/waveform";
 import {
@@ -27,6 +35,15 @@ export interface WaveformCanvasProps {
   style?: WaveformStyle;
   /** Accessible name for the seek surface when reused by another visualizer. */
   ariaLabel?: string;
+  /** Placed A/B points in milliseconds; a null side is not yet placed. */
+  abPoints?: { startMs: number | null; endMs: number | null };
+  /** Region confirmed by the Rust engine; null until setLoopRegion resolves. */
+  loopRegion?: { startMs: number; endMs: number } | null;
+  /** Repositions an A/B point (drag on a marker). */
+  onSetAbPoint?: (
+    point: "a" | "b",
+    positionMs: number,
+  ) => void | Promise<boolean>;
 }
 
 const REFETCH_DEBOUNCE_MS = 200;
@@ -46,6 +63,11 @@ function setSeekX(element: HTMLElement, positionPx: number): void {
   element.style.setProperty("--seek-x", `${positionPx}px`);
 }
 
+export interface WaveformCanvasHandle {
+  /** Returns the position the canvas currently displays (ms), or null. */
+  getPlayheadPosition: () => number | null;
+}
+
 /**
  * Canvas 2D waveform renderer with an imperative playhead.
  *
@@ -54,19 +76,28 @@ function setSeekX(element: HTMLElement, positionPx: number): void {
  * updates do not re-render the component. Resize re-requests a resolution
  * level that fits the new width.
  */
-export function WaveformCanvas({
-  waveform,
-  durationMs,
-  restoredPositionMs,
-  resetRevision = 0,
-  onRequestRefetch,
-  onSeek,
-  seekStepMs = DEFAULT_SEEK_STEP_MS,
-  targetPeaksForWidth = defaultTargetPeaksForWidth,
-  getTokens = resolveTokens,
-  style = "outline",
-  ariaLabel = "Waveform seek",
-}: WaveformCanvasProps) {
+export const WaveformCanvas = forwardRef<
+  WaveformCanvasHandle,
+  WaveformCanvasProps
+>(function WaveformCanvas(
+  {
+    waveform,
+    durationMs,
+    restoredPositionMs,
+    resetRevision = 0,
+    onRequestRefetch,
+    onSeek,
+    seekStepMs = DEFAULT_SEEK_STEP_MS,
+    targetPeaksForWidth = defaultTargetPeaksForWidth,
+    getTokens = resolveTokens,
+    style = "outline",
+    ariaLabel = "Waveform seek",
+    abPoints = { startMs: null, endMs: null },
+    loopRegion = null,
+    onSetAbPoint,
+  }: WaveformCanvasProps,
+  ref,
+) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const currentTimeRef = useRef<HTMLSpanElement | null>(null);
   const currentMarkerRef = useRef<HTMLSpanElement | null>(null);
@@ -85,6 +116,22 @@ export function WaveformCanvas({
   const pendingPointerXRef = useRef<number | null>(null);
   const pointerTimerRef = useRef<number | null>(null);
   const lastPointerUpdateAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const startMarkerRef = useRef<HTMLSpanElement | null>(null);
+  const endMarkerRef = useRef<HTMLSpanElement | null>(null);
+  const abDragRef = useRef<{ point: "a" | "b"; lastMs: number } | null>(null);
+  const abPointsRef = useRef(abPoints);
+
+  // Exposes the live visual playhead (position events, drag preview, and the
+  // restored position) so A/B placement can target exactly where the user
+  // sees the marker, without waiting for a React re-render.
+  useImperativeHandle(
+    ref,
+    () => ({
+      getPlayheadPosition: () =>
+        positionRef.current ?? restoredPositionMs ?? null,
+    }),
+    [restoredPositionMs],
+  );
 
   const propsRef = useRef({
     waveform,
@@ -97,6 +144,7 @@ export function WaveformCanvas({
     targetPeaksForWidth,
     getTokens,
     style,
+    onSetAbPoint,
   });
   useEffect(() => {
     propsRef.current = {
@@ -110,6 +158,7 @@ export function WaveformCanvas({
       targetPeaksForWidth,
       getTokens,
       style,
+      onSetAbPoint,
     };
   }, [
     waveform,
@@ -122,7 +171,11 @@ export function WaveformCanvas({
     targetPeaksForWidth,
     getTokens,
     style,
+    onSetAbPoint,
   ]);
+  useEffect(() => {
+    abPointsRef.current = abPoints;
+  }, [abPoints]);
 
   const renderPlayhead = useCallback(() => {
     const width = widthRef.current;
@@ -280,6 +333,120 @@ export function WaveformCanvas({
       previewSeek(target);
     },
     [previewSeek, targetFromPointer, updateHover],
+  );
+
+  // ── A/B marker drag ───────────────────────────────────────────────────
+  // Dragging a marker repositions that point. The dragged side is clamped so
+  // it can never cross the other side (A ≤ B-1, B ≥ A+1), keeping every
+  // committed pair valid for the engine.
+  const clampAbPosition = useCallback(
+    (rawMs: number, point: "a" | "b"): number => {
+      const duration = durationRef.current;
+      const { startMs, endMs } = abPointsRef.current;
+      if (point === "a") {
+        const max = endMs !== null ? Math.max(0, endMs - 1) : (duration ?? 0);
+        return Math.max(0, Math.min(rawMs, max));
+      }
+      const min = startMs !== null ? Math.min(duration ?? 0, startMs + 1) : 0;
+      return Math.max(min, Math.min(rawMs, duration ?? 0));
+    },
+    [],
+  );
+
+  const previewAbMarker = useCallback(
+    (marker: HTMLElement | null, ms: number, duration: number) => {
+      if (!marker || duration <= 0) return;
+      marker.style.setProperty("--ab-x", String((ms / duration) * 100));
+    },
+    [],
+  );
+
+  const handleAbMarkerPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLSpanElement>, point: "a" | "b") => {
+      if (durationRef.current === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is best-effort in non-browser environments.
+      }
+      const raw = targetFromPointer(event.clientX);
+      if (raw === null) return;
+      const clamped = clampAbPosition(raw, point);
+      abDragRef.current = { point, lastMs: clamped };
+      previewAbMarker(event.currentTarget, clamped, durationRef.current);
+    },
+    [clampAbPosition, previewAbMarker, targetFromPointer],
+  );
+
+  const handleAbMarkerPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLSpanElement>) => {
+      const drag = abDragRef.current;
+      if (!drag) return;
+      const raw = targetFromPointer(event.clientX);
+      if (raw === null) return;
+      const clamped = clampAbPosition(raw, drag.point);
+      drag.lastMs = clamped;
+      previewAbMarker(event.currentTarget, clamped, durationRef.current ?? 0);
+    },
+    [clampAbPosition, previewAbMarker, targetFromPointer],
+  );
+
+  const handleAbMarkerPointerUp = useCallback(
+    (event: React.PointerEvent<HTMLSpanElement>) => {
+      const drag = abDragRef.current;
+      abDragRef.current = null;
+      if (!drag) return;
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is best-effort.
+      }
+      propsRef.current.onSetAbPoint?.(drag.point, drag.lastMs);
+    },
+    [],
+  );
+
+  const handleAbMarkerPointerCancel = useCallback(
+    (event: React.PointerEvent<HTMLSpanElement>) => {
+      const drag = abDragRef.current;
+      abDragRef.current = null;
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is best-effort.
+      }
+      const duration = durationRef.current;
+      if (duration === null) return;
+      const points = abPointsRef.current;
+      const ms = drag?.point === "a" ? points.startMs : points.endMs;
+      if (ms !== null) previewAbMarker(event.currentTarget, ms, duration);
+    },
+    [previewAbMarker],
+  );
+
+  const handleAbMarkerKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLSpanElement>, point: "a" | "b") => {
+      const current =
+        point === "a" ? abPointsRef.current.startMs : abPointsRef.current.endMs;
+      if (current === null) return;
+      const step = event.shiftKey ? 100 : 1;
+      let target: number | null = null;
+      if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+        target = current - step;
+      } else if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+        target = current + step;
+      } else if (event.key === "Home") {
+        target = 0;
+      } else if (event.key === "End") {
+        target = durationRef.current;
+      }
+      if (target === null) return;
+      event.preventDefault();
+      propsRef.current.onSetAbPoint?.(point, clampAbPosition(target, point));
+    },
+    [clampAbPosition],
   );
 
   const schedulePointerUpdate = useCallback(
@@ -598,7 +765,108 @@ export function WaveformCanvas({
         aria-hidden="true"
         hidden
       />
+      {renderAbOverlays(abPoints, loopRegion, durationMs, {
+        startRef: startMarkerRef,
+        endRef: endMarkerRef,
+        onPointerDown: handleAbMarkerPointerDown,
+        onPointerMove: handleAbMarkerPointerMove,
+        onPointerUp: handleAbMarkerPointerUp,
+        onPointerCancel: handleAbMarkerPointerCancel,
+        onKeyDown: handleAbMarkerKeyDown,
+      })}
     </div>
+  );
+});
+
+interface AbMarkerDragHandlers {
+  startRef: React.RefObject<HTMLSpanElement | null>;
+  endRef: React.RefObject<HTMLSpanElement | null>;
+  onPointerDown: (
+    event: React.PointerEvent<HTMLSpanElement>,
+    point: "a" | "b",
+  ) => void;
+  onPointerMove: (event: React.PointerEvent<HTMLSpanElement>) => void;
+  onPointerUp: (event: React.PointerEvent<HTMLSpanElement>) => void;
+  onPointerCancel: (event: React.PointerEvent<HTMLSpanElement>) => void;
+  onKeyDown: (
+    event: React.KeyboardEvent<HTMLSpanElement>,
+    point: "a" | "b",
+  ) => void;
+}
+
+function renderAbOverlays(
+  points: { startMs: number | null; endMs: number | null },
+  region: { startMs: number; endMs: number } | null,
+  durationMs: number | null,
+  drag: AbMarkerDragHandlers,
+): ReactNode {
+  if (durationMs === null || durationMs <= 0) return null;
+  const percent = (ms: number) => (ms / durationMs) * 100;
+  const startConfirmed =
+    region !== null &&
+    points.startMs !== null &&
+    region.startMs === points.startMs &&
+    region.endMs === points.endMs;
+  const endConfirmed =
+    region !== null && points.endMs !== null && region.endMs === points.endMs;
+  return (
+    <>
+      {points.startMs !== null ? (
+        <span
+          ref={drag.startRef}
+          className={`waveform-ab-marker waveform-ab-marker--start${
+            startConfirmed ? "" : " waveform-ab-marker--pending"
+          }`}
+          data-testid="waveform-ab-start"
+          role="slider"
+          tabIndex={0}
+          aria-label="A point"
+          aria-valuemin={0}
+          aria-valuemax={points.endMs === null ? durationMs : points.endMs - 1}
+          aria-valuenow={points.startMs}
+          style={{ "--ab-x": percent(points.startMs) } as CSSProperties}
+          onPointerDown={(event) => drag.onPointerDown(event, "a")}
+          onPointerMove={drag.onPointerMove}
+          onPointerUp={drag.onPointerUp}
+          onPointerCancel={drag.onPointerCancel}
+          onKeyDown={(event) => drag.onKeyDown(event, "a")}
+        />
+      ) : null}
+      {points.endMs !== null ? (
+        <span
+          ref={drag.endRef}
+          className={`waveform-ab-marker waveform-ab-marker--end${
+            endConfirmed ? "" : " waveform-ab-marker--pending"
+          }`}
+          data-testid="waveform-ab-end"
+          role="slider"
+          tabIndex={0}
+          aria-label="B point"
+          aria-valuemin={points.startMs === null ? 0 : points.startMs + 1}
+          aria-valuemax={durationMs}
+          aria-valuenow={points.endMs}
+          style={{ "--ab-x": percent(points.endMs) } as CSSProperties}
+          onPointerDown={(event) => drag.onPointerDown(event, "b")}
+          onPointerMove={drag.onPointerMove}
+          onPointerUp={drag.onPointerUp}
+          onPointerCancel={drag.onPointerCancel}
+          onKeyDown={(event) => drag.onKeyDown(event, "b")}
+        />
+      ) : null}
+      {region !== null ? (
+        <span
+          className="waveform-ab-band"
+          data-testid="waveform-ab-band"
+          aria-hidden="true"
+          style={
+            {
+              "--ab-x": percent(region.startMs),
+              "--ab-width": percent(region.endMs - region.startMs),
+            } as CSSProperties
+          }
+        />
+      ) : null}
+    </>
   );
 }
 

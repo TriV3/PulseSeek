@@ -25,6 +25,9 @@ export interface KeyboardShortcutActions {
   onPlaySelection?: () => void | Promise<void>;
   onRefresh?: () => void | Promise<void>;
   onFocusSearch?: () => void | Promise<void>;
+  onSetAbStart?: () => void | Promise<void>;
+  onSetAbEnd?: () => void | Promise<void>;
+  onToggleAbRepeat?: () => void | Promise<void>;
   onSetPlaybackModeOneShot?: () => void | Promise<void>;
   onSetPlaybackModeLoopCurrent?: () => void | Promise<void>;
   onSetPlaybackModeSequential?: () => void | Promise<void>;
@@ -90,9 +93,9 @@ const ACTION_CALLBACKS: Record<
   mark_reject: "onMarkReject",
   mark_favorite: "onMarkFavorite",
   mark_clear: "onMarkClear",
-  set_ab_start: null,
-  set_ab_end: null,
-  toggle_ab_repeat: null,
+  set_ab_start: "onSetAbStart",
+  set_ab_end: "onSetAbEnd",
+  toggle_ab_repeat: "onToggleAbRepeat",
 };
 
 export function useKeyboardShortcuts(

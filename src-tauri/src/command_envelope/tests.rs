@@ -132,18 +132,15 @@ fn shortcut_dispatch(
 }
 
 #[test]
-fn shortcut_envelope_load_exposes_available_mappings_and_unavailable_ab_actions() {
+fn shortcut_envelope_load_exposes_all_available_mappings() {
     let shortcuts = InMemoryShortcutMappingsService::new();
 
     let response = shortcut_dispatch("load_shortcuts", serde_json::json!({}), &shortcuts);
 
     assert!(response.ok);
     let data = response.data.unwrap();
-    assert_eq!(data["mappings"].as_array().unwrap().len(), 20);
-    assert_eq!(
-        data["unavailable_action_ids"],
-        serde_json::json!(["set_ab_start", "set_ab_end", "toggle_ab_repeat"])
-    );
+    assert_eq!(data["mappings"].as_array().unwrap().len(), 23);
+    assert_eq!(data["unavailable_action_ids"], serde_json::json!([]));
 }
 
 #[test]

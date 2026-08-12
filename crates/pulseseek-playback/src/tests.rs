@@ -10,6 +10,48 @@ struct RampDecoder {
     position: usize,
 }
 
+/// Stereo fake whose sample values identify their source frame.
+struct StereoRampDecoder {
+    data: Vec<f32>,
+    position: usize,
+}
+
+impl StereoRampDecoder {
+    fn new(frames: usize) -> Self {
+        let data = (0..frames).flat_map(|frame| [frame as f32, frame as f32]).collect();
+        Self { data, position: 0 }
+    }
+}
+
+impl Decoder for StereoRampDecoder {
+    fn probe(&self) -> pulseseek_domain::decoder::ProbeResult {
+        pulseseek_domain::decoder::ProbeResult::Supported
+    }
+
+    fn metadata(&mut self) -> Result<pulseseek_domain::decoder::StreamMetadata, DecodeError> {
+        unimplemented!("not used in tests")
+    }
+
+    fn read(&mut self, buf: &mut [f32]) -> Result<usize, DecodeError> {
+        let remaining = self.data.len() - self.position;
+        let to_copy = buf.len().min(remaining);
+        if to_copy == 0 {
+            return Ok(0);
+        }
+        buf[..to_copy].copy_from_slice(&self.data[self.position..self.position + to_copy]);
+        self.position += to_copy;
+        Ok(to_copy)
+    }
+
+    fn seek(
+        &mut self,
+        target: pulseseek_domain::playback::position::SeekTarget,
+    ) -> Result<pulseseek_domain::playback::position::Position, DecodeError> {
+        self.position = (target.position().as_millis() as usize * 2).min(self.data.len());
+        Ok(target.position())
+    }
+}
+
 impl RampDecoder {
     fn new(len: usize) -> Self {
         let data: Vec<f32> = (0..len).map(|i| i as f32).collect();
@@ -71,6 +113,41 @@ impl Decoder for InvalidFrameDecoder {
 
 struct RejectingSeekDecoder {
     inner: RampDecoder,
+}
+
+struct RejectSecondSeekDecoder {
+    inner: RampDecoder,
+    seeks: usize,
+}
+
+impl Decoder for RejectSecondSeekDecoder {
+    fn probe(&self) -> pulseseek_domain::decoder::ProbeResult {
+        self.inner.probe()
+    }
+
+    fn metadata(&mut self) -> Result<pulseseek_domain::decoder::StreamMetadata, DecodeError> {
+        unimplemented!("not used in tests")
+    }
+
+    fn read(&mut self, buf: &mut [f32]) -> Result<usize, DecodeError> {
+        self.inner.read(buf)
+    }
+
+    fn seek(
+        &mut self,
+        target: pulseseek_domain::playback::position::SeekTarget,
+    ) -> Result<pulseseek_domain::playback::position::Position, DecodeError> {
+        self.seeks += 1;
+        if self.seeks == 2 {
+            return Err(DecodeError::new(
+                pulseseek_domain::error::DiagnosticContext::new(
+                    pulseseek_domain::error::DiagnosticCode::AudioOutput,
+                ),
+                std::io::Error::other("second seek rejected"),
+            ));
+        }
+        self.inner.seek(target)
+    }
 }
 
 impl Decoder for RejectingSeekDecoder {
@@ -554,6 +631,42 @@ fn seek_generation_never_scans_a_large_stale_buffer_in_one_callback() {
 }
 
 #[test]
+fn moving_loop_marker_discards_large_stale_buffer_in_one_callback() {
+    let (mut engine, mut consumer) =
+        PlaybackEngine::new(Box::new(RampDecoder::new(262_144)), 131_072);
+    assert!(engine.process_chunk().unwrap());
+
+    let mut before = [0.0f32; 1];
+    assert_eq!(consumer.consume_channels(&mut before, 1, 1), 1);
+
+    engine.set_loop_region(loop_region(50, 100)).unwrap();
+
+    let mut resumed = [0.0f32; 1];
+    assert_eq!(consumer.consume_channels(&mut resumed, 1, 1), 0);
+    assert_eq!(
+        consumer.available(),
+        0,
+        "moving A or B must invalidate the stale ring in constant time"
+    );
+}
+
+#[test]
+fn failed_loop_marker_move_preserves_existing_region() {
+    let (mut engine, _) = PlaybackEngine::new(
+        Box::new(RejectSecondSeekDecoder { inner: RampDecoder::new(1_000), seeks: 0 }),
+        16,
+    );
+    let original = loop_region(10, 20);
+    engine.set_loop_region(original).unwrap();
+
+    let error =
+        engine.set_loop_region(loop_region(30, 40)).expect_err("second positioning seek must fail");
+
+    assert!(matches!(error.kind, PlaybackErrorKind::Decode(_)));
+    assert_eq!(engine.loop_region, Some(original));
+}
+
+#[test]
 fn seek_while_paused_preserves_pause_and_resumes_at_target() {
     let (worker, mut consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(1_000)), 16);
     let control = consumer.control();
@@ -940,6 +1053,12 @@ fn loop_region(start_ms: u64, end_ms: u64) -> pulseseek_domain::playback::loop_r
     .expect("valid loop region")
 }
 
+fn finish_loop_region_transition(consumer: &mut PlaybackConsumer, channels: usize) {
+    let mut transition = vec![0.0f32; channels];
+    assert_eq!(consumer.consume_channels(&mut transition, channels, channels), 0);
+    consumer.seek_ramp_frame = crate::control::SEEK_RAMP_FRAMES;
+}
+
 #[test]
 fn ab_repeat_wraps_at_region_end_without_advancing() {
     let (worker, mut consumer) = PlaybackWorker::start_with_mode(
@@ -948,6 +1067,7 @@ fn ab_repeat_wraps_at_region_end_without_advancing() {
         pulseseek_domain::playback::mode::PlaybackMode::OneShot,
     );
     worker.set_loop_region(Some(loop_region(2, 6))).unwrap();
+    finish_loop_region_transition(&mut consumer, 1);
 
     let mut output = [0.0f32; 16];
     let mut produced = 0;
@@ -972,6 +1092,39 @@ fn ab_repeat_wraps_at_region_end_without_advancing() {
     // matches the audio, which loops 2..6.
     assert_eq!(consumer.control().position_frames(), 6);
     assert!(worker.poll_event().is_none(), "A–B repeat must never complete or fail");
+    control_stop_and_join(worker, consumer);
+}
+
+#[test]
+fn ab_repeat_stereo_wraps_after_region_frames_not_interleaved_samples() {
+    let (worker, mut consumer) = PlaybackWorker::start_resampled_with_mode(
+        Box::new(StereoRampDecoder::new(1_000)),
+        16,
+        2,
+        1_000,
+        1_000,
+        pulseseek_domain::playback::mode::PlaybackMode::OneShot,
+    )
+    .unwrap();
+    worker.set_loop_region(Some(loop_region(2, 6))).unwrap();
+    finish_loop_region_transition(&mut consumer, 2);
+
+    let mut output = [0.0f32; 16];
+    let mut produced = 0;
+    for _ in 0..100_000 {
+        let count = consumer.consume_channels(&mut output[produced..], 2, 2);
+        produced += count;
+        if produced == output.len() {
+            break;
+        }
+        std::thread::yield_now();
+    }
+
+    assert_eq!(produced, output.len());
+    assert_eq!(
+        output,
+        [2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0]
+    );
     control_stop_and_join(worker, consumer);
 }
 
@@ -1179,6 +1332,7 @@ fn ab_repeat_region_longer_than_buffer_seeks_back_to_start() {
         pulseseek_domain::playback::mode::PlaybackMode::OneShot,
     );
     worker.set_loop_region(Some(loop_region(10, 18))).unwrap();
+    finish_loop_region_transition(&mut consumer, 1);
 
     let mut output = Vec::new();
     let mut scratch = [0.0f32; 8];
@@ -1200,6 +1354,37 @@ fn ab_repeat_region_longer_than_buffer_seeks_back_to_start() {
         ]
     );
     assert!(worker.poll_event().is_none());
+    control_stop_and_join(worker, consumer);
+}
+
+#[test]
+fn ab_repeat_long_region_resets_clock_only_when_a_is_audible() {
+    let (worker, mut consumer) = PlaybackWorker::start_with_mode(
+        Box::new(RampDecoder::new(1_000)),
+        4,
+        pulseseek_domain::playback::mode::PlaybackMode::OneShot,
+    );
+    worker.set_loop_region(Some(loop_region(10, 18))).unwrap();
+
+    for expected in 10_u64..18 {
+        let mut sample = [0.0f32; 1];
+        while consumer.consume_channels(&mut sample, 1, 1) != 1 {
+            std::thread::yield_now();
+        }
+        assert_eq!(sample[0], expected as f32);
+        assert_eq!(
+            consumer.control().position_frames(),
+            expected + 1,
+            "clock must reach B before wrapping"
+        );
+    }
+
+    let mut wrapped = [0.0f32; 1];
+    while consumer.consume_channels(&mut wrapped, 1, 1) != 1 {
+        std::thread::yield_now();
+    }
+    assert_eq!(wrapped[0], 10.0);
+    assert_eq!(consumer.control().position_frames(), 11);
     control_stop_and_join(worker, consumer);
 }
 

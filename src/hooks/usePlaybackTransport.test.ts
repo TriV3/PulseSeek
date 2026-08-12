@@ -8,6 +8,8 @@ const resumeMock = vi.hoisted(() => vi.fn());
 const stopMock = vi.hoisted(() => vi.fn());
 const seekMock = vi.hoisted(() => vi.fn());
 const setVolumeMock = vi.hoisted(() => vi.fn());
+const setLoopRegionMock = vi.hoisted(() => vi.fn());
+const clearLoopRegionMock = vi.hoisted(() => vi.fn());
 const onStateChangedMock = vi.hoisted(() => vi.fn());
 const onPositionMock = vi.hoisted(() => vi.fn());
 const onCompletedMock = vi.hoisted(() => vi.fn());
@@ -18,6 +20,8 @@ vi.mock("../api/commandEnvelope", () => ({
   stop: stopMock,
   seek: seekMock,
   setVolume: setVolumeMock,
+  setLoopRegion: setLoopRegionMock,
+  clearLoopRegion: clearLoopRegionMock,
 }));
 vi.mock("../api/playbackEvents", () => ({
   onStateChanged: onStateChangedMock,
@@ -310,5 +314,414 @@ describe("usePlaybackTransport", () => {
 
     expect(result.current.positionMs).toBe(0);
     expect(result.current.durationMs).toBeNull();
+  });
+
+  it("places a single A-B point without confirming a region", async () => {
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        onSelectEntry: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current.setAbPoint("a", 1_000));
+
+    expect(result.current.abPoints).toEqual({ startMs: 1_000, endMs: null });
+    expect(result.current.loopRegion).toBeNull();
+    expect(setLoopRegionMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a complete pending region without an active session", async () => {
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "idle",
+        onSelectEntry: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current.setAbPoint("a", 1_000));
+    await act(async () => result.current.setAbPoint("b", 5_000));
+
+    expect(setLoopRegionMock).not.toHaveBeenCalled();
+    expect(result.current.abPoints).toEqual({ startMs: 1_000, endMs: 5_000 });
+    expect(result.current.loopRegion).toEqual({ startMs: 1_000, endMs: 5_000 });
+    expect(result.current.abError).toBeNull();
+  });
+
+  it("confirms a region once both valid points are placed", async () => {
+    setLoopRegionMock.mockResolvedValue(1_000);
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        onSelectEntry: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current.setAbPoint("a", 1_000));
+    await act(async () => result.current.setAbPoint("b", 5_000));
+
+    expect(setLoopRegionMock).toHaveBeenCalledWith(1_000, 5_000);
+    expect(result.current.loopRegion).toEqual({ startMs: 1_000, endMs: 5_000 });
+    expect(result.current.abError).toBeNull();
+  });
+
+  it("rejects a reversed A-B pair and keeps the previous points", async () => {
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        onSelectEntry: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current.setAbPoint("a", 5_000));
+    await act(async () => result.current.setAbPoint("b", 1_000));
+
+    expect(setLoopRegionMock).not.toHaveBeenCalled();
+    expect(result.current.abPoints).toEqual({ startMs: 5_000, endMs: null });
+    expect(result.current.loopRegion).toBeNull();
+    expect(result.current.abError).toMatch(/after the A point/i);
+  });
+
+  it("rejects an equal A-B pair", async () => {
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        onSelectEntry: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current.setAbPoint("a", 2_000));
+    await act(async () => result.current.setAbPoint("b", 2_000));
+
+    expect(setLoopRegionMock).not.toHaveBeenCalled();
+    expect(result.current.abPoints).toEqual({ startMs: 2_000, endMs: null });
+  });
+
+  it("reverts the placed point and surfaces the error when the backend rejects", async () => {
+    setLoopRegionMock.mockRejectedValue(new Error("region out of bounds"));
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        onSelectEntry: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current.setAbPoint("a", 1_000));
+    await act(async () => result.current.setAbPoint("b", 5_000));
+
+    expect(result.current.loopRegion).toBeNull();
+    expect(result.current.abPoints).toEqual({ startMs: 1_000, endMs: null });
+    expect(result.current.abError).toBe("region out of bounds");
+  });
+
+  it("clears the region and points through the backend", async () => {
+    setLoopRegionMock.mockResolvedValue(1_000);
+    clearLoopRegionMock.mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        onSelectEntry: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current.setAbPoint("a", 1_000));
+    await act(async () => result.current.setAbPoint("b", 5_000));
+
+    await act(async () => result.current.clearAB());
+
+    expect(clearLoopRegionMock).toHaveBeenCalledOnce();
+    expect(result.current.loopRegion).toBeNull();
+    expect(result.current.abPoints).toEqual({ startMs: null, endMs: null });
+  });
+
+  it("keeps the region when a confirmed seek lands inside it", async () => {
+    setLoopRegionMock.mockResolvedValue(1_000);
+    seekMock.mockResolvedValue(2_000);
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        onSelectEntry: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current.setAbPoint("a", 1_000));
+    await act(async () => result.current.setAbPoint("b", 5_000));
+    await act(async () => result.current.handleSeek(2_000));
+
+    expect(clearLoopRegionMock).not.toHaveBeenCalled();
+    expect(result.current.loopRegion).toEqual({ startMs: 1_000, endMs: 5_000 });
+  });
+
+  it("clears region and points when a confirmed seek lands outside it", async () => {
+    setLoopRegionMock.mockResolvedValue(1_000);
+    clearLoopRegionMock.mockResolvedValue(undefined);
+    seekMock.mockResolvedValue(8_000);
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        onSelectEntry: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current.setAbPoint("a", 1_000));
+    await act(async () => result.current.setAbPoint("b", 5_000));
+    await act(async () => result.current.handleSeek(8_000));
+
+    expect(clearLoopRegionMock).toHaveBeenCalledOnce();
+    expect(result.current.loopRegion).toBeNull();
+    expect(result.current.abPoints).toEqual({ startMs: null, endMs: null });
+  });
+
+  it("resets A-B points and region when the selection changes", async () => {
+    const { result, rerender } = renderHook(
+      ({ selectedEntryId }) =>
+        usePlaybackTransport({
+          entries,
+          selectedEntryId,
+          playbackStatus: "playing",
+          onSelectEntry: vi.fn(),
+        }),
+      { initialProps: { selectedEntryId: "a.wav" } },
+    );
+    await act(async () => result.current.setAbPoint("a", 1_000));
+
+    rerender({ selectedEntryId: "b.wav" });
+
+    expect(result.current.abPoints).toEqual({ startMs: null, endMs: null });
+    expect(result.current.loopRegion).toBeNull();
+  });
+
+  it("preserves A-B points, region, and duration on stop", async () => {
+    setLoopRegionMock.mockResolvedValue(1_000);
+    stopMock.mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        onSelectEntry: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current.setAbPoint("a", 1_000));
+    await act(async () => result.current.setAbPoint("b", 5_000));
+    act(() => result.current.restorePosition("a.wav", 2_000, 10_000));
+    await act(async () => result.current.handleStop());
+
+    expect(result.current.loopRegion).toEqual({ startMs: 1_000, endMs: 5_000 });
+    expect(result.current.abPoints).toEqual({ startMs: 1_000, endMs: 5_000 });
+    expect(result.current.durationMs).toBe(10_000);
+  });
+
+  it("places B while stopped and keeps the pending region", async () => {
+    stopMock.mockResolvedValue(undefined);
+    setLoopRegionMock.mockResolvedValue(1_000);
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        onSelectEntry: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current.setAbPoint("a", 1_000));
+    act(() => result.current.restorePosition("a.wav", 4_000, 10_000));
+    await act(async () => result.current.handleStop());
+    await act(async () => result.current.setAbPoint("b", 4_000));
+
+    expect(setLoopRegionMock).toHaveBeenCalledTimes(0);
+    expect(result.current.abPoints).toEqual({ startMs: 1_000, endMs: 4_000 });
+    expect(result.current.loopRegion).toEqual({ startMs: 1_000, endMs: 4_000 });
+  });
+
+  it("moves the playhead locally while stopped so a point can be placed", async () => {
+    stopMock.mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        onSelectEntry: vi.fn(),
+      }),
+    );
+    act(() => result.current.restorePosition("a.wav", 2_000, 10_000));
+    await act(async () => result.current.handleStop());
+
+    let confirmed: number | null = null;
+    await act(async () => {
+      confirmed = await result.current.handleSeek(4_000);
+    });
+
+    expect(seekMock).not.toHaveBeenCalled();
+    expect(confirmed).toBe(4_000);
+    expect(result.current.positionMs).toBe(4_000);
+  });
+
+  it("reapplies a stopped A-B region to the next playback worker", async () => {
+    stopMock.mockResolvedValue(undefined);
+    setLoopRegionMock.mockResolvedValue(1_000);
+    const { result, rerender } = renderHook(
+      ({
+        status,
+        generation,
+      }: {
+        status: "playing" | "loading";
+        generation: number;
+      }) =>
+        usePlaybackTransport({
+          entries,
+          selectedEntryId: "a.wav",
+          playbackStatus: status,
+          playbackGeneration: generation,
+          onSelectEntry: vi.fn(),
+        }),
+      {
+        initialProps: {
+          status: "playing" as "playing" | "loading",
+          generation: 1,
+        },
+      },
+    );
+    await act(async () => result.current.setAbPoint("a", 1_000));
+    await act(async () => result.current.setAbPoint("b", 5_000));
+    await act(async () => result.current.handleStop());
+    setLoopRegionMock.mockClear();
+
+    rerender({ status: "loading", generation: 2 });
+    rerender({ status: "playing", generation: 2 });
+    await act(async () => undefined);
+
+    expect(setLoopRegionMock).toHaveBeenCalledOnce();
+    expect(setLoopRegionMock).toHaveBeenCalledWith(1_000, 5_000);
+  });
+
+  it("applies a region created while idle when playback starts", async () => {
+    setLoopRegionMock.mockResolvedValue(1_000);
+    const { result, rerender } = renderHook(
+      ({
+        status,
+        generation,
+      }: {
+        status: "idle" | "playing";
+        generation: number;
+      }) =>
+        usePlaybackTransport({
+          entries,
+          selectedEntryId: "a.wav",
+          playbackStatus: status,
+          playbackGeneration: generation,
+          onSelectEntry: vi.fn(),
+        }),
+      {
+        initialProps: {
+          status: "idle" as "idle" | "playing",
+          generation: 1,
+        },
+      },
+    );
+
+    await act(async () => result.current.setAbPoint("a", 1_000));
+    await act(async () => result.current.setAbPoint("b", 5_000));
+    expect(setLoopRegionMock).not.toHaveBeenCalled();
+
+    rerender({ status: "playing", generation: 2 });
+    await act(async () => undefined);
+
+    expect(setLoopRegionMock).toHaveBeenCalledOnce();
+    expect(setLoopRegionMock).toHaveBeenCalledWith(1_000, 5_000);
+  });
+
+  it("never combines hidden points from two selected files", async () => {
+    setLoopRegionMock.mockResolvedValue(1_000);
+    const { result, rerender } = renderHook(
+      ({ selectedEntryId }) =>
+        usePlaybackTransport({
+          entries,
+          selectedEntryId,
+          playbackStatus: "playing",
+          onSelectEntry: vi.fn(),
+        }),
+      { initialProps: { selectedEntryId: "a.wav" } },
+    );
+
+    await act(async () => result.current.setAbPoint("a", 1_000));
+    rerender({ selectedEntryId: "b.wav" });
+    await act(async () => result.current.setAbPoint("b", 5_000));
+
+    expect(setLoopRegionMock).not.toHaveBeenCalled();
+    expect(result.current.abPoints).toEqual({ startMs: null, endMs: 5_000 });
+  });
+
+  it("ignores a stale region response after selection changes", async () => {
+    let resolveRegion: ((value: number) => void) | undefined;
+    setLoopRegionMock.mockImplementation(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveRegion = resolve;
+        }),
+    );
+    const { result, rerender } = renderHook(
+      ({ selectedEntryId }) =>
+        usePlaybackTransport({
+          entries,
+          selectedEntryId,
+          playbackStatus: "playing",
+          onSelectEntry: vi.fn(),
+        }),
+      { initialProps: { selectedEntryId: "a.wav" } },
+    );
+
+    await act(async () => result.current.setAbPoint("a", 1_000));
+    let pending: Promise<boolean>;
+    act(() => {
+      pending = result.current.setAbPoint("b", 5_000);
+    });
+    rerender({ selectedEntryId: "b.wav" });
+    await act(async () => {
+      resolveRegion?.(1_000);
+      await pending!;
+    });
+
+    expect(result.current.abPoints).toEqual({ startMs: null, endMs: null });
+    expect(result.current.loopRegion).toBeNull();
+  });
+
+  it("toggles an active A-B region off and re-activates a pending pair", async () => {
+    setLoopRegionMock.mockResolvedValue(1_000);
+    clearLoopRegionMock.mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        onSelectEntry: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current.setAbPoint("a", 1_000));
+    await act(async () => result.current.setAbPoint("b", 5_000));
+    await act(async () => result.current.toggleAbRepeat());
+
+    expect(clearLoopRegionMock).toHaveBeenCalledOnce();
+    expect(result.current.loopRegion).toBeNull();
   });
 });

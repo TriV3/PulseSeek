@@ -314,10 +314,7 @@ mod tests {
         let profile = service.load().expect("load defaults");
 
         assert_eq!(profile.mappings, default_data());
-        assert_eq!(
-            profile.unavailable_action_ids,
-            vec!["set_ab_start", "set_ab_end", "toggle_ab_repeat"]
-        );
+        assert_eq!(profile.unavailable_action_ids, Vec::<String>::new());
     }
 
     #[test]
@@ -349,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn native_save_rejects_unavailable_ab_action_without_persisting() {
+    fn native_save_rejects_duplicate_ab_action_without_persisting() {
         let cache = Arc::new(RecordingCache::default());
         let service = NativeShortcutMappingsService::new(cache.clone());
         let mut mappings = default_data();
@@ -361,9 +358,9 @@ mod tests {
             alt: false,
         });
 
-        let error = service.save(mappings).expect_err("unavailable action fails");
+        let error = service.save(mappings).expect_err("duplicate action fails");
 
-        assert_eq!(error.user_descriptor().category(), ErrorCategory::InvalidInput);
+        assert_eq!(error.user_descriptor().category(), ErrorCategory::Conflict);
         assert!(cache.replacements.lock().unwrap().is_empty());
     }
 

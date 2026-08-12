@@ -25,11 +25,14 @@ const SCRIPT = `
     ["mark_maybe", "m", true, true, false],
     ["mark_reject", "r", true, true, false],
     ["mark_favorite", "f", true, true, false],
-    ["mark_clear", "u", true, true, false]
+    ["mark_clear", "u", true, true, false],
+    ["set_ab_start", "[", false, false, false],
+    ["set_ab_end", "]", false, false, false],
+    ["toggle_ab_repeat", "a", false, false, false]
   ].map(function(binding) {
     return { action_id: binding[0], key: binding[1], primary: binding[2], shift: binding[3], alt: binding[4] };
   });
-  var unavailableShortcuts = ["set_ab_start", "set_ab_end", "toggle_ab_repeat"];
+  var unavailableShortcuts = [];
   var state = {
     shortcuts: defaultShortcuts.map(function(mapping) { return Object.assign({}, mapping); }),
     visualizationSettings: { enabled: true, mode: "waveform", quality: "balanced" },

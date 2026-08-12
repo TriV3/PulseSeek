@@ -42,12 +42,33 @@ fn defaults_cover_existing_commands_refresh_search_modes_and_marks() {
         assert!(actions.contains(&action), "missing default for {action:?}");
     }
 
-    for unavailable in
+    for available in
         [ShortcutAction::SetAbStart, ShortcutAction::SetAbEnd, ShortcutAction::ToggleAbRepeat]
     {
-        assert!(!actions.contains(&unavailable), "A-B action must remain unbound");
-        assert!(!unavailable.is_available());
+        assert!(actions.contains(&available), "missing AB default for {available:?}");
+        assert!(available.is_available(), "AB action must be available now");
     }
+    assert_eq!(
+        defaults
+            .iter()
+            .find(|m| m.action == ShortcutAction::SetAbStart)
+            .map(|m| m.chord.key.as_str()),
+        Some("[")
+    );
+    assert_eq!(
+        defaults
+            .iter()
+            .find(|m| m.action == ShortcutAction::SetAbEnd)
+            .map(|m| m.chord.key.as_str()),
+        Some("]")
+    );
+    assert_eq!(
+        defaults
+            .iter()
+            .find(|m| m.action == ShortcutAction::ToggleAbRepeat)
+            .map(|m| m.chord.key.as_str()),
+        Some("a")
+    );
     validate_shortcut_mappings(&defaults, Platform::MacOs).expect("mac defaults valid");
     validate_shortcut_mappings(&defaults, Platform::Windows).expect("windows defaults valid");
     validate_shortcut_mappings(&defaults, Platform::Linux).expect("linux defaults valid");
@@ -99,12 +120,14 @@ fn duplicate_actions_and_unavailable_actions_are_rejected() {
         Err(ShortcutError::DuplicateAction(ShortcutAction::Refresh))
     ));
 
-    let unavailable =
-        vec![ShortcutMapping::new(ShortcutAction::SetAbStart, ShortcutChord::key("a"))];
-    assert!(matches!(
-        validate_shortcut_mappings(&unavailable, Platform::Linux),
-        Err(ShortcutError::UnavailableAction(ShortcutAction::SetAbStart))
-    ));
+    // AB actions are no longer reserved: they accept an explicit binding.
+    let ab_chords = vec![
+        ShortcutMapping::new(ShortcutAction::SetAbStart, ShortcutChord::key("[")),
+        ShortcutMapping::new(ShortcutAction::SetAbEnd, ShortcutChord::key("]")),
+        ShortcutMapping::new(ShortcutAction::ToggleAbRepeat, ShortcutChord::key("a")),
+    ];
+    validate_shortcut_mappings(&ab_chords, Platform::Linux)
+        .expect("AB chords must validate once available");
 }
 
 #[test]

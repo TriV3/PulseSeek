@@ -1,6 +1,7 @@
+import { createRef } from "react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
-import { WaveformCanvas } from "./WaveformCanvas";
+import { WaveformCanvas, type WaveformCanvasHandle } from "./WaveformCanvas";
 import { onPosition } from "../../api/playbackEvents";
 import type { WaveformLevel } from "../../api/waveform";
 import type { Canvas2D } from "./waveformRenderer";
@@ -578,6 +579,233 @@ describe("WaveformCanvas", () => {
     expect(mockContext.ctx.fill).toHaveBeenCalled();
     expect(onRequestRefetch).not.toHaveBeenCalled();
     expect(outlineStrokes).toBeGreaterThan(0);
+  });
+
+  it("does not render A-B markers without points", () => {
+    const { queryByTestId } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={2000} />,
+    );
+
+    expect(queryByTestId("waveform-ab-start")).not.toBeInTheDocument();
+    expect(queryByTestId("waveform-ab-end")).not.toBeInTheDocument();
+    expect(queryByTestId("waveform-ab-band")).not.toBeInTheDocument();
+  });
+
+  it("renders a single pending A marker before the region is confirmed", () => {
+    const { getByTestId, queryByTestId } = render(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={2000}
+        abPoints={{ startMs: 1_000, endMs: null }}
+      />,
+    );
+
+    expect(getByTestId("waveform-ab-start")).toHaveClass(
+      "waveform-ab-marker--pending",
+    );
+    expect(getByTestId("waveform-ab-start")).toHaveStyle("--ab-x: 50");
+    expect(queryByTestId("waveform-ab-end")).not.toBeInTheDocument();
+    expect(queryByTestId("waveform-ab-band")).not.toBeInTheDocument();
+  });
+
+  it("renders pending markers while the second point is pending", () => {
+    const { getByTestId, queryByTestId } = render(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={2000}
+        abPoints={{ startMs: 1_000, endMs: 1_500 }}
+      />,
+    );
+
+    expect(getByTestId("waveform-ab-start")).toHaveClass(
+      "waveform-ab-marker--pending",
+    );
+    expect(getByTestId("waveform-ab-end")).toHaveClass(
+      "waveform-ab-marker--pending",
+    );
+    expect(getByTestId("waveform-ab-end")).toHaveStyle("--ab-x: 75");
+    expect(queryByTestId("waveform-ab-band")).not.toBeInTheDocument();
+  });
+
+  it("renders solid markers and a band only for the confirmed region", () => {
+    const { getByTestId } = render(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={2000}
+        abPoints={{ startMs: 1_000, endMs: 1_500 }}
+        loopRegion={{ startMs: 1_000, endMs: 1_500 }}
+      />,
+    );
+
+    expect(getByTestId("waveform-ab-start")).not.toHaveClass(
+      "waveform-ab-marker--pending",
+    );
+    expect(getByTestId("waveform-ab-end")).not.toHaveClass(
+      "waveform-ab-marker--pending",
+    );
+    const band = getByTestId("waveform-ab-band");
+    expect(band).toHaveStyle("--ab-x: 50");
+    expect(band).toHaveStyle("--ab-width: 25");
+  });
+
+  it("never renders the loop band for a lone unconfirmed point", () => {
+    const { queryByTestId: querySolo } = render(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={2000}
+        abPoints={{ startMs: 1_000, endMs: null }}
+        loopRegion={null}
+      />,
+    );
+    expect(querySolo("waveform-ab-band")).not.toBeInTheDocument();
+  });
+
+  it("stays pending when points no longer match the confirmed region", () => {
+    const { getByTestId } = render(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={2000}
+        abPoints={{ startMs: 200, endMs: 1_500 }}
+        loopRegion={{ startMs: 1_000, endMs: 1_500 }}
+      />,
+    );
+
+    expect(getByTestId("waveform-ab-start")).toHaveClass(
+      "waveform-ab-marker--pending",
+    );
+    expect(getByTestId("waveform-ab-end")).not.toHaveClass(
+      "waveform-ab-marker--pending",
+    );
+  });
+
+  it("omits markers when the duration is unknown", () => {
+    const { queryByTestId } = render(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={null}
+        abPoints={{ startMs: 1_000, endMs: 1_500 }}
+      />,
+    );
+
+    expect(queryByTestId("waveform-ab-start")).not.toBeInTheDocument();
+    expect(queryByTestId("waveform-ab-band")).not.toBeInTheDocument();
+  });
+
+  it("exposes the visual playhead through the imperative handle", () => {
+    const ref = createRef<WaveformCanvasHandle>();
+    render(
+      <WaveformCanvas
+        ref={ref}
+        waveform={LEVEL}
+        durationMs={2000}
+        restoredPositionMs={1500}
+      />,
+    );
+    flushRaf();
+
+    expect(ref.current?.getPlayheadPosition()).toBe(1500);
+
+    emitPosition(500);
+    flushRaf();
+    expect(ref.current?.getPlayheadPosition()).toBe(500);
+  });
+
+  it("repositions a marker by dragging it on the waveform", () => {
+    const onSetAbPoint = vi.fn();
+    const { container } = render(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={2000}
+        abPoints={{ startMs: 1_000, endMs: 1_500 }}
+        loopRegion={{ startMs: 1_000, endMs: 1_500 }}
+        onSetAbPoint={onSetAbPoint}
+      />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+    const endMarker = container.querySelector(
+      "[data-testid='waveform-ab-end']",
+    ) as HTMLElement;
+
+    fireEvent.pointerDown(endMarker, { clientX: 75, pointerId: 1 });
+    fireEvent.pointerMove(endMarker, { clientX: 90, pointerId: 1 });
+    fireEvent.pointerUp(endMarker, { pointerId: 1 });
+
+    expect(onSetAbPoint).toHaveBeenCalledWith("b", 1_800);
+  });
+
+  it("clamps a dragged A marker so it never passes B", () => {
+    const onSetAbPoint = vi.fn();
+    const { container } = render(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={2000}
+        abPoints={{ startMs: 1_000, endMs: 1_500 }}
+        loopRegion={{ startMs: 1_000, endMs: 1_500 }}
+        onSetAbPoint={onSetAbPoint}
+      />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+    const startMarker = container.querySelector(
+      "[data-testid='waveform-ab-start']",
+    ) as HTMLElement;
+
+    fireEvent.pointerDown(startMarker, { clientX: 50, pointerId: 1 });
+    fireEvent.pointerMove(startMarker, { clientX: 90, pointerId: 1 });
+    fireEvent.pointerUp(startMarker, { pointerId: 1 });
+
+    expect(onSetAbPoint).toHaveBeenCalledWith("a", 1_499);
+  });
+
+  it("exposes keyboard-adjustable A-B marker sliders", () => {
+    const onSetAbPoint = vi.fn();
+    const { getByRole } = render(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={2000}
+        abPoints={{ startMs: 1_000, endMs: 1_500 }}
+        loopRegion={{ startMs: 1_000, endMs: 1_500 }}
+        onSetAbPoint={onSetAbPoint}
+      />,
+    );
+
+    const start = getByRole("slider", { name: "A point" });
+    const end = getByRole("slider", { name: "B point" });
+    expect(start).toHaveAttribute("aria-valuenow", "1000");
+    expect(start).toHaveAttribute("aria-valuemax", "1499");
+    expect(end).toHaveAttribute("aria-valuemin", "1001");
+
+    fireEvent.keyDown(start, { key: "ArrowRight" });
+    fireEvent.keyDown(end, { key: "ArrowLeft", shiftKey: true });
+
+    expect(onSetAbPoint).toHaveBeenNthCalledWith(1, "a", 1_001);
+    expect(onSetAbPoint).toHaveBeenNthCalledWith(2, "b", 1_400);
+  });
+
+  it("reverts a cancelled marker drag to the committed position", () => {
+    const onSetAbPoint = vi.fn();
+    const { container } = render(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={2000}
+        abPoints={{ startMs: 1_000, endMs: 1_500 }}
+        loopRegion={{ startMs: 1_000, endMs: 1_500 }}
+        onSetAbPoint={onSetAbPoint}
+      />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+    const startMarker = container.querySelector(
+      "[data-testid='waveform-ab-start']",
+    ) as HTMLElement;
+
+    fireEvent.pointerDown(startMarker, { clientX: 50, pointerId: 1 });
+    fireEvent.pointerMove(startMarker, { clientX: 90, pointerId: 1 });
+    fireEvent.pointerCancel(startMarker, { pointerId: 1 });
+
+    expect(onSetAbPoint).not.toHaveBeenCalled();
+    expect(startMarker).toHaveStyle("--ab-x: 50");
   });
 });
 

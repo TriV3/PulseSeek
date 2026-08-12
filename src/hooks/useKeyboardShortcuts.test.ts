@@ -30,6 +30,9 @@ function createActions() {
     onMoveToTrash: vi.fn(),
     onFocusSearch: vi.fn(),
     onMarkKeep: vi.fn(),
+    onSetAbStart: vi.fn(),
+    onSetAbEnd: vi.fn(),
+    onToggleAbRepeat: vi.fn(),
   };
 }
 
@@ -70,6 +73,20 @@ describe("useKeyboardShortcuts", () => {
     expect(actions.onNextTrack).toHaveBeenCalledOnce();
     expect(actions.onToggleLoop).toHaveBeenCalledOnce();
     expect(actions.onMoveToTrash).toHaveBeenCalledOnce();
+  });
+
+  it("dispatches A-B region shortcuts", () => {
+    renderHook(() => useKeyboardShortcuts(actions));
+
+    act(() => {
+      press("[");
+      press("]");
+      press("a");
+    });
+
+    expect(actions.onSetAbStart).toHaveBeenCalledOnce();
+    expect(actions.onSetAbEnd).toHaveBeenCalledOnce();
+    expect(actions.onToggleAbRepeat).toHaveBeenCalledOnce();
   });
 
   it("uses Meta as the platform modifier on macOS", () => {

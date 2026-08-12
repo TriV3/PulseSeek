@@ -56,7 +56,7 @@ describe("ShortcutEditor", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/reserved/i);
   });
 
-  it("resets through backend immediately, cancels, and shows unavailable A-B rows", async () => {
+  it("resets through backend immediately, cancels, and shows editable A-B rows", async () => {
     const onCancel = vi.fn();
     const onSave = vi.fn();
     const onReset = vi.fn(async () => DEFAULT_SHORTCUTS);
@@ -82,7 +82,22 @@ describe("ShortcutEditor", () => {
         }),
       ).toHaveTextContent("Ctrl+O"),
     );
-    expect(screen.getAllByText("Unavailable").length).toBeGreaterThanOrEqual(2);
+    expect(
+      screen.getByRole("button", {
+        name: /change shortcut for set a point/i,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: /change shortcut for set b point/i,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: /change shortcut for toggle a-b repeat/i,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalledOnce();

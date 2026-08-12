@@ -440,11 +440,12 @@ function shortcutBindingsFromResponse(value: unknown): ShortcutBindings {
   }
 
   for (const actionId of candidate.unavailable_action_ids) {
+    // Every shipped action is now available (PR-089), so any id in the
+    // unavailable list makes the response inconsistent and must be rejected;
+    // the seen-size guard below catches the extra entry.
     if (
       typeof actionId !== "string" ||
       !SHORTCUT_ACTION_IDS.has(actionId) ||
-      SHORTCUT_ACTIONS_BY_ID.get(actionId as ShortcutActionId)?.available !==
-        false ||
       seen.has(actionId)
     ) {
       return invalidShortcutResponse();

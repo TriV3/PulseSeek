@@ -90,9 +90,9 @@ impl ShortcutAction {
         Self::ALL.iter().copied().find(|action| action.id() == id)
     }
 
-    /// A-B actions are reserved until loop-region behavior ships.
+    /// All shipped actions are available; PR-089 activates A-B selection.
     pub const fn is_available(self) -> bool {
-        !matches!(self, Self::SetAbStart | Self::SetAbEnd | Self::ToggleAbRepeat)
+        true
     }
 }
 
@@ -267,6 +267,11 @@ pub fn default_shortcut_mappings() -> Vec<ShortcutMapping> {
         primary_shift(Action::MarkReject, "r"),
         primary_shift(Action::MarkFavorite, "f"),
         primary_shift(Action::MarkClear, "u"),
+        // A-B region selection (PR-089): unprefixed bracket keys place A/B at
+        // the playhead; "a" toggles A-B repeat.
+        plain(Action::SetAbStart, "["),
+        plain(Action::SetAbEnd, "]"),
+        plain(Action::ToggleAbRepeat, "a"),
     ]
 }
 

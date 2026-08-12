@@ -367,4 +367,103 @@ describe("WaveformPanel", () => {
 
     expect(getWaveform).toHaveBeenCalledTimes(1);
   });
+
+  it("disables A-B placement while the duration is unknown", () => {
+    render(
+      <WaveformPanel
+        entryPath={null}
+        entryName="No file selected"
+        durationMs={null}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /Set A/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Set B/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Clear A-B/i })).toBeDisabled();
+  });
+
+  it("enables placement once an entry and duration exist", () => {
+    render(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /Set A/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Set B/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Clear A-B/i })).toBeDisabled();
+  });
+
+  it("places A and B points at the current playhead", () => {
+    const onSetAbPoint = vi.fn();
+    render(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+        restoredPositionMs={500}
+        playheadPositionMs={500}
+        onSetAbPoint={onSetAbPoint}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Set A/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Set B/i }));
+
+    expect(onSetAbPoint).toHaveBeenNthCalledWith(1, "a", 500);
+    expect(onSetAbPoint).toHaveBeenNthCalledWith(2, "b", 500);
+  });
+
+  it("shows placed points, a confirmed region, and placement errors", async () => {
+    vi.mocked(getWaveform).mockResolvedValue(LEVEL);
+    render(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+        abPoints={{ startMs: 1_000, endMs: 1_500 }}
+        loopRegion={{ startMs: 1_000, endMs: 1_500 }}
+        abError="B point must be after the A point."
+      />,
+    );
+
+    expect(screen.getByText("A 0:01")).toBeInTheDocument();
+    expect(screen.getByText("B 0:01")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "B point must be after the A point.",
+    );
+    expect(screen.getByRole("button", { name: /Clear A-B/i })).toBeEnabled();
+
+    await waitFor(() => expect(getWaveform).toHaveBeenCalled());
+    expect(screen.getByTestId("waveform-ab-band")).toBeInTheDocument();
+  });
+
+  it("forwards clearing from the cluster and disables Clear without points", () => {
+    const onClearAB = vi.fn();
+    const { rerender } = render(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+        abPoints={{ startMs: 1_000, endMs: 1_500 }}
+        loopRegion={{ startMs: 1_000, endMs: 1_500 }}
+        onClearAB={onClearAB}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Clear A-B/i }));
+    expect(onClearAB).toHaveBeenCalledOnce();
+
+    rerender(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+        onClearAB={onClearAB}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /Clear A-B/i })).toBeDisabled();
+  });
 });
