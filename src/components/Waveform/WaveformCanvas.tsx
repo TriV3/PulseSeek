@@ -4,6 +4,7 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  useState,
   type CSSProperties,
   type ReactNode,
 } from "react";
@@ -11,14 +12,19 @@ import { onPosition } from "../../api/playbackEvents";
 import type { WaveformLevel } from "../../api/waveform";
 import {
   buildEnvelope,
+  clampViewport,
   defaultTargetPeaksForWidth,
   drawEnvelope,
-  positionMsForX,
+  positionMsForViewportX,
+  viewportXForPositionMs,
+  MIN_VIEWPORT_MS,
+  pinchZoomFactor,
   resolveTokens,
   type Canvas2D,
   type EnvelopeGeometry,
   type WaveformStyle,
   type WaveformTokens,
+  type WaveformViewport,
 } from "./waveformRenderer";
 
 export interface WaveformCanvasProps {
@@ -44,6 +50,9 @@ export interface WaveformCanvasProps {
     point: "a" | "b",
     positionMs: number,
   ) => void | Promise<boolean>;
+  onViewportChange?: (viewport: WaveformViewport) => void;
+  /** Shows temporal zoom controls for waveform mode only. */
+  showZoomControls?: boolean;
 }
 
 const REFETCH_DEBOUNCE_MS = 200;
@@ -95,6 +104,8 @@ export const WaveformCanvas = forwardRef<
     abPoints = { startMs: null, endMs: null },
     loopRegion = null,
     onSetAbPoint,
+    onViewportChange,
+    showZoomControls = false,
   }: WaveformCanvasProps,
   ref,
 ) {
@@ -120,6 +131,21 @@ export const WaveformCanvas = forwardRef<
   const endMarkerRef = useRef<HTMLSpanElement | null>(null);
   const abDragRef = useRef<{ point: "a" | "b"; lastMs: number } | null>(null);
   const abPointsRef = useRef(abPoints);
+  const viewportRef = useRef<WaveformViewport>({
+    startMs: 0,
+    endMs: durationMs ?? 0,
+  });
+  const [, setViewport] = useState<WaveformViewport>(viewportRef.current);
+  const panRef = useRef<{
+    startX: number;
+    viewport: WaveformViewport;
+    moved: boolean;
+  } | null>(null);
+  const pointersRef = useRef(new Map<number, number>());
+  const pinchRef = useRef<{
+    distance: number;
+    viewport: WaveformViewport;
+  } | null>(null);
 
   // Exposes the live visual playhead (position events, drag preview, and the
   // restored position) so A/B placement can target exactly where the user
@@ -145,6 +171,7 @@ export const WaveformCanvas = forwardRef<
     getTokens,
     style,
     onSetAbPoint,
+    onViewportChange,
   });
   useEffect(() => {
     propsRef.current = {
@@ -159,6 +186,7 @@ export const WaveformCanvas = forwardRef<
       getTokens,
       style,
       onSetAbPoint,
+      onViewportChange,
     };
   }, [
     waveform,
@@ -172,6 +200,7 @@ export const WaveformCanvas = forwardRef<
     getTokens,
     style,
     onSetAbPoint,
+    onViewportChange,
   ]);
   useEffect(() => {
     abPointsRef.current = abPoints;
@@ -192,9 +221,11 @@ export const WaveformCanvas = forwardRef<
     const playheadX =
       effectiveDurationMs === null || positionMs === null
         ? null
-        : Math.min(
+        : viewportXForPositionMs(
+            positionMs,
+            viewportRef.current.startMs,
+            viewportRef.current.endMs,
             width,
-            Math.max(0, (positionMs / effectiveDurationMs) * width),
           );
     const currentTime = currentTimeRef.current;
     const currentMarker = currentMarkerRef.current;
@@ -234,7 +265,14 @@ export const WaveformCanvas = forwardRef<
       geometryRef.current?.height !== height
     ) {
       const geometry = waveform
-        ? buildEnvelope(waveform, width, height, null, effectiveDurationMs)
+        ? buildEnvelope(
+            waveform,
+            width,
+            height,
+            null,
+            effectiveDurationMs,
+            viewportRef.current,
+          )
         : { channels: [], playheadX: null };
       geometryRef.current = { ...geometry, source: waveform, width, height };
     }
@@ -262,6 +300,50 @@ export const WaveformCanvas = forwardRef<
     });
   }, [draw]);
 
+  const updateViewport = useCallback(
+    (next: WaveformViewport) => {
+      const duration = durationRef.current;
+      if (duration === null || duration <= 0) return;
+      const resolved = clampViewport(next, duration, MIN_VIEWPORT_MS);
+      viewportRef.current = resolved;
+      setViewport(resolved);
+      onViewportChange?.(resolved);
+      geometryRef.current = null;
+      scheduleDraw();
+    },
+    [onViewportChange, scheduleDraw],
+  );
+
+  const zoomAt = useCallback(
+    (factor: number, clientX?: number) => {
+      const duration = durationRef.current;
+      const canvas = canvasRef.current;
+      if (!duration || !canvas) return;
+      const rect = interactionRectRef.current ?? canvas.getBoundingClientRect();
+      const current = viewportRef.current;
+      const anchor =
+        clientX === undefined
+          ? (current.startMs + current.endMs) / 2
+          : (positionMsForViewportX(
+              clientX - rect.left,
+              rect.width,
+              current.startMs,
+              current.endMs,
+            ) ?? (current.startMs + current.endMs) / 2);
+      const span = Math.max(
+        MIN_VIEWPORT_MS,
+        Math.min(duration, (current.endMs - current.startMs) * factor),
+      );
+      const ratio =
+        (anchor - current.startMs) / (current.endMs - current.startMs);
+      updateViewport({
+        startMs: anchor - ratio * span,
+        endMs: anchor + (1 - ratio) * span,
+      });
+    },
+    [updateViewport],
+  );
+
   const commitSeek = useCallback(
     (targetMs: number) => {
       positionRef.current = targetMs;
@@ -288,7 +370,12 @@ export const WaveformCanvas = forwardRef<
         ? cachedRect
         : canvas.getBoundingClientRect();
     interactionRectRef.current = rect;
-    return positionMsForX(clientX - rect.left, rect.width, durationRef.current);
+    return positionMsForViewportX(
+      clientX - rect.left,
+      rect.width,
+      viewportRef.current.startMs,
+      viewportRef.current.endMs,
+    );
   }, []);
 
   const updateHover = useCallback((clientX: number) => {
@@ -302,10 +389,11 @@ export const WaveformCanvas = forwardRef<
         : canvas?.getBoundingClientRect();
     if (!marker || !label || !rect) return;
     interactionRectRef.current = rect;
-    const target = positionMsForX(
+    const target = positionMsForViewportX(
       clientX - rect.left,
       rect.width,
-      durationRef.current,
+      viewportRef.current.startMs,
+      viewportRef.current.endMs,
     );
     if (target === null) {
       marker.hidden = true;
@@ -356,7 +444,19 @@ export const WaveformCanvas = forwardRef<
   const previewAbMarker = useCallback(
     (marker: HTMLElement | null, ms: number, duration: number) => {
       if (!marker || duration <= 0) return;
-      marker.style.setProperty("--ab-x", String((ms / duration) * 100));
+      marker.style.setProperty(
+        "--ab-x",
+        String(
+          (viewportXForPositionMs(
+            ms,
+            viewportRef.current.startMs,
+            viewportRef.current.endMs,
+            100,
+          ) /
+            100) *
+            100,
+        ),
+      );
     },
     [],
   );
@@ -496,6 +596,29 @@ export const WaveformCanvas = forwardRef<
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
       if (durationRef.current === null) return;
+      pointersRef.current.set(event.pointerId, event.clientX);
+      if (pointersRef.current.size === 2) {
+        const xs = [...pointersRef.current.values()];
+        pinchRef.current = {
+          distance: Math.abs(xs[1] - xs[0]) || 1,
+          viewport: viewportRef.current,
+        };
+        panRef.current = null;
+        event.preventDefault();
+        return;
+      }
+      if (
+        viewportRef.current.endMs - viewportRef.current.startMs <
+        durationRef.current
+      ) {
+        panRef.current = {
+          startX: event.clientX,
+          viewport: viewportRef.current,
+          moved: false,
+        };
+        event.preventDefault();
+        return;
+      }
       const target = targetFromPointer(event.clientX);
       if (target === null) return;
       event.preventDefault();
@@ -514,16 +637,61 @@ export const WaveformCanvas = forwardRef<
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
+      if (pointersRef.current.has(event.pointerId))
+        pointersRef.current.set(event.pointerId, event.clientX);
+      const pinch = pinchRef.current;
+      if (pinch && pointersRef.current.size >= 2) {
+        const xs = [...pointersRef.current.values()];
+        const distance = Math.abs(xs[1] - xs[0]) || 1;
+        const factor = pinchZoomFactor(pinch.distance, distance);
+        const center = (xs[0] + xs[1]) / 2;
+        const rect = interactionRectRef.current;
+        if (rect) {
+          const anchor =
+            positionMsForViewportX(
+              center - rect.left,
+              rect.width,
+              pinch.viewport.startMs,
+              pinch.viewport.endMs,
+            ) ?? (pinch.viewport.startMs + pinch.viewport.endMs) / 2;
+          const span = (pinch.viewport.endMs - pinch.viewport.startMs) * factor;
+          const ratio =
+            (anchor - pinch.viewport.startMs) /
+            (pinch.viewport.endMs - pinch.viewport.startMs);
+          updateViewport({
+            startMs: anchor - ratio * span,
+            endMs: anchor + (1 - ratio) * span,
+          });
+        }
+        return;
+      }
+      const pan = panRef.current;
+      if (pan) {
+        const rect = interactionRectRef.current;
+        const duration = durationRef.current;
+        if (rect && duration) {
+          pan.moved = pan.moved || Math.abs(event.clientX - pan.startX) > 3;
+          const delta =
+            ((event.clientX - pan.startX) / rect.width) *
+            (pan.viewport.endMs - pan.viewport.startMs);
+          updateViewport({
+            startMs: pan.viewport.startMs - delta,
+            endMs: pan.viewport.endMs - delta,
+          });
+        }
+        return;
+      }
       // Slow movement remains immediate. During a fast pointer stream, keep
       // only the latest coordinate and update at most once per display frame.
       // A timer is used instead of requestAnimationFrame because WKWebView can
       // defer animation frames while it is dispatching pointer events.
       schedulePointerUpdate(event.clientX);
     },
-    [schedulePointerUpdate],
+    [schedulePointerUpdate, updateViewport],
   );
 
   const handlePointerLeave = useCallback(() => {
+    if (panRef.current) return;
     if (draggingRef.current) return;
     pendingPointerXRef.current = null;
     if (pointerTimerRef.current !== null) {
@@ -533,6 +701,28 @@ export const WaveformCanvas = forwardRef<
     if (hoverMarkerRef.current) hoverMarkerRef.current.hidden = true;
     if (hoverTimeRef.current) hoverTimeRef.current.hidden = true;
   }, []);
+
+  const handleWheel = useCallback(
+    (event: React.WheelEvent<HTMLCanvasElement>) => {
+      event.preventDefault();
+      zoomAt(event.deltaY < 0 ? 0.8 : 1.25, event.clientX);
+    },
+    [zoomAt],
+  );
+
+  const finishPan = useCallback(
+    (event: React.PointerEvent<HTMLCanvasElement>) => {
+      const pan = panRef.current;
+      if (pan && !pan.moved) {
+        const target = targetFromPointer(event.clientX);
+        if (target !== null) commitSeek(target);
+      }
+      panRef.current = null;
+      pointersRef.current.clear();
+      pinchRef.current = null;
+    },
+    [commitSeek, targetFromPointer],
+  );
 
   const finishPointerInteraction = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>, shouldCommit: boolean) => {
@@ -589,6 +779,22 @@ export const WaveformCanvas = forwardRef<
   const lastResetRevisionRef = useRef(resetRevision);
   useEffect(() => {
     durationRef.current = durationMs;
+    if (lastWaveformRef.current !== waveform && durationMs !== null) {
+      const nextViewport = { startMs: 0, endMs: durationMs };
+      viewportRef.current = nextViewport;
+      setViewport(nextViewport);
+    } else if (durationMs !== null) {
+      const nextViewport = clampViewport(viewportRef.current, durationMs);
+      viewportRef.current = nextViewport;
+      setViewport(nextViewport);
+    }
+    if (
+      durationMs !== null &&
+      viewportRef.current.endMs <= viewportRef.current.startMs
+    ) {
+      viewportRef.current = { startMs: 0, endMs: durationMs };
+      setViewport(viewportRef.current);
+    }
     if (lastWaveformRef.current !== waveform) {
       lastWaveformRef.current = waveform;
       receivedPositionEventRef.current = false;
@@ -635,6 +841,10 @@ export const WaveformCanvas = forwardRef<
       receivedPositionEventRef.current = true;
       if (payload.duration_ms !== null) {
         durationRef.current = payload.duration_ms;
+        if (viewportRef.current.endMs <= viewportRef.current.startMs) {
+          viewportRef.current = { startMs: 0, endMs: payload.duration_ms };
+          setViewport(viewportRef.current);
+        }
       }
       // Keep the progress bar independent from WebKit's animation-frame
       // scheduling during pointer tracking.
@@ -732,11 +942,52 @@ export const WaveformCanvas = forwardRef<
         tabIndex={durationMs === null ? -1 : 0}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
-        onPointerUp={(event) => finishPointerInteraction(event, true)}
-        onPointerCancel={(event) => finishPointerInteraction(event, false)}
+        onPointerUp={(event) => {
+          finishPan(event);
+          finishPointerInteraction(event, true);
+        }}
+        onPointerCancel={(event) => {
+          finishPan(event);
+          finishPointerInteraction(event, false);
+        }}
         onPointerLeave={handlePointerLeave}
+        onWheel={handleWheel}
         onKeyDown={handleKeyDown}
       />
+      {showZoomControls ? (
+        <div
+          className="waveform-zoom-controls"
+          aria-label="Waveform zoom controls"
+        >
+          <button
+            type="button"
+            aria-label="Zoom out waveform"
+            onClick={() => zoomAt(1.25)}
+          >
+            −
+          </button>
+          <button
+            type="button"
+            aria-label="Zoom in waveform"
+            onClick={() => zoomAt(0.8)}
+          >
+            +
+          </button>
+          <button
+            type="button"
+            aria-label="Reset waveform zoom"
+            onClick={() =>
+              updateViewport({ startMs: 0, endMs: durationMs ?? 0 })
+            }
+            disabled={
+              viewportRef.current.startMs === 0 &&
+              viewportRef.current.endMs === (durationMs ?? 0)
+            }
+          >
+            Reset
+          </button>
+        </div>
+      ) : null}
       <span
         ref={currentMarkerRef}
         className="waveform-current-marker"
@@ -765,7 +1016,7 @@ export const WaveformCanvas = forwardRef<
         aria-hidden="true"
         hidden
       />
-      {renderAbOverlays(abPoints, loopRegion, durationMs, {
+      {renderAbOverlays(abPoints, loopRegion, durationMs, viewportRef.current, {
         startRef: startMarkerRef,
         endRef: endMarkerRef,
         onPointerDown: handleAbMarkerPointerDown,
@@ -798,10 +1049,13 @@ function renderAbOverlays(
   points: { startMs: number | null; endMs: number | null },
   region: { startMs: number; endMs: number } | null,
   durationMs: number | null,
+  viewport: WaveformViewport,
   drag: AbMarkerDragHandlers,
 ): ReactNode {
   if (durationMs === null || durationMs <= 0) return null;
-  const percent = (ms: number) => (ms / durationMs) * 100;
+  const percent = (ms: number) =>
+    (viewportXForPositionMs(ms, viewport.startMs, viewport.endMs, 100) / 100) *
+    100;
   const startConfirmed =
     region !== null &&
     points.startMs !== null &&
@@ -809,6 +1063,15 @@ function renderAbOverlays(
     region.endMs === points.endMs;
   const endConfirmed =
     region !== null && points.endMs !== null && region.endMs === points.endMs;
+  const hasCompletePoints =
+    points.startMs !== null &&
+    points.endMs !== null &&
+    points.startMs < points.endMs;
+  const bandStartMs = points.startMs ?? 0;
+  const bandEndMs = points.endMs ?? bandStartMs;
+  const visibleBandStart = Math.max(bandStartMs, viewport.startMs);
+  const visibleBandEnd = Math.min(bandEndMs, viewport.endMs);
+  const bandVisible = hasCompletePoints && visibleBandEnd > visibleBandStart;
   return (
     <>
       {points.startMs !== null ? (
@@ -853,15 +1116,15 @@ function renderAbOverlays(
           onKeyDown={(event) => drag.onKeyDown(event, "b")}
         />
       ) : null}
-      {region !== null ? (
+      {bandVisible ? (
         <span
           className="waveform-ab-band"
           data-testid="waveform-ab-band"
           aria-hidden="true"
           style={
             {
-              "--ab-x": percent(region.startMs),
-              "--ab-width": percent(region.endMs - region.startMs),
+              "--ab-x": percent(visibleBandStart),
+              "--ab-width": `${percent(visibleBandEnd) - percent(visibleBandStart)}`,
             } as CSSProperties
           }
         />

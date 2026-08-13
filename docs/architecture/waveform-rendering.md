@@ -84,7 +84,7 @@ frame. Late frames are dropped rather than delaying audio.
 `WaveformCanvas` is the seek surface (FR-VS-003):
 
 - Click or drag converts the pointer x coordinate into a millisecond target
-  through `positionMsForX`, clamped to `[0, durationMs]`, and forwards it to
+  through `positionMsForViewportX`, clamped to the visible viewport, and forwards it to
   `onSeek`. The app wires that to the validated `seek` command through
   `usePlaybackTransport.handleSeek`, which keeps the confirmed Rust position
   and surfaces command failures in the transport alert.
@@ -103,6 +103,24 @@ frame. Late frames are dropped rather than delaying audio.
   Without a known duration the slider is `aria-disabled` and not tabbable.
 - Seeking beyond the duration is clamped on the frontend because the backend
   rejects targets outside a known duration (`Duration::seek_to`).
+
+## Waveform zoom and navigation
+
+The canvas maintains horizontal temporal viewport independent from full track
+duration. Wheel zooms around pointer, touch pinch zooms around gesture center,
+and visible `+`, `−`, and `Reset` buttons provide keyboard-accessible controls.
+After zoom, pointer dragging pans viewport without seeking; click and A/B marker
+drag retain their existing behavior. Viewport span never falls below 100 ms and
+never exceeds track duration. Seek, hover, playhead, and A/B markers map through
+viewport boundaries.
+
+Playback priority: active A/B looping wins over sequential/gapless prepared-track
+handoff. Prepared next-track data may remain cached, but current track is never
+replaced while its loop region is active.
+
+Seeking outside active A/B temporarily clears the engine region; transport
+re-applies same region asynchronously, preserving A/B points and restarting at A.
+Restore responses are ignored if user clears, replaces, or edits A/B meanwhile.
 
 ## Failure and degradation behavior
 

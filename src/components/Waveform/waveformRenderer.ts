@@ -43,6 +43,14 @@ export interface WaveformSource {
   max: number[];
 }
 
+export interface WaveformViewport {
+  startMs: number;
+  endMs: number;
+}
+
+export const MIN_VIEWPORT_MS = 100;
+export const PINCH_ZOOM_SENSITIVITY = 0.15;
+
 const AMPLITUDE_MAX = 1;
 
 /**
@@ -57,6 +65,7 @@ export function buildEnvelope(
   heightPx: number,
   positionMs: number | null,
   durationMs: number | null,
+  viewport: WaveformViewport | null = null,
 ): EnvelopeGeometry {
   if (widthPx <= 0 || heightPx <= 0 || source.channels <= 0) {
     return { channels: [], playheadX: null };
@@ -64,7 +73,19 @@ export function buildEnvelope(
 
   const channels = source.channels;
   const peaks = source.min.length;
-  const buckets = Math.floor(peaks / channels);
+  const totalBuckets = Math.floor(peaks / channels);
+  const firstBucket =
+    viewport && durationMs && durationMs > 0
+      ? Math.max(0, Math.floor((viewport.startMs / durationMs) * totalBuckets))
+      : 0;
+  const lastBucket =
+    viewport && durationMs && durationMs > 0
+      ? Math.min(
+          totalBuckets,
+          Math.ceil((viewport.endMs / durationMs) * totalBuckets),
+        )
+      : totalBuckets;
+  const buckets = Math.max(0, lastBucket - firstBucket);
   const rowHeight = heightPx / channels;
 
   const channelRows: EnvelopeChannel[] = [];
@@ -73,7 +94,8 @@ export function buildEnvelope(
     const minPoints: Point[] = [];
     const maxPoints: Point[] = [];
     for (let bucket = 0; bucket < buckets; bucket += 1) {
-      const index = bucket * channels + channel;
+      const sourceBucket = firstBucket + bucket;
+      const index = sourceBucket * channels + channel;
       if (index >= peaks) break;
       const x = ((bucket + 0.5) * widthPx) / buckets;
       minPoints.push({
@@ -90,7 +112,9 @@ export function buildEnvelope(
 
   return {
     channels: channelRows,
-    playheadX: playheadX(widthPx, positionMs, durationMs),
+    playheadX: viewport
+      ? positionXInViewport(widthPx, positionMs, viewport)
+      : playheadX(widthPx, positionMs, durationMs),
   };
 }
 
@@ -315,4 +339,68 @@ export function positionMsForX(
     return null;
   }
   return Math.round(clamp((xPx / widthPx) * durationMs, 0, durationMs));
+}
+
+export function viewportXForPositionMs(
+  positionMs: number,
+  startMs: number,
+  endMs: number,
+  widthPx: number,
+): number {
+  if (endMs <= startMs || widthPx <= 0) return 0;
+  return clamp(
+    ((positionMs - startMs) / (endMs - startMs)) * widthPx,
+    0,
+    widthPx,
+  );
+}
+
+export function positionMsForViewportX(
+  xPx: number,
+  widthPx: number,
+  startMs: number,
+  endMs: number,
+): number | null {
+  if (!Number.isFinite(xPx) || widthPx <= 0 || endMs <= startMs) return null;
+  return Math.round(startMs + clamp(xPx / widthPx, 0, 1) * (endMs - startMs));
+}
+
+export function clampViewport(
+  viewport: WaveformViewport,
+  durationMs: number,
+  minimumMs = MIN_VIEWPORT_MS,
+): WaveformViewport {
+  if (durationMs <= 0) return { startMs: 0, endMs: 0 };
+  const span = Math.min(
+    durationMs,
+    Math.max(minimumMs, viewport.endMs - viewport.startMs),
+  );
+  const center = (viewport.startMs + viewport.endMs) / 2;
+  const startMs = clamp(center - span / 2, 0, durationMs - span);
+  return { startMs, endMs: startMs + span };
+}
+
+/** Dampens pinch distance changes so small finger movement does not over-zoom. */
+export function pinchZoomFactor(
+  initialDistancePx: number,
+  currentDistancePx: number,
+  sensitivity = PINCH_ZOOM_SENSITIVITY,
+): number {
+  if (!Number.isFinite(initialDistancePx) || initialDistancePx <= 0) return 1;
+  if (!Number.isFinite(currentDistancePx) || currentDistancePx <= 0) return 1;
+  return Math.pow(initialDistancePx / currentDistancePx, sensitivity);
+}
+
+function positionXInViewport(
+  widthPx: number,
+  positionMs: number | null,
+  viewport: WaveformViewport,
+): number | null {
+  if (positionMs === null) return null;
+  return viewportXForPositionMs(
+    positionMs,
+    viewport.startMs,
+    viewport.endMs,
+    widthPx,
+  );
 }

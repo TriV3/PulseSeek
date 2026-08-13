@@ -127,6 +127,93 @@ function emitPosition(positionMs: number, durationMs: number | null = 2000) {
 }
 
 describe("WaveformCanvas", () => {
+  it("exposes zoom controls and zooms around pointer", () => {
+    const { container, getByRole } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={2_000} showZoomControls />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+
+    expect(
+      getByRole("button", { name: "Zoom in waveform" }),
+    ).toBeInTheDocument();
+    fireEvent.wheel(canvas, { clientX: 25, deltaY: -100 });
+
+    expect(
+      getByRole("button", { name: "Reset waveform zoom" }),
+    ).not.toBeDisabled();
+    expect(canvas).toHaveAttribute("aria-label", "Waveform seek");
+  });
+
+  it("pans zoomed waveform by dragging without seeking", () => {
+    const onSeek = vi.fn();
+    const { container } = render(
+      <WaveformCanvas waveform={LEVEL} durationMs={2_000} onSeek={onSeek} />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+    fireEvent.wheel(canvas, { clientX: 50, deltaY: -100 });
+    fireEvent.pointerDown(canvas, { clientX: 50, pointerId: 1 });
+    fireEvent.pointerMove(canvas, { clientX: 60, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { clientX: 60, pointerId: 1 });
+
+    expect(onSeek).not.toHaveBeenCalled();
+  });
+
+  it("maps A/B marker drag preview in zoomed coordinates", () => {
+    const onSetAbPoint = vi.fn();
+    const { container, getByRole } = render(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={2_000}
+        abPoints={{ startMs: 1_000, endMs: 1_500 }}
+        onSetAbPoint={onSetAbPoint}
+      />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+    fireEvent.wheel(canvas, { clientX: 50, deltaY: -100 });
+    const marker = getByRole("slider", { name: "B point" });
+    fireEvent.pointerDown(marker, { clientX: 75, pointerId: 2 });
+    fireEvent.pointerMove(marker, { clientX: 100, pointerId: 2 });
+
+    expect(marker).toHaveStyle("--ab-x: 100");
+  });
+
+  it("uses damped pinch zoom", () => {
+    const onViewportChange = vi.fn();
+    const { container } = render(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={2_000}
+        onViewportChange={onViewportChange}
+      />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+    fireEvent.pointerDown(canvas, { clientX: 25, pointerId: 1 });
+    fireEvent.pointerDown(canvas, { clientX: 75, pointerId: 2 });
+    fireEvent.pointerMove(canvas, { clientX: 0, pointerId: 1 });
+
+    const viewport = onViewportChange.mock.lastCall?.[0];
+    expect(viewport.endMs - viewport.startMs).toBeGreaterThan(1_000);
+  });
+
+  it("keeps visible part of A-B highlight after zoom", () => {
+    const { container, getByTestId } = render(
+      <WaveformCanvas
+        waveform={LEVEL}
+        durationMs={2_000}
+        abPoints={{ startMs: 900, endMs: 1_100 }}
+      />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    stubCanvasRect(canvas, 100);
+    fireEvent.wheel(canvas, { clientX: 50, deltaY: -100 });
+
+    expect(getByTestId("waveform-ab-band")).toHaveStyle("--ab-width: 12.5");
+  });
+
   it("draws the envelope once waveform data arrives", () => {
     const { container } = render(
       <WaveformCanvas waveform={LEVEL} durationMs={2000} />,
@@ -624,7 +711,7 @@ describe("WaveformCanvas", () => {
       "waveform-ab-marker--pending",
     );
     expect(getByTestId("waveform-ab-end")).toHaveStyle("--ab-x: 75");
-    expect(queryByTestId("waveform-ab-band")).not.toBeInTheDocument();
+    expect(queryByTestId("waveform-ab-band")).toBeInTheDocument();
   });
 
   it("renders solid markers and a band only for the confirmed region", () => {

@@ -226,6 +226,7 @@ export function WaveformPanel({
                 abPoints={abPoints}
                 loopRegion={loopRegion}
                 onSetAbPoint={onSetAbPoint}
+                showZoomControls
               />
             )}
           </div>

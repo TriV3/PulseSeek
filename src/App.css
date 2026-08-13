@@ -148,6 +148,30 @@ input {
   isolation: isolate;
 }
 
+.waveform-zoom-controls {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  z-index: 2;
+  display: flex;
+  gap: 3px;
+}
+
+.waveform-zoom-controls button {
+  min-width: 24px;
+  min-height: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--bg-surface);
+  color: var(--text-strong);
+  cursor: pointer;
+}
+
+.waveform-zoom-controls button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
 .waveform-hover-marker {
   position: absolute;
   left: 0;

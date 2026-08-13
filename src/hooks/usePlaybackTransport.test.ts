@@ -661,6 +661,24 @@ describe("usePlaybackTransport", () => {
     expect(result.current.abError).toBeNull();
   });
 
+  it("activates completed A-B points immediately while playing", async () => {
+    setLoopRegionMock.mockResolvedValue(1_000);
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        onSelectEntry: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current.setAbPoint("a", 1_000));
+    await act(async () => result.current.setAbPoint("b", 5_000));
+
+    expect(setLoopRegionMock).toHaveBeenLastCalledWith(1_000, 5_000);
+    expect(result.current.loopRegion).toEqual({ startMs: 1_000, endMs: 5_000 });
+  });
+
   it("rejects a reversed A-B pair and keeps the previous points", async () => {
     const { result } = renderHook(() =>
       usePlaybackTransport({
@@ -758,7 +776,7 @@ describe("usePlaybackTransport", () => {
     expect(result.current.loopRegion).toEqual({ startMs: 1_000, endMs: 5_000 });
   });
 
-  it("clears region and points when a confirmed seek lands outside it", async () => {
+  it("restores region when seek lands outside it", async () => {
     setLoopRegionMock.mockResolvedValue(1_000);
     clearLoopRegionMock.mockResolvedValue(undefined);
     seekMock.mockResolvedValue(8_000);
@@ -774,10 +792,43 @@ describe("usePlaybackTransport", () => {
     await act(async () => result.current.setAbPoint("a", 1_000));
     await act(async () => result.current.setAbPoint("b", 5_000));
     await act(async () => result.current.handleSeek(8_000));
+    await act(async () => undefined);
 
-    expect(clearLoopRegionMock).toHaveBeenCalledOnce();
-    expect(result.current.loopRegion).toBeNull();
+    expect(clearLoopRegionMock).not.toHaveBeenCalled();
+    expect(setLoopRegionMock).toHaveBeenCalledTimes(2);
+    expect(result.current.loopRegion).toEqual({ startMs: 1_000, endMs: 5_000 });
+    expect(result.current.abPoints).toEqual({ startMs: 1_000, endMs: 5_000 });
+  });
+
+  it("does not restore A-B after clear wins the seek race", async () => {
+    let resolveRestore: (() => void) | undefined;
+    setLoopRegionMock.mockResolvedValueOnce(1_000).mockResolvedValueOnce(
+      new Promise<number>((resolve) => {
+        resolveRestore = () => resolve(1_000);
+      }),
+    );
+    seekMock.mockResolvedValue(8_000);
+    clearLoopRegionMock.mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      usePlaybackTransport({
+        entries,
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        onSelectEntry: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current.setAbPoint("a", 1_000));
+    await act(async () => result.current.setAbPoint("b", 5_000));
+    await act(async () => result.current.handleSeek(8_000));
+    await act(async () => result.current.clearAB());
+    await act(async () => {
+      resolveRestore?.();
+      await Promise.resolve();
+    });
+
     expect(result.current.abPoints).toEqual({ startMs: null, endMs: null });
+    expect(result.current.loopRegion).toBeNull();
   });
 
   it("resets A-B points and region when the selection changes", async () => {

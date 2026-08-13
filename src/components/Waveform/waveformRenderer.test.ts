@@ -5,6 +5,10 @@ import {
   positionMsForX,
   resolveTokens,
   defaultTargetPeaksForWidth,
+  clampViewport,
+  positionMsForViewportX,
+  viewportXForPositionMs,
+  pinchZoomFactor,
   type Canvas2D,
   type EnvelopeGeometry,
 } from "./waveformRenderer";
@@ -167,6 +171,32 @@ describe("playhead mapping", () => {
     );
     expect(none.playheadX).toBeNull();
     expect(noPosition.playheadX).toBeNull();
+  });
+});
+
+describe("waveform viewport mapping", () => {
+  it("dampens pinch zoom response", () => {
+    expect(pinchZoomFactor(100, 200)).toBeCloseTo(0.901, 3);
+    expect(pinchZoomFactor(100, 50)).toBeCloseTo(1.1096, 3);
+  });
+  it("maps positions into zoomed viewport coordinates", () => {
+    expect(viewportXForPositionMs(2_000, 1_000, 3_000, 100)).toBe(50);
+    expect(positionMsForViewportX(50, 100, 1_000, 3_000)).toBe(2_000);
+  });
+
+  it("clamps viewport to duration and minimum span", () => {
+    expect(clampViewport({ startMs: -100, endMs: 10_000 }, 5_000, 100)).toEqual(
+      {
+        startMs: 0,
+        endMs: 5_000,
+      },
+    );
+    expect(clampViewport({ startMs: 2_000, endMs: 2_050 }, 5_000, 100)).toEqual(
+      {
+        startMs: 1_975,
+        endMs: 2_075,
+      },
+    );
   });
 });
 
