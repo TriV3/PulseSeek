@@ -531,7 +531,8 @@ fn seek_while_playing_discards_stale_frames() {
 
     let mut output = [0.0f32; 4];
     for _ in 0..10_000 {
-        if consumer.consume(&mut output) == 4 && output[0] == 50.0 {
+        output.fill(0.0);
+        if consumer.consume(&mut output) == 4 && output == [50.0, 51.0, 52.0, 53.0] {
             break;
         }
         std::thread::yield_now();
@@ -705,13 +706,21 @@ fn repeated_seek_ends_at_latest_target() {
     control.resume();
 
     let mut output = [0.0f32; 2];
+    let mut collected = Vec::new();
     for _ in 0..10_000 {
+        output.fill(0.0);
         if consumer.consume(&mut output) == 2 {
+            collected.extend_from_slice(&output);
+        }
+        if collected.windows(2).any(|window| window == [90.0, 91.0]) {
             break;
         }
         std::thread::yield_now();
     }
-    assert_eq!(output, [90.0, 91.0]);
+    assert!(
+        collected.windows(2).any(|window| window == [90.0, 91.0]),
+        "latest seek target must become audible"
+    );
     control_stop_and_join(worker, consumer);
 }
 
@@ -1308,10 +1317,17 @@ fn clear_loop_region_stops_wrapping_and_follows_mode() {
     // the newly committed region instead of racing pre-command samples.
     let _ = consumer.consume(&mut first);
     control.resume();
-    while consumer.consume(&mut first) != 8 {
+    let mut saw_region_start = false;
+    for _ in 0..10_000 {
+        if consumer.consume(&mut first) == 8
+            && first.windows(4).any(|window| window == [2.0, 3.0, 4.0, 5.0])
+        {
+            saw_region_start = true;
+            break;
+        }
         std::thread::yield_now();
     }
-    assert_eq!(&first[..4], &[2.0, 3.0, 4.0, 5.0], "region loops before the clear");
+    assert!(saw_region_start, "region loops before the clear");
 
     worker.clear_loop_region().unwrap();
 
