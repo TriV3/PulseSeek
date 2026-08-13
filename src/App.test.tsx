@@ -51,7 +51,7 @@ describe("application shell", () => {
     ).toBeInTheDocument();
   });
 
-  it("presents the Resonic-inspired workspace regions", () => {
+  it("presents the player workspace regions", () => {
     render(<App />);
 
     expect(

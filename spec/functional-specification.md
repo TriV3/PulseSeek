@@ -635,29 +635,6 @@ MIDI playback and audio extraction from video containers are deferred.
   visual drops, continuous gaps, and audio underruns before and after the
   change.
 
-## 8. Resonic-inspired scope
-
-PulseSeek uses the official Resonic Player feature page as a product reference,
-not as a requirement to reproduce its implementation or interface exactly:
-
-<https://resonic.at/player>
-
-Features adopted into PulseSeek requirements:
-
-- Fast and lightweight folder-first playback.
-- One-click navigation and auditioning.
-- A large seekable waveform.
-- Frequency analyzer and musical spectrum.
-- Sequential, random, one-shot, and loop modes.
-- A–B repeat and seamless short-file loops.
-- Keyboard-first operation.
-- Drag and drop into compatible applications.
-- Direct use of existing folder structures without mandatory library import.
-- Safe coexistence with external file editors.
-
-Windows-specific taskbar integration, sleep/hibernation actions, MIDI synthesis,
-and legacy format parity are not part of the initial PulseSeek scope.
-
 ## 9. Acceptance criteria for the first usable release
 
 The first Audio Player release is usable when:

@@ -1,7 +1,7 @@
 # Resizable player layout
 
-The Audio Player shell follows a compact, Resonic-inspired hierarchy without
-coupling the browser to a manager database:
+The Audio Player shell follows a compact hierarchy without coupling the browser
+to a manager database:
 
 1. The waveform overview occupies the upper workspace.
 2. Playback, mode, volume, and output controls stay in a fixed transport strip.
