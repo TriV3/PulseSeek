@@ -694,12 +694,15 @@ fn seek_while_paused_preserves_pause_and_resumes_at_target() {
 #[test]
 fn repeated_seek_ends_at_latest_target() {
     let (worker, mut consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(1_000)), 16);
+    let control = consumer.control();
+    control.pause();
     while consumer.available() < 16 {
         std::thread::yield_now();
     }
 
     worker.seek(seek_target(20)).unwrap();
     worker.seek(seek_target(90)).unwrap();
+    control.resume();
 
     let mut output = [0.0f32; 2];
     for _ in 0..10_000 {
@@ -1296,9 +1299,15 @@ fn clear_loop_region_stops_wrapping_and_follows_mode() {
         8,
         pulseseek_domain::playback::mode::PlaybackMode::OneShot,
     );
+    let control = consumer.control();
+    control.pause();
     worker.set_loop_region(Some(loop_region(2, 6))).unwrap();
 
     let mut first = [0.0f32; 8];
+    // Acknowledge the worker's discard request while paused, then start from
+    // the newly committed region instead of racing pre-command samples.
+    let _ = consumer.consume(&mut first);
+    control.resume();
     while consumer.consume(&mut first) != 8 {
         std::thread::yield_now();
     }
