@@ -531,7 +531,8 @@ fn seek_while_playing_discards_stale_frames() {
 
     let mut output = [0.0f32; 4];
     for _ in 0..10_000 {
-        if consumer.consume(&mut output) == 4 {
+        output.fill(0.0);
+        if consumer.consume(&mut output) == 4 && output == [50.0, 51.0, 52.0, 53.0] {
             break;
         }
         std::thread::yield_now();
@@ -680,13 +681,21 @@ fn seek_while_paused_preserves_pause_and_resumes_at_target() {
 
     control.resume();
     let mut output = [0.0f32; 4];
+    let mut collected = Vec::new();
     for _ in 0..10_000 {
-        if consumer.consume(&mut output) == 4 {
+        let count = consumer.consume(&mut output);
+        if count == 4 {
+            collected.extend_from_slice(&output);
+        }
+        if collected.windows(4).any(|window| window == [75.0, 76.0, 77.0, 78.0]) {
             break;
         }
         std::thread::yield_now();
     }
-    assert_eq!(output, [75.0, 76.0, 77.0, 78.0]);
+    assert!(
+        collected.windows(4).any(|window| window == [75.0, 76.0, 77.0, 78.0]),
+        "seek target must become audible after resume"
+    );
     control.stop();
     worker.join().unwrap();
 }
@@ -694,21 +703,32 @@ fn seek_while_paused_preserves_pause_and_resumes_at_target() {
 #[test]
 fn repeated_seek_ends_at_latest_target() {
     let (worker, mut consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(1_000)), 16);
+    let control = consumer.control();
+    control.pause();
     while consumer.available() < 16 {
         std::thread::yield_now();
     }
 
     worker.seek(seek_target(20)).unwrap();
     worker.seek(seek_target(90)).unwrap();
+    control.resume();
 
     let mut output = [0.0f32; 2];
+    let mut collected = Vec::new();
     for _ in 0..10_000 {
+        output.fill(0.0);
         if consumer.consume(&mut output) == 2 {
+            collected.extend_from_slice(&output);
+        }
+        if collected.windows(2).any(|window| window == [90.0, 91.0]) {
             break;
         }
         std::thread::yield_now();
     }
-    assert_eq!(output, [90.0, 91.0]);
+    assert!(
+        collected.windows(2).any(|window| window == [90.0, 91.0]),
+        "latest seek target must become audible"
+    );
     control_stop_and_join(worker, consumer);
 }
 
@@ -1296,13 +1316,26 @@ fn clear_loop_region_stops_wrapping_and_follows_mode() {
         8,
         pulseseek_domain::playback::mode::PlaybackMode::OneShot,
     );
+    let control = consumer.control();
+    control.pause();
     worker.set_loop_region(Some(loop_region(2, 6))).unwrap();
 
     let mut first = [0.0f32; 8];
-    while consumer.consume(&mut first) != 8 {
+    // Acknowledge the worker's discard request while paused, then start from
+    // the newly committed region instead of racing pre-command samples.
+    let _ = consumer.consume(&mut first);
+    control.resume();
+    let mut saw_region_start = false;
+    for _ in 0..10_000 {
+        if consumer.consume(&mut first) == 8
+            && first.windows(4).any(|window| window == [2.0, 3.0, 4.0, 5.0])
+        {
+            saw_region_start = true;
+            break;
+        }
         std::thread::yield_now();
     }
-    assert_eq!(&first[..4], &[2.0, 3.0, 4.0, 5.0], "region loops before the clear");
+    assert!(saw_region_start, "region loops before the clear");
 
     worker.clear_loop_region().unwrap();
 

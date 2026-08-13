@@ -121,6 +121,7 @@ describe("player preferences boundary", () => {
           last_played_duration_ms: null,
           theme: "system",
           waveform_style,
+          seek_step_mode: "auto",
           show_hidden_folders: false,
         },
       });
@@ -150,6 +151,7 @@ describe("player preferences boundary", () => {
         last_played_duration_ms: null,
         theme: "system",
         waveform_style: "neon",
+        seek_step_mode: "auto",
         show_hidden_folders: false,
       },
     });
