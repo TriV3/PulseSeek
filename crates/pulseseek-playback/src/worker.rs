@@ -199,7 +199,10 @@ impl PlaybackWorker {
                         worker_finished.store(false, Ordering::Release);
                     }
                 }
-                if engine.mode == PlaybackMode::Sequential && engine.prepared.is_some() {
+                if engine.mode == PlaybackMode::Sequential
+                    && engine.prepared.is_some()
+                    && engine.loop_region.is_none()
+                {
                     if let Err(error) = engine.prime_prepared() {
                         if engine.control.claim_failure() {
                             let _ = event_tx.send(PlaybackEvent::Failed);
@@ -210,35 +213,16 @@ impl PlaybackWorker {
                     }
                 }
                 if reached_eof {
-                    if engine.mode == PlaybackMode::Sequential && engine.prepared.is_some() {
-                        if let Err(error) = engine.prime_prepared() {
-                            if engine.control.claim_failure() {
-                                let _ = event_tx.send(PlaybackEvent::Failed);
-                                *worker_error.lock().expect("playback error mutex poisoned") =
-                                    Some(error);
-                            }
-                            break;
-                        }
-                        engine.append_prepared();
-                    }
-                    if engine.mode == PlaybackMode::Sequential && engine.take_prepared() {
-                        reached_eof = false;
-                        worker_finished.store(false, Ordering::Release);
-                        continue;
-                    }
-                    if engine.mode == PlaybackMode::Sequential && engine.prepared.is_some() {
-                        thread::yield_now();
-                        continue;
-                    }
-                    if engine.loop_region.is_some() && !engine.eof {
-                        // A–B region boundary: wrap back to the region start.
-                        // Short regions replay from the prebuffer; long ones
-                        // seek the decoder back to A.
+                    // A/B has priority over gapless continuation. Prepared
+                    // next-track data must never be appended while current
+                    // track has active loop region.
+                    if engine.loop_region.is_some() {
                         if engine.has_cached_cycle() {
                             worker_finished.store(false, Ordering::Release);
                             if !engine.replay_cached_cycle() {
                                 thread::yield_now();
                             }
+                            reached_eof = false;
                             continue;
                         }
                         if !engine.cycle_produced {
@@ -263,6 +247,26 @@ impl PlaybackWorker {
                                 break;
                             },
                         }
+                        continue;
+                    }
+                    if engine.mode == PlaybackMode::Sequential && engine.prepared.is_some() {
+                        if let Err(error) = engine.prime_prepared() {
+                            if engine.control.claim_failure() {
+                                let _ = event_tx.send(PlaybackEvent::Failed);
+                                *worker_error.lock().expect("playback error mutex poisoned") =
+                                    Some(error);
+                            }
+                            break;
+                        }
+                        engine.append_prepared();
+                    }
+                    if engine.mode == PlaybackMode::Sequential && engine.take_prepared() {
+                        reached_eof = false;
+                        worker_finished.store(false, Ordering::Release);
+                        continue;
+                    }
+                    if engine.mode == PlaybackMode::Sequential && engine.prepared.is_some() {
+                        thread::yield_now();
                         continue;
                     }
                     if engine.mode == PlaybackMode::LoopCurrent {

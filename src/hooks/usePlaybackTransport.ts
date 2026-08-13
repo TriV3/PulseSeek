@@ -78,9 +78,8 @@ export function usePlaybackTransport({
   const regionNeedsRestoreRef = useRef(false);
 
   // A–B points and the confirmed region are display state owned by the
-  // transport. The engine is authoritative: a region is only shown after
-  // `setLoopRegion` resolves, and an out-of-region seek (which clears the
-  // engine region) also clears the markers.
+  // transport. The engine is authoritative for active looping, while placed
+  // A/B points remain user cue points and survive ordinary seeks.
   const resetABLocal = useCallback(() => {
     abPointsRef.current = { startMs: null, endMs: null };
     setAbPoints({ startMs: null, endMs: null });
@@ -587,16 +586,34 @@ export function usePlaybackTransport({
       });
       if (confirmedPosition !== null) {
         const region = loopRegionRef.current;
+        const regionOperation = abOperationRef.current;
         if (
           region &&
           (confirmedPosition < region.startMs ||
             confirmedPosition >= region.endMs)
         ) {
-          // The engine cleared the region during this out-of-region seek;
-          // mirror the confirmed Rust state in the markers. The command is
-          // best-effort because the engine already dropped the region.
-          void clearLoopRegion().catch(() => undefined);
-          resetABLocal();
+          // The engine clears active looping during an out-of-region seek.
+          // Re-apply region immediately so a seek cannot silently turn A/B
+          // into pending cue points. The engine positions playback at A.
+          void setLoopRegion(region.startMs, region.endMs)
+            .then(() => {
+              if (
+                abOperationRef.current !== regionOperation ||
+                abPointsRef.current.startMs !== region.startMs ||
+                abPointsRef.current.endMs !== region.endMs
+              )
+                return;
+              loopRegionRef.current = region;
+              setLoopRegionState(region);
+            })
+            .catch((cause) => {
+              if (abOperationRef.current !== regionOperation) return;
+              setAbError(
+                cause instanceof Error
+                  ? cause.message
+                  : "Could not restore the A-B region.",
+              );
+            });
         }
       }
       return succeeded ? confirmedPosition : null;
