@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use ringbuf::traits::{Consumer, Observer};
 use ringbuf::HeapCons;
@@ -40,6 +40,13 @@ pub struct PlaybackControl {
     pub(crate) output_active: Arc<AtomicBool>,
     pub(crate) terminal: Arc<AtomicU8>,
     pub(crate) position_frames: Arc<AtomicU64>,
+    pub(crate) track_change: Arc<Mutex<Option<TrackChange>>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrackChange {
+    pub path: String,
+    pub duration_ms: Option<u64>,
 }
 
 pub(crate) const TERMINAL_ACTIVE: u8 = 0;
@@ -92,6 +99,16 @@ impl PlaybackControl {
     /// Resets the callback clock after a successful seek.
     pub fn set_position_frames(&self, frames: u64) {
         self.position_frames.store(frames, Ordering::Release);
+    }
+
+    pub(crate) fn publish_track_change(&self, change: TrackChange) {
+        if let Ok(mut pending) = self.track_change.lock() {
+            *pending = Some(change);
+        }
+    }
+
+    pub fn take_track_change(&self) -> Option<TrackChange> {
+        self.track_change.lock().ok().and_then(|mut pending| pending.take())
     }
 
     pub(crate) fn generation(&self) -> u64 {

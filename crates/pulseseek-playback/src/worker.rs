@@ -25,13 +25,38 @@ pub struct PlaybackWorker {
 }
 
 enum WorkerCommand {
+    PrepareNext { prepared: Box<PreparedDecoder>, response: SyncSender<Result<(), PlaybackError>> },
+    ClearPrepared,
     Seek { target: SeekTarget, response: SyncSender<Result<Position, PlaybackError>> },
     SetMode { mode: PlaybackMode, response: SyncSender<Result<(), PlaybackError>> },
     SetLoopRegion { region: Option<LoopRegion>, response: SyncSender<Result<(), PlaybackError>> },
 }
 
+struct PreparedDecoder {
+    decoder: Box<dyn Decoder>,
+    resampler: Option<SampleRateConverter>,
+    sample_rate: u32,
+    path: String,
+    duration_ms: Option<u64>,
+}
+
 fn execute_worker_command(engine: &mut PlaybackEngine, command: WorkerCommand) -> bool {
     match command {
+        WorkerCommand::ClearPrepared => {
+            engine.clear_prepared();
+            false
+        },
+        WorkerCommand::PrepareNext { prepared, response } => {
+            engine.prepare_next(
+                prepared.decoder,
+                prepared.resampler,
+                prepared.sample_rate,
+                prepared.path,
+                prepared.duration_ms,
+            );
+            let _ = response.send(Ok(()));
+            false
+        },
         WorkerCommand::Seek { target, response } => {
             engine.control.begin_seek();
             engine.control.wait_for_seek_fade();
@@ -72,6 +97,9 @@ fn execute_worker_command(engine: &mut PlaybackEngine, command: WorkerCommand) -
         },
         WorkerCommand::SetMode { mode, response } => {
             engine.mode = mode;
+            if mode != PlaybackMode::Sequential {
+                engine.clear_prepared();
+            }
             let _ = response.send(Ok(()));
             mode == PlaybackMode::LoopCurrent
         },
@@ -171,7 +199,37 @@ impl PlaybackWorker {
                         worker_finished.store(false, Ordering::Release);
                     }
                 }
+                if engine.mode == PlaybackMode::Sequential && engine.prepared.is_some() {
+                    if let Err(error) = engine.prime_prepared() {
+                        if engine.control.claim_failure() {
+                            let _ = event_tx.send(PlaybackEvent::Failed);
+                            *worker_error.lock().expect("playback error mutex poisoned") =
+                                Some(error);
+                        }
+                        break;
+                    }
+                }
                 if reached_eof {
+                    if engine.mode == PlaybackMode::Sequential && engine.prepared.is_some() {
+                        if let Err(error) = engine.prime_prepared() {
+                            if engine.control.claim_failure() {
+                                let _ = event_tx.send(PlaybackEvent::Failed);
+                                *worker_error.lock().expect("playback error mutex poisoned") =
+                                    Some(error);
+                            }
+                            break;
+                        }
+                        engine.append_prepared();
+                    }
+                    if engine.mode == PlaybackMode::Sequential && engine.take_prepared() {
+                        reached_eof = false;
+                        worker_finished.store(false, Ordering::Release);
+                        continue;
+                    }
+                    if engine.mode == PlaybackMode::Sequential && engine.prepared.is_some() {
+                        thread::yield_now();
+                        continue;
+                    }
                     if engine.loop_region.is_some() && !engine.eof {
                         // A–B region boundary: wrap back to the region start.
                         // Short regions replay from the prebuffer; long ones
@@ -305,6 +363,47 @@ impl PlaybackWorker {
             },
             consumer,
         )
+    }
+
+    pub fn prepare_next(
+        &self,
+        decoder: Box<dyn Decoder>,
+        channels: usize,
+        source_rate: u32,
+        sample_rate: u32,
+        path: String,
+        duration_ms: Option<u64>,
+    ) -> Result<(), PlaybackError> {
+        SampleRateConverter::validate(channels, source_rate, sample_rate)
+            .map_err(PlaybackError::from)?;
+        let resampler = if source_rate == sample_rate {
+            None
+        } else {
+            Some(
+                SampleRateConverter::new(channels, source_rate, sample_rate)
+                    .map_err(PlaybackError::from)?,
+            )
+        };
+        let (response_tx, response_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::PrepareNext {
+                prepared: Box::new(PreparedDecoder {
+                    decoder,
+                    resampler,
+                    sample_rate,
+                    path,
+                    duration_ms,
+                }),
+                response: response_tx,
+            })
+            .map_err(|_| PlaybackError { kind: PlaybackErrorKind::WorkerStopped })?;
+        response_rx.recv().map_err(|_| PlaybackError { kind: PlaybackErrorKind::WorkerStopped })?
+    }
+
+    pub fn clear_prepared(&self) -> Result<(), PlaybackError> {
+        self.commands
+            .send(WorkerCommand::ClearPrepared)
+            .map_err(|_| PlaybackError { kind: PlaybackErrorKind::WorkerStopped })
     }
 
     /// Returns `true` after worker reached EOF, failed, or was stopped.

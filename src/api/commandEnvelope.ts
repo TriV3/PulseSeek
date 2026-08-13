@@ -141,6 +141,7 @@ export interface PlayerPreferences {
   waveform_style: WaveformStyle;
   seek_step_mode: SeekStepMode;
   show_hidden_folders: boolean;
+  gapless_playback: boolean;
 }
 
 interface PlayerPreferencesResponse {
@@ -186,7 +187,9 @@ function isPlayerPreferences(value: unknown): value is PlayerPreferences {
       ["1s", "2s", "5s", "10s", "15s", "20s", "30s"].includes(
         String(candidate.seek_step_mode),
       )) &&
-    typeof candidate.show_hidden_folders === "boolean"
+    typeof candidate.show_hidden_folders === "boolean" &&
+    (candidate.gapless_playback === undefined ||
+      typeof candidate.gapless_playback === "boolean")
   );
 }
 
@@ -196,7 +199,10 @@ function preferencesFromResponse(
   if (!isPlayerPreferences(response?.preferences)) {
     throw new Error("Invalid player preferences response.");
   }
-  return response.preferences;
+  return {
+    ...response.preferences,
+    gapless_playback: response.preferences.gapless_playback ?? true,
+  };
 }
 
 export async function loadPlayerPreferences(): Promise<PlayerPreferences> {
@@ -324,6 +330,15 @@ export async function healthCheck(): Promise<boolean> {
 /** Starts playback of the given file path. */
 export async function play(path: string): Promise<void> {
   await invokeCommand<PlayResponse>("play", { path } satisfies PlayRequest);
+}
+
+/** Prepares next file for gapless sequential playback. */
+export async function prepareNext(path: string): Promise<void> {
+  await invokeCommand<Record<string, never>>("prepare_next", { path });
+}
+
+export async function clearPrepared(): Promise<void> {
+  await invokeCommand<Record<string, never>>("clear_prepared", {});
 }
 
 /** Pauses current playback. */

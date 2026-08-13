@@ -220,11 +220,12 @@ function App() {
   const selectAndRemember = useCallback(
     async (
       entry: import("./components/FolderTree/folderTreeTypes").BrowserEntry,
+      options?: { alreadyPlaying?: boolean },
     ) => {
       const savedResume = restoredResume.current;
       const startPositionMs =
         savedResume?.entryId === entry.id ? savedResume.positionMs : 0;
-      if (await playback.select(entry, startPositionMs)) {
+      if (await playback.select(entry, startPositionMs, options)) {
         if (savedResume?.entryId === entry.id) restoredResume.current = null;
         updatePreferences({
           last_played_file_path: entry.id,
@@ -243,6 +244,7 @@ function App() {
     playbackStatus: playback.playback.status,
     playbackGeneration: playback.playback.generation,
     playbackMode: playbackMode.mode,
+    gaplessPlayback: playerPreferences.preferences.gapless_playback,
     onSelectEntry: selectAndRemember,
   });
 
@@ -773,6 +775,19 @@ function App() {
                           show_hidden_folders: event.currentTarget.checked,
                         });
                       }}
+                    />
+                  </div>
+                  <div className="app-option-row">
+                    <label htmlFor="gapless-playback">Gapless playback</label>
+                    <input
+                      id="gapless-playback"
+                      type="checkbox"
+                      checked={playerPreferences.preferences.gapless_playback}
+                      onChange={(event) =>
+                        playerPreferences.update({
+                          gapless_playback: event.currentTarget.checked,
+                        })
+                      }
                     />
                   </div>
                   <button

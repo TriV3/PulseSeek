@@ -13,6 +13,9 @@ const clearLoopRegionMock = vi.hoisted(() => vi.fn());
 const onStateChangedMock = vi.hoisted(() => vi.fn());
 const onPositionMock = vi.hoisted(() => vi.fn());
 const onCompletedMock = vi.hoisted(() => vi.fn());
+const prepareNextMock = vi.hoisted(() => vi.fn());
+const onTrackChangedMock = vi.hoisted(() => vi.fn());
+const clearPreparedMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../api/commandEnvelope", () => ({
   pause: pauseMock,
@@ -22,11 +25,14 @@ vi.mock("../api/commandEnvelope", () => ({
   setVolume: setVolumeMock,
   setLoopRegion: setLoopRegionMock,
   clearLoopRegion: clearLoopRegionMock,
+  prepareNext: prepareNextMock,
+  clearPrepared: clearPreparedMock,
 }));
 vi.mock("../api/playbackEvents", () => ({
   onStateChanged: onStateChangedMock,
   onPosition: onPositionMock,
   onCompleted: onCompletedMock,
+  onTrackChanged: onTrackChangedMock,
 }));
 
 const entries: BrowserEntry[] = [
@@ -39,6 +45,9 @@ beforeEach(() => {
   onStateChangedMock.mockResolvedValue(() => undefined);
   onPositionMock.mockResolvedValue(() => undefined);
   onCompletedMock.mockResolvedValue(() => undefined);
+  prepareNextMock.mockResolvedValue(undefined);
+  onTrackChangedMock.mockResolvedValue(() => undefined);
+  clearPreparedMock.mockResolvedValue(undefined);
 });
 
 describe("usePlaybackTransport", () => {
