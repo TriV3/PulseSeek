@@ -12,6 +12,7 @@ fn write_fixture(dir: &tempfile::TempDir, name: &str, data: &[u8]) -> std::path:
 const WAV_FIXTURE: &[u8] = include_bytes!("fixtures/silent-stereo-44100.wav");
 const FLAC_FIXTURE: &[u8] = include_bytes!("fixtures/silent-stereo-44100.flac");
 const MP3_FIXTURE: &[u8] = include_bytes!("fixtures/silent-stereo-44100.mp3");
+const AIFF_FIXTURE: &[u8] = include_bytes!("fixtures/sine-stereo-44100.aiff");
 
 #[test]
 fn registry_opens_wav() {
@@ -37,6 +38,16 @@ fn registry_opens_mp3() {
     let path = write_fixture(&dir, "test.mp3", MP3_FIXTURE);
     let mut decoder = DecoderRegistry::open(&path).unwrap();
     let meta = decoder.metadata().unwrap();
+    assert_eq!(meta.channels, 2);
+}
+
+#[test]
+fn registry_opens_aiff() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_fixture(&dir, "test.aiff", AIFF_FIXTURE);
+    let mut decoder = DecoderRegistry::open(&path).unwrap();
+    let meta = decoder.metadata().unwrap();
+    assert_eq!(meta.sample_rate, 44_100);
     assert_eq!(meta.channels, 2);
 }
 

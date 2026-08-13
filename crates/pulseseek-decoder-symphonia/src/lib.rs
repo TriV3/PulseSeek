@@ -302,6 +302,33 @@ impl WavDecoder {
     }
 }
 
+/// A Symphonia-based decoder for AIFF audio files.
+pub struct AiffDecoder(SymphoniaDecoder);
+
+impl AiffDecoder {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, DecodeError> {
+        SymphoniaDecoder::open(path, "aiff").map(AiffDecoder)
+    }
+}
+
+impl Decoder for AiffDecoder {
+    fn probe(&self) -> ProbeResult {
+        self.0.probe()
+    }
+    fn metadata(&mut self) -> Result<StreamMetadata, DecodeError> {
+        self.0.metadata()
+    }
+    fn read(&mut self, buf: &mut [f32]) -> Result<usize, DecodeError> {
+        self.0.read(buf)
+    }
+    fn seek(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
+        self.0.seek(target)
+    }
+    fn seek_coarse(&mut self, target: SeekTarget) -> Result<Position, DecodeError> {
+        self.0.seek_coarse(target)
+    }
+}
+
 impl Decoder for WavDecoder {
     fn probe(&self) -> ProbeResult {
         self.0.probe()

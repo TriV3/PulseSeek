@@ -26,6 +26,17 @@ fn create_wav(path: &Path) {
     .expect("create WAV fixture");
 }
 
+fn create_aiff(path: &Path) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("create parent dir");
+    }
+    fs::write(
+        path,
+        include_bytes!("../../pulseseek-decoder-symphonia/tests/fixtures/sine-stereo-44100.aiff"),
+    )
+    .expect("create AIFF fixture");
+}
+
 #[test]
 fn native_reads_empty_folder() {
     let dir = tempfile::tempdir().expect("create temp dir");
@@ -60,6 +71,22 @@ fn native_reads_file_and_audio_metadata() {
     assert_eq!(metadata.channels, Some(2));
     assert_eq!(metadata.sample_rate, Some(44_100));
     assert_eq!(metadata.bit_depth, Some(16));
+    assert_eq!(metadata.codec.as_deref(), Some("PCM"));
+}
+
+#[test]
+fn native_reads_aiff_file_and_audio_metadata() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    create_aiff(&dir.path().join("audio.aif"));
+
+    let result = NativeFolderReader.read_folder(dir.path()).unwrap();
+    let BrowserEntry::PlayableFile(file) = &result[0] else {
+        panic!("expected playable file");
+    };
+    let metadata = file.metadata.as_ref().expect("metadata should be available");
+
+    assert_eq!(metadata.channels, Some(2));
+    assert_eq!(metadata.sample_rate, Some(44_100));
     assert_eq!(metadata.codec.as_deref(), Some("PCM"));
 }
 

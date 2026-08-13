@@ -32,9 +32,14 @@ function folder(id: string): BrowserEntry {
 }
 
 describe("formatOf — filename extension mapping", () => {
-  it("maps the WAV extension to the pcm format", () => {
-    expect(formatOf(playable("kick.wav", "Unknown"))).toBe("pcm");
-    expect(formatOf(playable("kick.wave", "Unknown"))).toBe("pcm");
+  it("maps the WAV extension to the wav format", () => {
+    expect(formatOf(playable("kick.wav", "Unknown"))).toBe("wav");
+    expect(formatOf(playable("kick.wave", "Unknown"))).toBe("wav");
+  });
+
+  it("maps AIFF extensions to the aiff format", () => {
+    expect(formatOf(playable("kick.aif", "Unknown"))).toBe("aiff");
+    expect(formatOf(playable("kick.aiff", "Unknown"))).toBe("aiff");
   });
 
   it("maps the FLAC extension to the flac format", () => {
@@ -48,6 +53,7 @@ describe("formatOf — filename extension mapping", () => {
   it("matches extensions case-insensitively", () => {
     expect(formatOf(playable("loop.MP3", null))).toBe("mp3");
     expect(formatOf(playable("kit.FlAc", null))).toBe("flac");
+    expect(formatOf(playable("kit.AiFf", null))).toBe("aiff");
   });
 
   it("returns null for unsupported extensions", () => {
@@ -140,8 +146,8 @@ describe("filterByFormat — extension over decoder metadata", () => {
       playable("misleading.mp3", "PCM"),
       playable("real.mp3", "MP3"),
     ];
-    const pcm = filterByFormat(entries, ["pcm"]);
-    expect(pcm.map((e) => e.id)).toEqual([]);
+    const wav = filterByFormat(entries, ["wav"]);
+    expect(wav.map((e) => e.id)).toEqual([]);
     const mp3 = filterByFormat(entries, ["mp3"]);
     expect(mp3.map((e) => e.id)).toEqual(["misleading.mp3", "real.mp3"]);
   });
