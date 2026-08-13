@@ -50,10 +50,14 @@ describe("application shell", () => {
     render(<App />);
 
     fireEvent.click(screen.getByLabelText("Open application menu"));
-    fireEvent.click(screen.getByRole("button", { name: "Clear waveform cache" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Clear waveform cache" }),
+    );
 
     expect(screen.getByRole("alertdialog")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Clear cache" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Clear cache" }),
+    ).toBeInTheDocument();
     expect(invoke).not.toHaveBeenCalledWith("clear_waveform_cache");
   });
 

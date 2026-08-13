@@ -81,6 +81,24 @@ describe("WaveformPanel", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps A/B controls in their own row before waveform workspace", () => {
+    const { container } = render(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+      />,
+    );
+    const panel = container.querySelector(".waveform-panel")!;
+
+    expect([...panel.children].map((child) => child.className)).toEqual([
+      "now-playing",
+      "audio-summary",
+      "ab-controls",
+      "visualization-workspace",
+    ]);
+  });
+
   it("shows only the waveform by default", () => {
     render(
       <WaveformPanel

@@ -59,8 +59,8 @@ describe("useKeyboardShortcuts", () => {
       press(" ");
       press("ArrowLeft");
       press("ArrowRight");
-      press("ArrowLeft", { ctrlKey: true });
-      press("ArrowRight", { ctrlKey: true });
+      press("ArrowUp");
+      press("ArrowDown");
       press("l");
       press("Delete");
     });
@@ -73,6 +73,22 @@ describe("useKeyboardShortcuts", () => {
     expect(actions.onNextTrack).toHaveBeenCalledOnce();
     expect(actions.onToggleLoop).toHaveBeenCalledOnce();
     expect(actions.onMoveToTrash).toHaveBeenCalledOnce();
+  });
+
+  it("uses horizontal arrows for seeking and vertical arrows for track navigation", () => {
+    renderHook(() => useKeyboardShortcuts(actions));
+
+    act(() => {
+      press("ArrowLeft");
+      press("ArrowRight");
+      press("ArrowUp");
+      press("ArrowDown");
+    });
+
+    expect(actions.onSeekBackward).toHaveBeenCalledOnce();
+    expect(actions.onSeekForward).toHaveBeenCalledOnce();
+    expect(actions.onPreviousTrack).toHaveBeenCalledOnce();
+    expect(actions.onNextTrack).toHaveBeenCalledOnce();
   });
 
   it("dispatches A-B region shortcuts", () => {
@@ -98,13 +114,13 @@ describe("useKeyboardShortcuts", () => {
 
     act(() => {
       press("o", { metaKey: true });
-      press("ArrowLeft", { metaKey: true });
-      press("ArrowRight", { ctrlKey: true });
+      press("ArrowUp");
+      press("ArrowDown");
     });
 
     expect(actions.onOpenFolder).toHaveBeenCalledOnce();
     expect(actions.onPreviousTrack).toHaveBeenCalledOnce();
-    expect(actions.onNextTrack).not.toHaveBeenCalled();
+    expect(actions.onNextTrack).toHaveBeenCalledOnce();
   });
 
   it("ignores editable controls", () => {
@@ -128,7 +144,7 @@ describe("useKeyboardShortcuts", () => {
     expect(actions.onMoveToTrash).not.toHaveBeenCalled();
   });
 
-  it("leaves file-grid navigation to the grid", () => {
+  it("dispatches global arrow shortcuts from inside the file grid", () => {
     const grid = document.createElement("div");
     grid.setAttribute("role", "grid");
     const row = document.createElement("div");
@@ -141,8 +157,27 @@ describe("useKeyboardShortcuts", () => {
       press("ArrowRight", {}, row);
     });
 
-    expect(actions.onSeekBackward).not.toHaveBeenCalled();
-    expect(actions.onSeekForward).not.toHaveBeenCalled();
+    expect(actions.onSeekBackward).toHaveBeenCalledOnce();
+    expect(actions.onSeekForward).toHaveBeenCalledOnce();
+  });
+
+  it("prevents section navigation after handling a global track shortcut", () => {
+    const tree = document.createElement("div");
+    tree.setAttribute("role", "tree");
+    document.body.append(tree);
+    renderHook(() => useKeyboardShortcuts(actions));
+
+    let sectionHandled = false;
+    tree.addEventListener("keydown", () => {
+      sectionHandled = true;
+    });
+
+    act(() => {
+      press("ArrowUp", {}, tree);
+    });
+
+    expect(actions.onPreviousTrack).toHaveBeenCalledOnce();
+    expect(sectionHandled).toBe(false);
   });
 
   it("allows modified mark shortcuts while grid has focus", () => {

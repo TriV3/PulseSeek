@@ -8,8 +8,9 @@ use std::sync::{Arc, Mutex};
 use pulseseek_cache::shortcut_mappings::{ShortcutMappingsCachePort, ShortcutMappingsError};
 use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContext, ErrorCategory};
 use pulseseek_domain::shortcuts::{
-    default_shortcut_mappings, validate_and_normalize_shortcut_mappings, Platform, ShortcutAction,
-    ShortcutChord, ShortcutError, ShortcutMapping,
+    default_shortcut_mappings, legacy_default_shortcut_mappings,
+    validate_and_normalize_shortcut_mappings, Platform, ShortcutAction, ShortcutChord,
+    ShortcutError, ShortcutMapping,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -62,6 +63,9 @@ impl ShortcutMappingsService for NativeShortcutMappingsService {
     fn load(&self) -> Result<ShortcutMappingsData, ApplicationError> {
         let mappings = self.cache.load_shortcut_mappings().map_err(cache_error)?;
         if mappings.is_empty() {
+            return Ok(profile(default_shortcut_mappings()));
+        }
+        if mappings == legacy_default_shortcut_mappings() {
             return Ok(profile(default_shortcut_mappings()));
         }
         validate_complete(mappings).map(profile)

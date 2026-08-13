@@ -55,7 +55,7 @@ function isNavigationTarget(target: EventTarget | null): boolean {
   return (
     target instanceof Element &&
     target.closest(
-      "[role='grid'], [role='tree'], [role='slider'], [role='separator'], [role='listbox'], [role='menu']",
+      "[role='slider'], [role='separator'], [role='listbox'], [role='menu'], [role='tab']",
     ) !== null
   );
 }
@@ -113,19 +113,7 @@ export function useKeyboardShortcuts(
       )
         return;
       const editable = isEditableTarget(event.target);
-      if (
-        isNavigationTarget(event.target) &&
-        [
-          "ArrowDown",
-          "ArrowUp",
-          "ArrowLeft",
-          "ArrowRight",
-          "Home",
-          "End",
-          "PageDown",
-          "PageUp",
-        ].includes(event.key)
-      ) {
+      if (isNavigationTarget(event.target)) {
         return;
       }
       if (
@@ -147,12 +135,21 @@ export function useKeyboardShortcuts(
         const callback = actions[callbackName];
         if (!callback || !matchShortcut(event, binding, platform)) continue;
         event.preventDefault();
+        if (
+          action.id === "previous_track" ||
+          action.id === "next_track" ||
+          action.id === "seek_backward" ||
+          action.id === "seek_forward" ||
+          action.id === "toggle_play_pause"
+        ) {
+          event.stopPropagation();
+        }
         void callback();
         return;
       }
     }
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [actions, bindings]);
 }

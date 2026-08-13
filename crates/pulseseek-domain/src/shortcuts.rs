@@ -250,8 +250,8 @@ pub fn default_shortcut_mappings() -> Vec<ShortcutMapping> {
         primary(Action::OpenFolder, "o"),
         plain(Action::TogglePlayPause, "space"),
         plain(Action::PlaySelection, "enter"),
-        primary(Action::PreviousTrack, "arrowleft"),
-        primary(Action::NextTrack, "arrowright"),
+        plain(Action::PreviousTrack, "arrowup"),
+        plain(Action::NextTrack, "arrowdown"),
         plain(Action::SeekBackward, "arrowleft"),
         plain(Action::SeekForward, "arrowright"),
         plain(Action::ToggleLoop, "l"),
@@ -273,6 +273,37 @@ pub fn default_shortcut_mappings() -> Vec<ShortcutMapping> {
         plain(Action::SetAbEnd, "]"),
         plain(Action::ToggleAbRepeat, "a"),
     ]
+}
+
+/// Previous defaults migrated when users first adopt vertical track navigation.
+pub fn legacy_default_shortcut_mappings() -> Vec<ShortcutMapping> {
+    use ShortcutAction as Action;
+
+    let mut mappings = default_shortcut_mappings();
+    mappings.iter_mut().find(|m| m.action == Action::PreviousTrack).unwrap().chord =
+        ShortcutChord::new("arrowleft", true, false, false);
+    mappings.iter_mut().find(|m| m.action == Action::NextTrack).unwrap().chord =
+        ShortcutChord::new("arrowright", true, false, false);
+    mappings
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{default_shortcut_mappings, ShortcutAction};
+
+    #[test]
+    fn track_navigation_defaults_to_vertical_arrows() {
+        let mappings = default_shortcut_mappings();
+        let key_for = |action| {
+            mappings
+                .iter()
+                .find(|mapping| mapping.action == action)
+                .map(|mapping| (mapping.chord.key.as_str(), mapping.chord.primary))
+        };
+
+        assert_eq!(key_for(ShortcutAction::PreviousTrack), Some(("arrowup", false)));
+        assert_eq!(key_for(ShortcutAction::NextTrack), Some(("arrowdown", false)));
+    }
 }
 
 fn plain(action: ShortcutAction, key: &str) -> ShortcutMapping {
