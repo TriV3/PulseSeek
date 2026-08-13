@@ -46,7 +46,7 @@ const SCRIPT = `
       set_playback_mode: function(args) { return { mode: args.mode }; },
       seek: function(args) { return { position_ms: args.position_ms }; },
       volume: function() { return {}; },
-      load_player_preferences: function() { return { version: 1, preferences: { schema_version: 1, revision: 0, playback_mode: "one-shot", output_device_id: null, volume: 1, muted: false, waveform_size: 38, browser_size: 24, selected_folder_path: null, expanded_folder_paths: [], last_played_file_path: null, last_played_position_ms: 0, last_played_duration_ms: null, theme: "system", waveform_style: "outline", show_hidden_folders: false } }; },
+    load_player_preferences: function() { return { version: 1, preferences: { schema_version: 1, revision: 0, playback_mode: "one-shot", output_device_id: null, volume: 1, muted: false, waveform_size: 38, browser_size: 24, selected_folder_path: null, expanded_folder_paths: [], last_played_file_path: null, last_played_position_ms: 0, last_played_duration_ms: null, theme: "system", waveform_style: "outline", seek_step_mode: "auto", show_hidden_folders: false } }; },
       save_player_preferences: function(args) { return { version: 1, preferences: args.preferences }; },
       load_visualization_settings: function() { return { version: 1, settings: Object.assign({}, state.visualizationSettings) }; },
       save_visualization_settings: function(args) { state.visualizationSettings = Object.assign({}, args.settings); return { version: 1, settings: Object.assign({}, state.visualizationSettings) }; },

@@ -25,8 +25,8 @@ operating-system global shortcuts.
 | Open folder | Primary+O |
 | Play/pause | Space |
 | Play selection | Enter |
-| Previous/next | Primary+Left / Primary+Right |
-| Seek backward/forward | Left / Right |
+| Previous/next | Up / Down |
+| Seek backward/forward | Left / Right; step configurable in player settings |
 | Toggle current-file loop | L |
 | Move to Trash | Delete |
 | Refresh | Primary+R |

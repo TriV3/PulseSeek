@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { SeekStepMode } from "../shortcuts/seekStep";
 import {
   getShortcutPlatform,
   SHORTCUT_ACTIONS,
@@ -138,6 +139,7 @@ export interface PlayerPreferences {
   last_played_duration_ms: number | null;
   theme: ThemePreference;
   waveform_style: WaveformStyle;
+  seek_step_mode: SeekStepMode;
   show_hidden_folders: boolean;
 }
 
@@ -180,6 +182,10 @@ function isPlayerPreferences(value: unknown): value is PlayerPreferences {
     ["solid", "gradient", "outline"].includes(
       String(candidate.waveform_style),
     ) &&
+    (candidate.seek_step_mode === "auto" ||
+      ["1s", "2s", "5s", "10s", "15s", "20s", "30s"].includes(
+        String(candidate.seek_step_mode),
+      )) &&
     typeof candidate.show_hidden_folders === "boolean"
   );
 }

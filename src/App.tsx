@@ -52,6 +52,11 @@ import {
   VisualizationSettingsControls,
 } from "./components/VisualizationSelector/VisualizationSelector";
 import { useVisualizationSettings } from "./hooks/useVisualizationSettings";
+import {
+  seekStepMs,
+  SEEK_STEP_PRESETS,
+  type SeekStepMode,
+} from "./shortcuts/seekStep";
 import { ConfirmDialog } from "./components/ConfirmDialog/ConfirmDialog";
 import "./components/ConfirmDialog/ConfirmDialog.css";
 import "./styles/tokens.css";
@@ -494,12 +499,26 @@ function App() {
       onPreviousTrack: transport.handlePrevious,
       onNextTrack: transport.handleNext,
       onSeekBackward: () =>
-        seekAndRemember(Math.max(0, transport.positionMs - 5_000)),
+        seekAndRemember(
+          Math.max(
+            0,
+            transport.positionMs -
+              seekStepMs(
+                playerPreferences.preferences.seek_step_mode,
+                transport.durationMs,
+              ),
+          ),
+        ),
       onSeekForward: () =>
         seekAndRemember(
-          transport.durationMs === null
-            ? transport.positionMs + 5_000
-            : Math.min(transport.durationMs, transport.positionMs + 5_000),
+          Math.min(
+            transport.durationMs ?? Number.MAX_SAFE_INTEGER,
+            transport.positionMs +
+              seekStepMs(
+                playerPreferences.preferences.seek_step_mode,
+                transport.durationMs,
+              ),
+          ),
         ),
       onToggleLoop: () => {
         const mode =
@@ -553,6 +572,10 @@ function App() {
           playheadPositionMs={transport.positionMs}
           resetRevision={waveformResetRevision}
           onSeek={seekAndRemember}
+          seekStepMs={seekStepMs(
+            playerPreferences.preferences.seek_step_mode,
+            transport.durationMs,
+          )}
           style={playerPreferences.preferences.waveform_style}
           theme={resolvedTheme}
           visualization={visualizationSettings.effectiveMode}
@@ -704,6 +727,26 @@ function App() {
                       playerPreferences.update({ theme });
                     }}
                   />
+                  <label className="app-option-row" htmlFor="seek-step">
+                    <span>Seek step</span>
+                    <select
+                      id="seek-step"
+                      value={playerPreferences.preferences.seek_step_mode}
+                      onChange={(event) =>
+                        playerPreferences.update({
+                          seek_step_mode: event.currentTarget
+                            .value as SeekStepMode,
+                        })
+                      }
+                    >
+                      <option value="auto">Auto</option>
+                      {SEEK_STEP_PRESETS.map((seconds) => (
+                        <option key={seconds} value={`${seconds}s`}>
+                          {seconds} s
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <VisualizationSettingsControls
                     enabled={visualizationSettings.settings.enabled}
                     quality={visualizationSettings.settings.quality}
@@ -715,7 +758,7 @@ function App() {
                       visualizationSettings.update({ quality })
                     }
                   />
-                  <div className="browser-hidden-option">
+                  <div className="app-option-row">
                     <label htmlFor="show-hidden-folders">
                       Show hidden folders
                     </label>

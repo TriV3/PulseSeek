@@ -25,6 +25,7 @@ export interface WaveformPanelProps {
   resetRevision?: number;
   /** Seeks playback to a millisecond position (confirmed by the backend). */
   onSeek?: (positionMs: number) => void | Promise<void>;
+  seekStepMs?: number;
   /** Renderer style for the envelope. */
   style?: WaveformStyle;
   /** Resolved semantic theme used to repaint the analyzer immediately. */
@@ -106,6 +107,7 @@ export function WaveformPanel({
   playheadPositionMs = restoredPositionMs,
   resetRevision = 0,
   onSeek,
+  seekStepMs,
   style = "outline",
   theme = "light",
   visualization = "waveform",
@@ -219,6 +221,7 @@ export function WaveformPanel({
                   }
                 }}
                 onSeek={onSeek}
+                seekStepMs={seekStepMs}
                 style={style}
                 abPoints={abPoints}
                 loopRegion={loopRegion}

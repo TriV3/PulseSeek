@@ -431,12 +431,28 @@ input {
 }
 
 .app-options-menu-content > div,
-.app-options-menu-content > section {
+.app-options-menu-content > section,
+.app-options-menu-content > label,
+.app-option-row,
+.theme-selector,
+.app-options-menu-content .visualization-settings-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   white-space: nowrap;
+}
+
+.app-option-row > :first-child,
+.theme-selector > label,
+.app-options-menu-content > section > label {
+  text-align: left;
+}
+
+.app-option-row > :last-child,
+.theme-selector > select,
+.app-options-menu-content > section > select {
+  margin-inline-start: auto;
 }
 
 .app-options-menu-content select {
@@ -449,10 +465,7 @@ input {
 }
 
 .visualization-settings-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  width: 100%;
 }
 
 .visualization-settings-row input {

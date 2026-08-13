@@ -17,6 +17,10 @@ fn default_waveform_style() -> String {
     "outline".to_string()
 }
 
+fn default_seek_step_mode() -> String {
+    "auto".to_string()
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PlayerPreferences {
     pub schema_version: u32,
@@ -38,6 +42,8 @@ pub struct PlayerPreferences {
     pub theme: String,
     #[serde(default = "default_waveform_style")]
     pub waveform_style: String,
+    #[serde(default = "default_seek_step_mode")]
+    pub seek_step_mode: String,
     #[serde(default)]
     pub show_hidden_folders: bool,
 }
@@ -60,6 +66,7 @@ impl Default for PlayerPreferences {
             last_played_duration_ms: None,
             theme: default_theme(),
             waveform_style: default_waveform_style(),
+            seek_step_mode: default_seek_step_mode(),
             show_hidden_folders: false,
         }
     }
@@ -81,6 +88,12 @@ impl PlayerPreferences {
         }
         if !matches!(self.waveform_style.as_str(), "solid" | "gradient" | "outline") {
             self.waveform_style = default_waveform_style();
+        }
+        if !matches!(
+            self.seek_step_mode.as_str(),
+            "auto" | "1s" | "2s" | "5s" | "10s" | "15s" | "20s" | "30s"
+        ) {
+            self.seek_step_mode = default_seek_step_mode();
         }
         if !self.volume.is_finite() {
             self.volume = 1.0;
@@ -238,6 +251,11 @@ mod tests {
     #[test]
     fn waveform_style_defaults_to_outline() {
         assert_eq!(PlayerPreferences::default().waveform_style, "outline");
+    }
+
+    #[test]
+    fn seek_step_mode_defaults_to_auto() {
+        assert_eq!(PlayerPreferences::default().seek_step_mode, "auto");
     }
 
     #[test]

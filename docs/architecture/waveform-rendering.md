@@ -88,7 +88,11 @@ frame. Late frames are dropped rather than delaying audio.
   `onSeek`. The app wires that to the validated `seek` command through
   `usePlaybackTransport.handleSeek`, which keeps the confirmed Rust position
   and surfaces command failures in the transport alert.
-- Keyboard: `ArrowLeft`/`ArrowRight` step by `seekStepMs` (default 5 s, aligned
+- Keyboard: `ArrowLeft`/`ArrowRight` step by selected seek-step preference. Auto
+  uses duration plateaus: below 15 s → 1 s; 15 s–1 min → 2 s; 1–7 min → 5 s;
+  7–15 min → 10 s; 15–30 min → 15 s; 30–60 min → 20 s; above 60 min → 30 s.
+  Presets range from 1 s to 30 s. When duration is unavailable, auto uses 5 s.
+  The step is aligned
   with the existing keyboard shortcuts), `Home` seeks to zero, `End` to the
   duration.
 - During a drag the playhead previews the pointer target imperatively; the next

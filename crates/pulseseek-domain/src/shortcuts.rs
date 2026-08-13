@@ -287,25 +287,6 @@ pub fn legacy_default_shortcut_mappings() -> Vec<ShortcutMapping> {
     mappings
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{default_shortcut_mappings, ShortcutAction};
-
-    #[test]
-    fn track_navigation_defaults_to_vertical_arrows() {
-        let mappings = default_shortcut_mappings();
-        let key_for = |action| {
-            mappings
-                .iter()
-                .find(|mapping| mapping.action == action)
-                .map(|mapping| (mapping.chord.key.as_str(), mapping.chord.primary))
-        };
-
-        assert_eq!(key_for(ShortcutAction::PreviousTrack), Some(("arrowup", false)));
-        assert_eq!(key_for(ShortcutAction::NextTrack), Some(("arrowdown", false)));
-    }
-}
-
 fn plain(action: ShortcutAction, key: &str) -> ShortcutMapping {
     ShortcutMapping::new(action, ShortcutChord::key(key))
 }
@@ -356,5 +337,24 @@ fn is_reserved(action: ShortcutAction, chord: &ShortcutChord, platform: Platform
         Platform::Windows | Platform::Linux => {
             chord.alt && !chord.primary && !chord.shift && chord.key == "f4"
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{default_shortcut_mappings, ShortcutAction};
+
+    #[test]
+    fn track_navigation_defaults_to_vertical_arrows() {
+        let mappings = default_shortcut_mappings();
+        let key_for = |action| {
+            mappings
+                .iter()
+                .find(|mapping| mapping.action == action)
+                .map(|mapping| (mapping.chord.key.as_str(), mapping.chord.primary))
+        };
+
+        assert_eq!(key_for(ShortcutAction::PreviousTrack), Some(("arrowup", false)));
+        assert_eq!(key_for(ShortcutAction::NextTrack), Some(("arrowdown", false)));
     }
 }
