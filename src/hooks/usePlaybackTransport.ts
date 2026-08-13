@@ -28,6 +28,7 @@ interface PlaybackTransportOptions {
   playbackStatus: TransportPlaybackStatus;
   playbackGeneration?: number;
   playbackMode?: PlaybackMode;
+  random?: () => number;
   onSelectEntry: (entry: BrowserEntry) => void | Promise<void>;
 }
 
@@ -37,6 +38,7 @@ export function usePlaybackTransport({
   playbackStatus,
   playbackGeneration = 0,
   playbackMode = "one-shot",
+  random = Math.random,
   onSelectEntry,
 }: PlaybackTransportOptions) {
   const [positionMs, setPositionMs] = useState(0);
@@ -241,6 +243,7 @@ export function usePlaybackTransport({
     selectedEntryId,
     playbackGeneration,
     playbackMode,
+    random,
     onSelectEntry,
   });
   const appliedRegionGeneration = useRef<number | null>(null);
@@ -265,6 +268,7 @@ export function usePlaybackTransport({
       selectedEntryId,
       playbackGeneration,
       playbackMode,
+      random,
       onSelectEntry,
     };
   }, [
@@ -272,6 +276,7 @@ export function usePlaybackTransport({
     onSelectEntry,
     playbackGeneration,
     playbackMode,
+    random,
     resetABLocal,
     selectedEntryId,
   ]);
@@ -341,7 +346,11 @@ export function usePlaybackTransport({
               ? context.entries[index + 1]
               : undefined
             : context.playbackMode === "random"
-              ? pickRandomEntry(context.entries, context.selectedEntryId)
+              ? pickRandomEntry(
+                  context.entries,
+                  context.selectedEntryId,
+                  context.random,
+                )
               : undefined;
         if (next) void context.onSelectEntry(next);
       }),
@@ -578,8 +587,14 @@ export function usePlaybackTransport({
 function pickRandomEntry(
   entries: BrowserEntry[],
   currentEntryId: string | null,
+  random: () => number,
 ): BrowserEntry | undefined {
   const alternatives = entries.filter((entry) => entry.id !== currentEntryId);
   const candidates = alternatives.length > 0 ? alternatives : entries;
-  return candidates[Math.floor(Math.random() * candidates.length)];
+  if (candidates.length === 0) return undefined;
+  const index = Math.min(
+    candidates.length - 1,
+    Math.max(0, Math.floor(random() * candidates.length)),
+  );
+  return candidates[index];
 }

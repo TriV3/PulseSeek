@@ -163,7 +163,7 @@ describe("usePlaybackTransport", () => {
       complete = handler;
       return () => undefined;
     });
-    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const random = vi.fn().mockReturnValue(0);
     const onSelectEntry = vi.fn().mockResolvedValue(undefined);
     renderHook(() =>
       usePlaybackTransport({
@@ -171,6 +171,7 @@ describe("usePlaybackTransport", () => {
         selectedEntryId: "a.wav",
         playbackStatus: "playing",
         playbackMode: "random",
+        random,
         onSelectEntry,
       }),
     );
@@ -178,7 +179,92 @@ describe("usePlaybackTransport", () => {
     await act(async () => complete?.());
 
     expect(onSelectEntry).toHaveBeenCalledWith(entries[1]);
-    random.mockRestore();
+    expect(random).toHaveBeenCalledOnce();
+  });
+
+  it("selects a deterministic random alternative without immediate repeat", async () => {
+    let complete: (() => void) | undefined;
+    onCompletedMock.mockImplementationOnce(async (handler: () => void) => {
+      complete = handler;
+      return () => undefined;
+    });
+    const random = vi.fn().mockReturnValue(0.99);
+    const onSelectEntry = vi.fn().mockResolvedValue(undefined);
+    renderHook(() =>
+      usePlaybackTransport({
+        entries: [...entries, { id: "c.wav", name: "c.wav", kind: "playable" }],
+        selectedEntryId: "a.wav",
+        playbackStatus: "playing",
+        playbackMode: "random",
+        random,
+        onSelectEntry,
+      }),
+    );
+
+    await act(async () => complete?.());
+
+    expect(onSelectEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "c.wav" }),
+    );
+  });
+
+  it("reselects the only playable item in random mode", async () => {
+    let complete: (() => void) | undefined;
+    onCompletedMock.mockImplementationOnce(async (handler: () => void) => {
+      complete = handler;
+      return () => undefined;
+    });
+    const random = vi.fn().mockReturnValue(0.5);
+    const onSelectEntry = vi.fn().mockResolvedValue(undefined);
+    renderHook(() =>
+      usePlaybackTransport({
+        entries: [entries[0]],
+        selectedEntryId: entries[0].id,
+        playbackStatus: "playing",
+        playbackMode: "random",
+        random,
+        onSelectEntry,
+      }),
+    );
+
+    await act(async () => complete?.());
+
+    expect(onSelectEntry).toHaveBeenCalledWith(entries[0]);
+  });
+
+  it("chooses from current visible playable entries after removal", async () => {
+    let complete: (() => void) | undefined;
+    onCompletedMock.mockImplementationOnce(async (handler: () => void) => {
+      complete = handler;
+      return () => undefined;
+    });
+    const random = vi.fn().mockReturnValue(0);
+    const onSelectEntry = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = renderHook(
+      ({ currentEntries }: { currentEntries: BrowserEntry[] }) =>
+        usePlaybackTransport({
+          entries: currentEntries,
+          selectedEntryId: "a.wav",
+          playbackStatus: "playing",
+          playbackMode: "random",
+          random,
+          onSelectEntry,
+        }),
+      { initialProps: { currentEntries: entries } },
+    );
+
+    rerender({
+      currentEntries: [
+        entries[0],
+        { id: "c.wav", name: "c.wav", kind: "playable" },
+      ],
+    });
+    await act(async () => complete?.());
+
+    expect(onSelectEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "c.wav" }),
+    );
+    expect(onSelectEntry).not.toHaveBeenCalledWith(entries[1]);
   });
 
   it("does not advance after stop when a stale completion arrives", async () => {
