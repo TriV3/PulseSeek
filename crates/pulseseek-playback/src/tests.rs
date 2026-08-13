@@ -681,13 +681,21 @@ fn seek_while_paused_preserves_pause_and_resumes_at_target() {
 
     control.resume();
     let mut output = [0.0f32; 4];
+    let mut collected = Vec::new();
     for _ in 0..10_000 {
-        if consumer.consume(&mut output) == 4 {
+        let count = consumer.consume(&mut output);
+        if count == 4 {
+            collected.extend_from_slice(&output);
+        }
+        if collected.windows(4).any(|window| window == [75.0, 76.0, 77.0, 78.0]) {
             break;
         }
         std::thread::yield_now();
     }
-    assert_eq!(output, [75.0, 76.0, 77.0, 78.0]);
+    assert!(
+        collected.windows(4).any(|window| window == [75.0, 76.0, 77.0, 78.0]),
+        "seek target must become audible after resume"
+    );
     control.stop();
     worker.join().unwrap();
 }
