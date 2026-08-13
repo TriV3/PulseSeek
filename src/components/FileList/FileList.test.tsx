@@ -1461,8 +1461,8 @@ describe("FileList — format filter", () => {
       "true",
     );
 
-    // Filter to PCM only: the selected WAV row stays visible and selected.
-    fireEvent.click(screen.getByRole("checkbox", { name: "WAV/PCM" }));
+    // Filter to WAV only: the selected WAV row stays visible and selected.
+    fireEvent.click(screen.getByRole("checkbox", { name: "WAV" }));
     expect(screen.getByRole("row", { name: /kick\.wav/ })).toHaveAttribute(
       "aria-selected",
       "true",

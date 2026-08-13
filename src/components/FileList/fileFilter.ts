@@ -4,7 +4,7 @@ import type { BrowserEntry } from "../FolderTree/folderTreeTypes";
  * Audio formats supported by the File List. Values map to filename
  * extensions, which are also the browser's explicit allow-list.
  */
-export type AudioFileFormat = "mp3" | "flac" | "pcm";
+export type AudioFileFormat = "mp3" | "flac" | "wav" | "aiff";
 
 /** Selectable format options shown in the file list filter. */
 export const FORMAT_OPTIONS: ReadonlyArray<{
@@ -13,7 +13,8 @@ export const FORMAT_OPTIONS: ReadonlyArray<{
 }> = [
   { value: "mp3", label: "MP3" },
   { value: "flac", label: "FLAC" },
-  { value: "pcm", label: "WAV/PCM" },
+  { value: "wav", label: "WAV" },
+  { value: "aiff", label: "AIFF" },
 ];
 
 /**
@@ -30,7 +31,10 @@ export function formatOf(entry: BrowserEntry): AudioFileFormat | null {
       return "flac";
     case "wav":
     case "wave":
-      return "pcm";
+      return "wav";
+    case "aif":
+    case "aiff":
+      return "aiff";
     default:
       return null;
   }

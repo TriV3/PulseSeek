@@ -2,11 +2,11 @@ use std::path::Path;
 
 use pulseseek_domain::decoder::{DecodeError, Decoder};
 
-use crate::{FlacDecoder, Mp3Decoder, WavDecoder};
+use crate::{AiffDecoder, FlacDecoder, Mp3Decoder, WavDecoder};
 
 /// Registry that selects the correct decoder based on content probing.
 ///
-/// Tries each registered decoder in order (MP3 → FLAC → WAV) and returns
+/// Tries each registered decoder in order (MP3 → FLAC → AIFF → WAV) and returns
 /// the first that successfully probes and opens the file. Selection is
 /// based on content headers, not file extension.
 pub struct DecoderRegistry;
@@ -23,6 +23,9 @@ impl DecoderRegistry {
             return Ok(Box::new(d));
         }
         if let Ok(d) = FlacDecoder::open(path) {
+            return Ok(Box::new(d));
+        }
+        if let Ok(d) = AiffDecoder::open(path) {
             return Ok(Box::new(d));
         }
         if let Ok(d) = WavDecoder::open(path) {
