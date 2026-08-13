@@ -23,8 +23,21 @@ export function usePlaybackSelection() {
   const generation = useRef(0);
 
   const select = useCallback(
-    async (entry: BrowserEntry, startPositionMs = 0): Promise<boolean> => {
+    async (
+      entry: BrowserEntry,
+      startPositionMs = 0,
+      options?: { alreadyPlaying?: boolean },
+    ): Promise<boolean> => {
       const requestGeneration = ++generation.current;
+      if (options?.alreadyPlaying) {
+        setPlayback({
+          entryId: entry.id,
+          status: "playing",
+          error: null,
+          generation: requestGeneration,
+        });
+        return true;
+      }
       setPlayback({
         entryId: entry.id,
         status: "loading",
@@ -33,8 +46,10 @@ export function usePlaybackSelection() {
       });
 
       try {
-        await play(entry.id);
-        if (startPositionMs > 0) await seek(startPositionMs);
+        if (!options?.alreadyPlaying) {
+          await play(entry.id);
+          if (startPositionMs > 0) await seek(startPositionMs);
+        }
         if (requestGeneration === generation.current) {
           setPlayback({
             entryId: entry.id,

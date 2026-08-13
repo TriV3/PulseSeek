@@ -4,8 +4,9 @@ use pulseseek_domain::playback::mode::PlaybackMode;
 use serde_json::Value;
 
 use crate::command_envelope::types::{
-    ClearLoopRegionRequest, ClearLoopRegionResponse, PauseRequest, PauseResponse, PlayRequest,
-    PlayResponse, ResumeRequest, ResumeResponse, SeekRequest, SeekResponse, SetLoopRegionRequest,
+    ClearLoopRegionRequest, ClearLoopRegionResponse, ClearPreparedResponse, PauseRequest,
+    PauseResponse, PlayRequest, PlayResponse, PrepareNextRequest, PrepareNextResponse,
+    ResumeRequest, ResumeResponse, SeekRequest, SeekResponse, SetLoopRegionRequest,
     SetLoopRegionResponse, SetPlaybackModeRequest, SetPlaybackModeResponse, StopRequest,
     StopResponse, VolumeRequest, VolumeResponse,
 };
@@ -35,6 +36,22 @@ pub(crate) fn handle(
                 },
                 Err(e) => CommandResponse::err(from_application_error(&e)),
             }
+        },
+        "prepare_next" => {
+            let request: PrepareNextRequest = match parse_payload("prepare_next", payload) {
+                Ok(request) => request,
+                Err(response) => return response,
+            };
+            match service.prepare_next(&request.path) {
+                Ok(()) => {
+                    CommandResponse::ok(serde_json::to_value(PrepareNextResponse {}).unwrap())
+                },
+                Err(e) => CommandResponse::err(from_application_error(&e)),
+            }
+        },
+        "clear_prepared" => match service.clear_prepared() {
+            Ok(()) => CommandResponse::ok(serde_json::to_value(ClearPreparedResponse {}).unwrap()),
+            Err(e) => CommandResponse::err(from_application_error(&e)),
         },
         "pause" => {
             let _request: PauseRequest = match parse_payload("pause", payload) {

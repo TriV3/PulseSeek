@@ -256,6 +256,26 @@ fn frames_output_in_order() {
 }
 
 #[test]
+fn prepared_track_appends_without_silence_at_boundary() {
+    let (mut engine, mut consumer) = PlaybackEngine::new(Box::new(RampDecoder::new(4)), 8);
+    engine.prepare_next(
+        Box::new(RampDecoder::new(4)),
+        None,
+        1_000,
+        "next.wav".to_string(),
+        Some(4),
+    );
+    engine.prime_prepared().expect("prime next track");
+    assert!(engine.process_chunk().unwrap());
+    assert!(!engine.process_chunk().unwrap());
+    assert!(engine.append_prepared());
+
+    let mut output = [0.0f32; 8];
+    assert_eq!(consumer.consume(&mut output), 8);
+    assert_eq!(output, [0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0]);
+}
+
+#[test]
 fn invalid_decoder_frame_count_returns_error() {
     let (mut engine, _) = PlaybackEngine::new(Box::new(InvalidFrameDecoder), 16);
 

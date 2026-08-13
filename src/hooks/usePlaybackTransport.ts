@@ -16,7 +16,13 @@ import {
   stop,
   type PlaybackMode,
 } from "../api/commandEnvelope";
-import { onCompleted, onPosition, onStateChanged } from "../api/playbackEvents";
+import { clearPrepared, prepareNext } from "../api/commandEnvelope";
+import {
+  onCompleted,
+  onPosition,
+  onStateChanged,
+  onTrackChanged,
+} from "../api/playbackEvents";
 import type { BrowserEntry } from "../components/FolderTree/folderTreeTypes";
 
 export type TransportPlaybackStatus =
@@ -28,8 +34,12 @@ interface PlaybackTransportOptions {
   playbackStatus: TransportPlaybackStatus;
   playbackGeneration?: number;
   playbackMode?: PlaybackMode;
+  gaplessPlayback?: boolean;
   random?: () => number;
-  onSelectEntry: (entry: BrowserEntry) => void | Promise<void>;
+  onSelectEntry: (
+    entry: BrowserEntry,
+    options?: { alreadyPlaying?: boolean },
+  ) => void | Promise<void>;
 }
 
 export function usePlaybackTransport({
@@ -38,6 +48,7 @@ export function usePlaybackTransport({
   playbackStatus,
   playbackGeneration = 0,
   playbackMode = "one-shot",
+  gaplessPlayback = true,
   random = Math.random,
   onSelectEntry,
 }: PlaybackTransportOptions) {
@@ -243,10 +254,12 @@ export function usePlaybackTransport({
     selectedEntryId,
     playbackGeneration,
     playbackMode,
+    gaplessPlayback,
     random,
     onSelectEntry,
   });
   const appliedRegionGeneration = useRef<number | null>(null);
+  const preparedNextKeyRef = useRef<string | null>(null);
   // Folder rows appear in the visible list only while a search is active;
   // playback navigation must never select a folder.
   const playableEntries = useMemo(
@@ -268,6 +281,7 @@ export function usePlaybackTransport({
       selectedEntryId,
       playbackGeneration,
       playbackMode,
+      gaplessPlayback,
       random,
       onSelectEntry,
     };
@@ -276,6 +290,7 @@ export function usePlaybackTransport({
     onSelectEntry,
     playbackGeneration,
     playbackMode,
+    gaplessPlayback,
     random,
     resetABLocal,
     selectedEntryId,
@@ -286,6 +301,7 @@ export function usePlaybackTransport({
     let unlistenState: (() => void) | undefined;
     let unlistenPosition: (() => void) | undefined;
     let unlistenCompleted: (() => void) | undefined;
+    let unlistenTrackChanged: (() => void) | undefined;
 
     void Promise.resolve(
       onStateChanged((payload) => {
@@ -325,6 +341,25 @@ export function usePlaybackTransport({
       })
       .catch(() => {
         if (!disposed) setError("Playback position updates unavailable.");
+      });
+    void Promise.resolve(
+      onTrackChanged((payload) => {
+        if (disposed) return;
+        const context = playbackContext.current;
+        if (context.playbackMode !== "sequential") return;
+        const entry = context.entries.find(
+          (candidate) => candidate.id === payload.path,
+        );
+        if (!entry) return;
+        void context.onSelectEntry(entry, { alreadyPlaying: true });
+      }),
+    )
+      .then((cleanup) => {
+        if (disposed) cleanup();
+        else unlistenTrackChanged = cleanup;
+      })
+      .catch(() => {
+        if (!disposed) setError("Playback track updates unavailable.");
       });
     void Promise.resolve(
       onCompleted(() => {
@@ -368,8 +403,44 @@ export function usePlaybackTransport({
       unlistenState?.();
       unlistenPosition?.();
       unlistenCompleted?.();
+      unlistenTrackChanged?.();
     };
   }, [playbackGeneration, resetABLocal, selectedEntryId]);
+
+  useEffect(() => {
+    if (
+      !gaplessPlayback ||
+      playbackMode !== "sequential" ||
+      playbackStatus !== "playing"
+    ) {
+      void clearPrepared().catch(() => undefined);
+      preparedNextKeyRef.current = null;
+      return;
+    }
+    const index = playableEntries.findIndex(
+      (entry) => entry.id === selectedEntryId,
+    );
+    const candidates = index >= 0 ? playableEntries.slice(index + 1) : [];
+    const key = `${selectedEntryId ?? ""}:${candidates.map((entry) => entry.id).join("\u0000")}`;
+    if (preparedNextKeyRef.current === key) return;
+    preparedNextKeyRef.current = key;
+    void (async () => {
+      for (const candidate of candidates) {
+        try {
+          await prepareNext(candidate.id);
+          return;
+        } catch {
+          // Skip candidates that cannot be prepared; next sequential item may work.
+        }
+      }
+    })();
+  }, [
+    gaplessPlayback,
+    playbackMode,
+    playbackStatus,
+    playableEntries,
+    selectedEntryId,
+  ]);
 
   useEffect(() => {
     if (playbackStatus === "playing" || playbackStatus === "paused") {

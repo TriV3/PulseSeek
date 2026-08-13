@@ -24,6 +24,7 @@ pub struct NativePlaybackService {
     events: Arc<dyn PlaybackEventEmitter>,
     current_path: Option<String>,
     current_metadata: Option<StreamMetadata>,
+    current_channels: usize,
     mode: PlaybackMode,
     buffer_frames: usize,
     output_sample_rate: Option<u32>,
@@ -48,13 +49,25 @@ impl PositionReporter {
         let reporter_stop = Arc::clone(&stop);
         let join = std::thread::spawn(move || {
             let _ = events.emit_position(0, duration_ms);
+            let mut current_duration_ms = duration_ms;
             while !reporter_stop.load(Ordering::Acquire) && !control.is_stopped() {
                 std::thread::sleep(ThreadDuration::from_millis(50));
                 if reporter_stop.load(Ordering::Acquire) {
                     break;
                 }
                 let position_ms = frames_to_millis(control.position_frames(), sample_rate);
-                let _ = events.emit_position(position_ms, duration_ms);
+                let _ = events.emit_position(position_ms, current_duration_ms);
+                if let Some(change) = control.take_track_change() {
+                    current_duration_ms = change.duration_ms;
+                    let _ = events.emit_position(0, current_duration_ms);
+                    let _ = events.emit(
+                        "playback:track-changed",
+                        serde_json::json!({
+                            "path": change.path,
+                            "duration_ms": change.duration_ms,
+                        }),
+                    );
+                }
             }
             if !reporter_stop.load(Ordering::Acquire) && control.is_completed() {
                 let _ = events.emit(EVENT_COMPLETED, serde_json::json!({}));
@@ -103,6 +116,7 @@ impl NativePlaybackService {
             events: Arc::new(NoopEventEmitter),
             current_path: None,
             current_metadata: None,
+            current_channels: 0,
             mode: PlaybackMode::OneShot,
             // Ring buffer capacity. Combined with the 5ms sleep in the
             // worker loop (instead of thread::yield_now), this buffer gives
@@ -241,6 +255,7 @@ impl PlaybackService for NativePlaybackService {
         self.control = Some(control.clone());
         self.current_path = Some(path.to_string());
         self.current_metadata = Some(metadata);
+        self.current_channels = channels;
         self.output_sample_rate = Some(output_sample_rate);
         self.visualization = visualization;
 
@@ -254,6 +269,52 @@ impl PlaybackService for NativePlaybackService {
 
         let _ = self.events.emit_state("playing");
         Ok(())
+    }
+
+    fn prepare_next(&mut self, path: &str) -> Result<(), ApplicationError> {
+        if self.mode != PlaybackMode::Sequential {
+            return Ok(());
+        }
+        let worker = self.worker.as_ref().ok_or_else(|| Self::unavailable("no active playback"))?;
+        let mut decoder = pulseseek_decoder_symphonia::registry::DecoderRegistry::open(path)
+            .map_err(|e| {
+                ApplicationError::new(
+                    ErrorCategory::InvalidInput,
+                    DiagnosticContext::new(DiagnosticCode::BrowserRead),
+                    e,
+                )
+            })?;
+        let metadata = decoder.metadata().map_err(|e| {
+            ApplicationError::new(
+                ErrorCategory::Unavailable,
+                DiagnosticContext::new(DiagnosticCode::AudioOutput),
+                e,
+            )
+        })?;
+        let channels = if metadata.channels == 0 { 2 } else { metadata.channels as usize };
+        if channels != self.current_channels {
+            return Err(Self::unavailable("gapless preparation requires matching channel count"));
+        }
+        let source_rate = if metadata.sample_rate == 0 { 44_100 } else { metadata.sample_rate };
+        let output_rate = self.output_sample_rate.unwrap_or(source_rate);
+        worker
+            .prepare_next(
+                decoder,
+                channels,
+                source_rate,
+                output_rate,
+                path.to_string(),
+                metadata_duration_ms(&metadata),
+            )
+            .map_err(|e| Self::unavailable(&e.to_string()))
+    }
+
+    fn clear_prepared(&mut self) -> Result<(), ApplicationError> {
+        self.worker
+            .as_ref()
+            .ok_or_else(|| Self::unavailable("no active playback"))?
+            .clear_prepared()
+            .map_err(|e| Self::unavailable(&e.to_string()))
     }
 
     fn pause(&mut self) -> Result<(), ApplicationError> {
@@ -306,6 +367,7 @@ impl PlaybackService for NativePlaybackService {
         self.control = None;
         self.current_path = None;
         self.current_metadata = None;
+        self.current_channels = 0;
         self.output_sample_rate = None;
         let _ = self.events.emit_state("stopped");
         Ok(())

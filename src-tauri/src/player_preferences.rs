@@ -46,6 +46,12 @@ pub struct PlayerPreferences {
     pub seek_step_mode: String,
     #[serde(default)]
     pub show_hidden_folders: bool,
+    #[serde(default = "default_gapless_playback")]
+    pub gapless_playback: bool,
+}
+
+fn default_gapless_playback() -> bool {
+    true
 }
 
 impl Default for PlayerPreferences {
@@ -68,6 +74,7 @@ impl Default for PlayerPreferences {
             waveform_style: default_waveform_style(),
             seek_step_mode: default_seek_step_mode(),
             show_hidden_folders: false,
+            gapless_playback: true,
         }
     }
 }

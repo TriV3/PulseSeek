@@ -17,6 +17,11 @@ NativePlaybackService
     └── cpal audio callback reads frames from consumer ring buffer
 ```
 
+Sequential gapless playback extends this path: the worker primes the next
+decoder and appends its PCM to the same ring buffer before current track EOF.
+See [Gapless sequential playback](gapless-sequential-playback.md) and
+[ADR 0010](../adr/0010-gapless-sequential-playback.md).
+
 - `NativePlaybackService` implements the existing `PlaybackService` trait.
 - `CpalAudioOutput` is shared via `Arc<Mutex<CpalAudioOutput>>` between
   `NativeAudioDeviceService` and `NativePlaybackService`.

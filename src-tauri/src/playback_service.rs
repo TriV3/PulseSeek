@@ -17,6 +17,10 @@ pub trait PlaybackService: Send {
     /// Starts playback of the file at the given path.
     fn play(&mut self, path: &str) -> Result<(), ApplicationError>;
 
+    fn prepare_next(&mut self, path: &str) -> Result<(), ApplicationError>;
+
+    fn clear_prepared(&mut self) -> Result<(), ApplicationError>;
+
     /// Pauses playback without discarding buffered frames.
     fn pause(&mut self) -> Result<(), ApplicationError>;
 
@@ -76,6 +80,7 @@ pub trait PlaybackService: Send {
 /// Records the number of calls per method and returns configurable errors.
 pub struct FakePlaybackService {
     pub play_call_count: u64,
+    pub prepare_next_call_count: u64,
     pub pause_call_count: u64,
     pub resume_call_count: u64,
     pub stop_call_count: u64,
@@ -114,6 +119,7 @@ impl FakePlaybackService {
     pub fn new() -> Self {
         Self {
             play_call_count: 0,
+            prepare_next_call_count: 0,
             pause_call_count: 0,
             resume_call_count: 0,
             stop_call_count: 0,
@@ -165,6 +171,15 @@ impl PlaybackService for FakePlaybackService {
     fn play(&mut self, path: &str) -> Result<(), ApplicationError> {
         self.play_call_count += 1;
         self.last_play_path = Some(path.to_string());
+        self.check_fail()
+    }
+
+    fn prepare_next(&mut self, _path: &str) -> Result<(), ApplicationError> {
+        self.prepare_next_call_count += 1;
+        self.check_fail()
+    }
+
+    fn clear_prepared(&mut self) -> Result<(), ApplicationError> {
         self.check_fail()
     }
 

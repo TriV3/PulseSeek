@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use pulseseek_domain::decoder::Decoder;
 use pulseseek_domain::playback::loop_region::LoopRegion;
@@ -15,9 +15,20 @@ use crate::control::{
 use crate::error::*;
 use crate::resampling::SampleRateConverter;
 
+pub(crate) struct PreparedTrack {
+    pub(crate) decoder: Box<dyn Decoder>,
+    pub(crate) resampler: Option<SampleRateConverter>,
+    pub(crate) sample_rate: u32,
+    pub(crate) path: String,
+    pub(crate) duration_ms: Option<u64>,
+    pub(crate) pending: VecDeque<f32>,
+    pub(crate) eof: bool,
+}
+
 /// for a real-time audio callback to consume.
 pub struct PlaybackEngine {
     pub(crate) decoder: Box<dyn Decoder>,
+    pub(crate) prepared: Option<PreparedTrack>,
     pub(crate) producer: HeapProd<BufferedSample>,
     pub(crate) buffer_size: usize,
     pub(crate) eof: bool,
@@ -99,10 +110,12 @@ impl PlaybackEngine {
             output_active: Arc::new(AtomicBool::new(false)),
             terminal: Arc::new(AtomicU8::new(TERMINAL_ACTIVE)),
             position_frames: Arc::new(AtomicU64::new(0)),
+            track_change: Arc::new(Mutex::new(None)),
         };
         (
             Self {
                 decoder,
+                prepared: None,
                 producer,
                 buffer_size: buffer_frames,
                 eof: false,
@@ -273,6 +286,99 @@ impl PlaybackEngine {
         self.cycle_produced |= pushed > 0;
 
         Ok(!self.region_boundary_reached)
+    }
+
+    pub(crate) fn prepare_next(
+        &mut self,
+        decoder: Box<dyn Decoder>,
+        resampler: Option<SampleRateConverter>,
+        sample_rate: u32,
+        path: String,
+        duration_ms: Option<u64>,
+    ) {
+        self.prepared = Some(PreparedTrack {
+            decoder,
+            resampler,
+            sample_rate,
+            path,
+            duration_ms,
+            pending: VecDeque::new(),
+            eof: false,
+        });
+    }
+
+    pub(crate) fn clear_prepared(&mut self) {
+        self.prepared = None;
+    }
+
+    pub(crate) fn take_prepared(&mut self) -> bool {
+        if self.prepared.as_ref().is_some_and(|prepared| !prepared.pending.is_empty()) {
+            return false;
+        }
+        let Some(prepared) = self.prepared.take() else {
+            return false;
+        };
+        self.decoder = prepared.decoder;
+        self.resampler = prepared.resampler;
+        self.sample_rate = prepared.sample_rate;
+        self.eof = false;
+        self.pending = prepared.pending;
+        self.decoder_position_ms = 0;
+        self.control.publish_track_change(crate::control::TrackChange {
+            path: prepared.path,
+            duration_ms: prepared.duration_ms,
+        });
+        true
+    }
+
+    pub(crate) fn prime_prepared(&mut self) -> Result<(), PlaybackError> {
+        let Some(prepared) = self.prepared.as_mut() else { return Ok(()) };
+        // Keep enough decoded audio to cover decoder scheduling jitter and one
+        // or more output callbacks. This remains bounded worker-side memory.
+        const PRIME_SAMPLES: usize = 131_072;
+        if prepared.eof || prepared.pending.len() >= PRIME_SAMPLES {
+            return Ok(());
+        }
+        while prepared.pending.len() < PRIME_SAMPLES && !prepared.eof {
+            if let Some(resampler) = &mut prepared.resampler {
+                match resampler.next_chunk(&mut *prepared.decoder)? {
+                    Some(samples) if samples.is_empty() => prepared.eof = true,
+                    Some(samples) => prepared.pending.extend(samples),
+                    None => prepared.eof = true,
+                }
+            } else {
+                let mut samples = vec![0.0; PRIME_SAMPLES - prepared.pending.len()];
+                let read = prepared.decoder.read(&mut samples)?;
+                if read == 0 {
+                    prepared.eof = true;
+                } else {
+                    prepared.pending.extend(samples.into_iter().take(read));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn append_prepared(&mut self) -> bool {
+        let Some(prepared) = self.prepared.as_mut() else { return false };
+        let mut appended = false;
+        while self.producer.vacant_len() > 0 {
+            let Some(sample) = prepared.pending.pop_front() else { break };
+            if self
+                .producer
+                .try_push(BufferedSample {
+                    value: sample,
+                    generation: self.control.generation(),
+                    position_reset: if !appended { Some(0) } else { None },
+                })
+                .is_err()
+            {
+                prepared.pending.push_front(sample);
+                break;
+            }
+            appended = true;
+        }
+        appended
     }
 
     /// Returns the number of frames the decoder has made available.

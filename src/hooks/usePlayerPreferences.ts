@@ -23,6 +23,7 @@ export const DEFAULT_PLAYER_PREFERENCES: PlayerPreferences = {
   waveform_style: "outline",
   seek_step_mode: "auto",
   show_hidden_folders: false,
+  gapless_playback: true,
 };
 
 export function usePlayerPreferences() {

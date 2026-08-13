@@ -47,6 +47,17 @@ pub struct PlayRequest {
 pub struct PlayResponse {}
 
 #[derive(Debug, Deserialize)]
+pub struct PrepareNextRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PrepareNextResponse {}
+
+#[derive(Debug, Serialize)]
+pub struct ClearPreparedResponse {}
+
+#[derive(Debug, Deserialize)]
 pub struct PauseRequest {}
 
 #[derive(Debug, Serialize)]
