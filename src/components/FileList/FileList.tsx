@@ -71,6 +71,8 @@ import "../CopyDialog/CopyDialog.css";
 
 const UNAVAILABLE = "—";
 const NATIVE_DRAG_THRESHOLD_PX = 5;
+const HORIZONTAL_SCROLL_INITIAL_DELAY_MS = 300;
+const HORIZONTAL_SCROLL_REPEAT_MS = 120;
 
 /** True when running on macOS, where WKWebView cannot deliver file URLs to
  * an external drag session and the native drag-out command is used instead.
@@ -258,6 +260,7 @@ export function FileList({
   focusSearchRevision = 0,
 }: FileListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const initialFocusSearchRevision = useRef(focusSearchRevision);
   const activeShortcutBindings = shortcutBindings ?? DEFAULT_SHORTCUTS;
@@ -328,6 +331,11 @@ export function FileList({
     startY: number;
     entryId: string;
   } | null>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const horizontalScrollTimeoutRef = useRef<number | null>(null);
+  const horizontalScrollIntervalRef = useRef<number | null>(null);
+  const middleMousePanRef = useRef<{ lastX: number } | null>(null);
 
   useEffect(() => {
     onEntriesMovedRef.current = onEntriesMoved;
@@ -349,6 +357,120 @@ export function FileList({
       ),
     [entries],
   );
+
+  useEffect(() => {
+    const viewport = parentRef.current;
+    if (!viewport) return;
+
+    const updateHorizontalScrollControls = () => {
+      const maxScrollLeft = viewport.scrollWidth - viewport.clientWidth;
+      setCanScrollLeft(viewport.scrollLeft > 0);
+      setCanScrollRight(viewport.scrollLeft < maxScrollLeft - 1);
+    };
+
+    updateHorizontalScrollControls();
+    viewport.addEventListener("scroll", updateHorizontalScrollControls, {
+      passive: true,
+    });
+    window.addEventListener("resize", updateHorizontalScrollControls);
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(updateHorizontalScrollControls);
+    resizeObserver?.observe(viewport);
+    return () => {
+      viewport.removeEventListener("scroll", updateHorizontalScrollControls);
+      window.removeEventListener("resize", updateHorizontalScrollControls);
+      resizeObserver?.disconnect();
+    };
+  }, [visibleEntries.length]);
+
+  const scrollHorizontally = (
+    direction: "left" | "right",
+    behavior: ScrollBehavior = "smooth",
+  ) => {
+    const viewport = parentRef.current;
+    if (!viewport) return;
+    const columnOffsets = headerRef.current
+      ? Array.from(headerRef.current.children).map(
+          (column) => (column as HTMLElement).offsetLeft,
+        )
+      : [];
+    const current = viewport.scrollLeft;
+    const nextOffset =
+      direction === "right"
+        ? columnOffsets.find((offset) => offset > current + 1)
+        : [...columnOffsets].reverse().find((offset) => offset < current - 1);
+
+    if (nextOffset !== undefined) {
+      viewport.scrollTo({ left: nextOffset, behavior });
+      return;
+    }
+
+    viewport.scrollBy({
+      left:
+        direction === "right" ? viewport.clientWidth : -viewport.clientWidth,
+      behavior,
+    });
+  };
+
+  const stopHorizontalScroll = () => {
+    if (horizontalScrollTimeoutRef.current !== null) {
+      window.clearTimeout(horizontalScrollTimeoutRef.current);
+      horizontalScrollTimeoutRef.current = null;
+    }
+    if (horizontalScrollIntervalRef.current !== null) {
+      window.clearInterval(horizontalScrollIntervalRef.current);
+      horizontalScrollIntervalRef.current = null;
+    }
+  };
+
+  const stopMiddleMousePan = () => {
+    middleMousePanRef.current = null;
+  };
+
+  const handleMiddleMousePanStart = (event: React.MouseEvent) => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    middleMousePanRef.current = { lastX: event.clientX };
+  };
+
+  const handleMiddleMousePanMove = (event: React.MouseEvent) => {
+    const pan = middleMousePanRef.current;
+    const viewport = parentRef.current;
+    if (!pan || !viewport) return;
+    event.preventDefault();
+    viewport.scrollLeft -= event.clientX - pan.lastX;
+    pan.lastX = event.clientX;
+  };
+
+  const startHorizontalScroll = (direction: "left" | "right") => {
+    stopHorizontalScroll();
+    scrollHorizontally(direction);
+    horizontalScrollTimeoutRef.current = window.setTimeout(() => {
+      horizontalScrollIntervalRef.current = window.setInterval(() => {
+        scrollHorizontally(direction, "auto");
+      }, HORIZONTAL_SCROLL_REPEAT_MS);
+    }, HORIZONTAL_SCROLL_INITIAL_DELAY_MS);
+  };
+
+  useEffect(
+    () => () => {
+      stopHorizontalScroll();
+      stopMiddleMousePan();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const stopPan = () => stopMiddleMousePan();
+    window.addEventListener("mouseup", stopPan);
+    window.addEventListener("blur", stopPan);
+    return () => {
+      window.removeEventListener("mouseup", stopPan);
+      window.removeEventListener("blur", stopPan);
+    };
+  }, []);
 
   const toggleFormat = (format: AudioFileFormat) => {
     if (!onFormatFilterChange) return;
@@ -1337,58 +1459,190 @@ export function FileList({
           <p className="file-list-placeholder">{emptyStateMessage}</p>
         </div>
       ) : (
-        <div
-          ref={parentRef}
-          className="file-list-viewport"
-          role="grid"
-          aria-label="Playable files"
-          aria-multiselectable="true"
-          aria-colcount={10}
-          aria-rowcount={visibleEntries.length + 1}
-        >
-          <div className="file-list-header" role="row">
-            {SORTABLE_HEADERS.map((header) => {
-              const isActive = sort.field === header.field;
-              return (
-                <button
-                  key={header.field}
-                  type="button"
-                  role="columnheader"
-                  className="file-list-sort-button"
-                  aria-label={header.label}
-                  aria-sort={
-                    isActive
-                      ? sort.direction === "asc"
-                        ? "ascending"
-                        : "descending"
-                      : undefined
-                  }
-                  onClick={() => requestSort(header.field)}
-                >
-                  <span>{header.label}</span>
-                  {isActive ? (
-                    <span aria-hidden="true">
-                      {sort.direction === "asc" ? " ↑" : " ↓"}
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-            <span role="columnheader">Channels</span>
-            <span role="columnheader">Sample rate</span>
-            <span role="columnheader">Bit depth</span>
-            <span role="columnheader">Codec</span>
-            <span role="columnheader">Status</span>
-            <span role="columnheader">Mark</span>
+        <>
+          <div
+            className="file-list-horizontal-controls"
+            aria-label="Horizontal column navigation"
+          >
+            <button
+              type="button"
+              aria-label="Show columns to the left"
+              onMouseDown={(event) => {
+                if (event.button === 0) startHorizontalScroll("left");
+              }}
+              onMouseUp={stopHorizontalScroll}
+              onMouseLeave={stopHorizontalScroll}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft" && !event.repeat) {
+                  event.preventDefault();
+                  startHorizontalScroll("left");
+                }
+              }}
+              onKeyUp={stopHorizontalScroll}
+              onBlur={stopHorizontalScroll}
+              disabled={!canScrollLeft}
+            >
+              ←
+            </button>
+            <button
+              type="button"
+              aria-label="Show columns to the right"
+              onMouseDown={(event) => {
+                if (event.button === 0) startHorizontalScroll("right");
+              }}
+              onMouseUp={stopHorizontalScroll}
+              onMouseLeave={stopHorizontalScroll}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowRight" && !event.repeat) {
+                  event.preventDefault();
+                  startHorizontalScroll("right");
+                }
+              }}
+              onKeyUp={stopHorizontalScroll}
+              onBlur={stopHorizontalScroll}
+              disabled={!canScrollRight}
+            >
+              →
+            </button>
           </div>
           <div
-            className="file-list-inner"
-            style={{ height: `${virtualizer.getTotalSize()}px` }}
+            ref={parentRef}
+            className="file-list-viewport"
+            onMouseDown={handleMiddleMousePanStart}
+            onMouseMove={handleMiddleMousePanMove}
+            onMouseUp={stopMiddleMousePan}
+            onMouseLeave={stopMiddleMousePan}
+            onContextMenu={(event) => {
+              if (middleMousePanRef.current) event.preventDefault();
+            }}
+            role="grid"
+            aria-label="Playable files"
+            aria-multiselectable="true"
+            aria-colcount={10}
+            aria-rowcount={visibleEntries.length + 1}
           >
-            {virtualizer.getVirtualItems().map((virtualRow) => {
-              const entry = visibleEntries[virtualRow.index];
+            <div ref={headerRef} className="file-list-header" role="row">
+              {SORTABLE_HEADERS.map((header) => {
+                const isActive = sort.field === header.field;
+                return (
+                  <button
+                    key={header.field}
+                    type="button"
+                    role="columnheader"
+                    className="file-list-sort-button"
+                    aria-label={header.label}
+                    aria-sort={
+                      isActive
+                        ? sort.direction === "asc"
+                          ? "ascending"
+                          : "descending"
+                        : undefined
+                    }
+                    onClick={() => requestSort(header.field)}
+                  >
+                    <span>{header.label}</span>
+                    {isActive ? (
+                      <span aria-hidden="true">
+                        {sort.direction === "asc" ? " ↑" : " ↓"}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+              <span role="columnheader">Channels</span>
+              <span role="columnheader">Sample rate</span>
+              <span role="columnheader">Bit depth</span>
+              <span role="columnheader">Codec</span>
+              <span role="columnheader">Status</span>
+              <span role="columnheader">Mark</span>
+            </div>
+            <div
+              className="file-list-inner"
+              style={{ height: `${virtualizer.getTotalSize()}px` }}
+            >
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const entry = visibleEntries[virtualRow.index];
 
-              if (entry.kind === "folder") {
+                if (entry.kind === "folder") {
+                  return (
+                    <div
+                      key={entry.id}
+                      ref={(node) => {
+                        if (node) rowRefs.current.set(entry.id, node);
+                        else rowRefs.current.delete(entry.id);
+                      }}
+                      data-row-id={entry.id}
+                      className="file-list-row file-list-row--folder"
+                      style={{
+                        height: `${virtualRow.size}px`,
+                        transform: `translateY(${virtualRow.start}px)`,
+                      }}
+                      onClick={() => onSelectFolder?.(entry.id)}
+                      onContextMenu={(event) => openContextMenu(event, entry)}
+                      onKeyDown={(event) => {
+                        if (openContextMenuFromKeyboard(event, entry)) return;
+                        if (handleGridKeyDown(event, virtualRow.index)) {
+                          return;
+                        }
+                        if (event.key === "ArrowDown") {
+                          event.preventDefault();
+                          focusEntry(virtualRow.index + 1);
+                          return;
+                        }
+                        if (event.key === "ArrowUp") {
+                          event.preventDefault();
+                          focusEntry(virtualRow.index - 1);
+                          return;
+                        }
+                        if (event.key === "Home") {
+                          event.preventDefault();
+                          focusEntry(0);
+                          return;
+                        }
+                        if (event.key === "End") {
+                          event.preventDefault();
+                          focusEntry(visibleEntries.length - 1);
+                          return;
+                        }
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          onSelectFolder?.(entry.id);
+                        }
+                      }}
+                      role="row"
+                      aria-rowindex={virtualRow.index + 2}
+                      aria-selected="false"
+                      tabIndex={activeEntryIdForFolder === entry.id ? 0 : -1}
+                      aria-label={`Open folder ${entry.name}`}
+                    >
+                      <span className="file-list-row-name" role="gridcell">
+                        {entry.name}
+                      </span>
+                      <span role="gridcell" aria-hidden="true"></span>
+                      <span role="gridcell" aria-hidden="true"></span>
+                      <span role="gridcell" aria-hidden="true"></span>
+                      <span role="gridcell" aria-hidden="true"></span>
+                      <span role="gridcell" aria-hidden="true"></span>
+                      <span role="gridcell" aria-hidden="true"></span>
+                      <span role="gridcell" aria-hidden="true"></span>
+                      <span role="gridcell">Folder</span>
+                      <span role="gridcell" aria-hidden="true"></span>
+                    </div>
+                  );
+                }
+
+                const metadata = entry.metadata;
+                const metadataLoading = isLoading && metadata == null;
+                const isPlaybackEntry = playbackEntryId === entry.id;
+                const statusLabel = isPlaybackEntry
+                  ? playbackStatus === "loading"
+                    ? "Loading"
+                    : playbackStatus === "playing"
+                      ? "Playing"
+                      : playbackStatus === "failed"
+                        ? "Failed"
+                        : ""
+                  : "";
                 return (
                   <div
                     key={entry.id}
@@ -1397,16 +1651,41 @@ export function FileList({
                       else rowRefs.current.delete(entry.id);
                     }}
                     data-row-id={entry.id}
-                    className="file-list-row file-list-row--folder"
+                    className={`file-list-row${
+                      selectedIds.has(entry.id) ? " selected" : ""
+                    }`}
                     style={{
                       height: `${virtualRow.size}px`,
                       transform: `translateY(${virtualRow.start}px)`,
                     }}
-                    onClick={() => onSelectFolder?.(entry.id)}
+                    draggable={entry.kind === "playable" && !usesNativeDragOut}
+                    onDragStart={
+                      usesNativeDragOut
+                        ? undefined
+                        : (event) => handleHtmlDragStart(event, entry)
+                    }
+                    onDragEnd={handleDragEnd}
+                    onMouseDown={(event) => handleNativeMouseDown(event, entry)}
+                    onMouseMove={(event) => handleNativeMouseMove(event, entry)}
+                    onMouseUp={clearNativeDragMouse}
+                    onMouseLeave={clearNativeDragMouse}
+                    onClick={(event) => handlePlayableRowClick(event, entry)}
                     onContextMenu={(event) => openContextMenu(event, entry)}
                     onKeyDown={(event) => {
                       if (openContextMenuFromKeyboard(event, entry)) return;
                       if (handleGridKeyDown(event, virtualRow.index)) {
+                        return;
+                      }
+                      if (
+                        activeShortcutBindings.move_to_trash &&
+                        matchShortcut(
+                          event.nativeEvent,
+                          activeShortcutBindings.move_to_trash,
+                          shortcutPlatform,
+                        )
+                      ) {
+                        event.preventDefault();
+                        if (trashStatus !== "moving") requestTrash(entry);
                         return;
                       }
                       if (event.key === "ArrowDown") {
@@ -1426,208 +1705,105 @@ export function FileList({
                       }
                       if (event.key === "End") {
                         event.preventDefault();
-                        focusEntry(visibleEntries.length - 1);
+                        focusEntry(entries.length - 1);
                         return;
                       }
-                      if (event.key === "Enter" || event.key === " ") {
+                      if (
+                        activeShortcutBindings.play_selection &&
+                        matchShortcut(
+                          event.nativeEvent,
+                          activeShortcutBindings.play_selection,
+                          shortcutPlatform,
+                        )
+                      ) {
                         event.preventDefault();
-                        onSelectFolder?.(entry.id);
+                        selectEntry(entry);
                       }
                     }}
                     role="row"
                     aria-rowindex={virtualRow.index + 2}
-                    aria-selected="false"
+                    aria-selected={selectedIds.has(entry.id)}
                     tabIndex={activeEntryIdForFolder === entry.id ? 0 : -1}
-                    aria-label={`Open folder ${entry.name}`}
+                    aria-label={`${entry.name}${statusLabel ? ` ${statusLabel}` : ""}`}
+                    aria-describedby={
+                      isPlaybackEntry && playbackError
+                        ? "file-list-playback-error"
+                        : undefined
+                    }
                   >
                     <span className="file-list-row-name" role="gridcell">
-                      {entry.name}
+                      {marks[entry.id] ? (
+                        <span
+                          className={`file-list-mark-dot file-list-mark-dot--${marks[entry.id]}`}
+                          aria-hidden="true"
+                        >
+                          {marks[entry.id] === "favorite" ? "★" : ""}
+                        </span>
+                      ) : null}
+                      {recursive
+                        ? relativeEntryPath(entry.id, selectedPath ?? "")
+                        : entry.name}
                     </span>
-                    <span role="gridcell" aria-hidden="true"></span>
-                    <span role="gridcell" aria-hidden="true"></span>
-                    <span role="gridcell" aria-hidden="true"></span>
-                    <span role="gridcell" aria-hidden="true"></span>
-                    <span role="gridcell" aria-hidden="true"></span>
-                    <span role="gridcell" aria-hidden="true"></span>
-                    <span role="gridcell" aria-hidden="true"></span>
-                    <span role="gridcell">Folder</span>
-                    <span role="gridcell" aria-hidden="true"></span>
+                    <span role="gridcell">
+                      {metadataValue(
+                        formatDuration(metadata?.duration_ms ?? null),
+                        metadataLoading,
+                      )}
+                    </span>
+                    <span role="gridcell">
+                      {metadataValue(
+                        formatSize(metadata?.size_bytes ?? null),
+                        metadataLoading,
+                      )}
+                    </span>
+                    <span role="gridcell">
+                      {metadataValue(
+                        formatModified(metadata?.modified_at_ms ?? null),
+                        metadataLoading,
+                      )}
+                    </span>
+                    <span role="gridcell">
+                      {metadataValue(
+                        formatChannels(metadata?.channels ?? null),
+                        metadataLoading,
+                      )}
+                    </span>
+                    <span role="gridcell">
+                      {metadataValue(
+                        formatSampleRate(metadata?.sample_rate ?? null),
+                        metadataLoading,
+                      )}
+                    </span>
+                    <span role="gridcell">
+                      {metadataValue(
+                        metadata?.bit_depth == null
+                          ? UNAVAILABLE
+                          : `${metadata.bit_depth}-bit`,
+                        metadataLoading,
+                      )}
+                    </span>
+                    <span role="gridcell">
+                      {metadataValue(
+                        metadata?.codec ?? UNAVAILABLE,
+                        metadataLoading,
+                      )}
+                    </span>
+                    <span role="gridcell">{statusLabel}</span>
+                    <span role="gridcell">
+                      {marks[entry.id] ? (
+                        <span
+                          className={`file-list-mark file-list-mark--${marks[entry.id]}`}
+                        >
+                          {SESSION_MARK_LABELS[marks[entry.id]]}
+                        </span>
+                      ) : null}
+                    </span>
                   </div>
                 );
-              }
-
-              const metadata = entry.metadata;
-              const metadataLoading = isLoading && metadata == null;
-              const isPlaybackEntry = playbackEntryId === entry.id;
-              const statusLabel = isPlaybackEntry
-                ? playbackStatus === "loading"
-                  ? "Loading"
-                  : playbackStatus === "playing"
-                    ? "Playing"
-                    : playbackStatus === "failed"
-                      ? "Failed"
-                      : ""
-                : "";
-              return (
-                <div
-                  key={entry.id}
-                  ref={(node) => {
-                    if (node) rowRefs.current.set(entry.id, node);
-                    else rowRefs.current.delete(entry.id);
-                  }}
-                  data-row-id={entry.id}
-                  className={`file-list-row${
-                    selectedIds.has(entry.id) ? " selected" : ""
-                  }`}
-                  style={{
-                    height: `${virtualRow.size}px`,
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
-                  draggable={entry.kind === "playable" && !usesNativeDragOut}
-                  onDragStart={
-                    usesNativeDragOut
-                      ? undefined
-                      : (event) => handleHtmlDragStart(event, entry)
-                  }
-                  onDragEnd={handleDragEnd}
-                  onMouseDown={(event) => handleNativeMouseDown(event, entry)}
-                  onMouseMove={(event) => handleNativeMouseMove(event, entry)}
-                  onMouseUp={clearNativeDragMouse}
-                  onMouseLeave={clearNativeDragMouse}
-                  onClick={(event) => handlePlayableRowClick(event, entry)}
-                  onContextMenu={(event) => openContextMenu(event, entry)}
-                  onKeyDown={(event) => {
-                    if (openContextMenuFromKeyboard(event, entry)) return;
-                    if (handleGridKeyDown(event, virtualRow.index)) {
-                      return;
-                    }
-                    if (
-                      activeShortcutBindings.move_to_trash &&
-                      matchShortcut(
-                        event.nativeEvent,
-                        activeShortcutBindings.move_to_trash,
-                        shortcutPlatform,
-                      )
-                    ) {
-                      event.preventDefault();
-                      if (trashStatus !== "moving") requestTrash(entry);
-                      return;
-                    }
-                    if (event.key === "ArrowDown") {
-                      event.preventDefault();
-                      focusEntry(virtualRow.index + 1);
-                      return;
-                    }
-                    if (event.key === "ArrowUp") {
-                      event.preventDefault();
-                      focusEntry(virtualRow.index - 1);
-                      return;
-                    }
-                    if (event.key === "Home") {
-                      event.preventDefault();
-                      focusEntry(0);
-                      return;
-                    }
-                    if (event.key === "End") {
-                      event.preventDefault();
-                      focusEntry(entries.length - 1);
-                      return;
-                    }
-                    if (
-                      activeShortcutBindings.play_selection &&
-                      matchShortcut(
-                        event.nativeEvent,
-                        activeShortcutBindings.play_selection,
-                        shortcutPlatform,
-                      )
-                    ) {
-                      event.preventDefault();
-                      selectEntry(entry);
-                    }
-                  }}
-                  role="row"
-                  aria-rowindex={virtualRow.index + 2}
-                  aria-selected={selectedIds.has(entry.id)}
-                  tabIndex={activeEntryIdForFolder === entry.id ? 0 : -1}
-                  aria-label={`${entry.name}${statusLabel ? ` ${statusLabel}` : ""}`}
-                  aria-describedby={
-                    isPlaybackEntry && playbackError
-                      ? "file-list-playback-error"
-                      : undefined
-                  }
-                >
-                  <span className="file-list-row-name" role="gridcell">
-                    {marks[entry.id] ? (
-                      <span
-                        className={`file-list-mark-dot file-list-mark-dot--${marks[entry.id]}`}
-                        aria-hidden="true"
-                      >
-                        {marks[entry.id] === "favorite" ? "★" : ""}
-                      </span>
-                    ) : null}
-                    {recursive
-                      ? relativeEntryPath(entry.id, selectedPath ?? "")
-                      : entry.name}
-                  </span>
-                  <span role="gridcell">
-                    {metadataValue(
-                      formatDuration(metadata?.duration_ms ?? null),
-                      metadataLoading,
-                    )}
-                  </span>
-                  <span role="gridcell">
-                    {metadataValue(
-                      formatSize(metadata?.size_bytes ?? null),
-                      metadataLoading,
-                    )}
-                  </span>
-                  <span role="gridcell">
-                    {metadataValue(
-                      formatModified(metadata?.modified_at_ms ?? null),
-                      metadataLoading,
-                    )}
-                  </span>
-                  <span role="gridcell">
-                    {metadataValue(
-                      formatChannels(metadata?.channels ?? null),
-                      metadataLoading,
-                    )}
-                  </span>
-                  <span role="gridcell">
-                    {metadataValue(
-                      formatSampleRate(metadata?.sample_rate ?? null),
-                      metadataLoading,
-                    )}
-                  </span>
-                  <span role="gridcell">
-                    {metadataValue(
-                      metadata?.bit_depth == null
-                        ? UNAVAILABLE
-                        : `${metadata.bit_depth}-bit`,
-                      metadataLoading,
-                    )}
-                  </span>
-                  <span role="gridcell">
-                    {metadataValue(
-                      metadata?.codec ?? UNAVAILABLE,
-                      metadataLoading,
-                    )}
-                  </span>
-                  <span role="gridcell">{statusLabel}</span>
-                  <span role="gridcell">
-                    {marks[entry.id] ? (
-                      <span
-                        className={`file-list-mark file-list-mark--${marks[entry.id]}`}
-                      >
-                        {SESSION_MARK_LABELS[marks[entry.id]]}
-                      </span>
-                    ) : null}
-                  </span>
-                </div>
-              );
-            })}
+              })}
+            </div>
           </div>
-        </div>
+        </>
       )}
       {playbackError &&
       playbackEntryId &&
