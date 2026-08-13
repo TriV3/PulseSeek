@@ -531,7 +531,7 @@ fn seek_while_playing_discards_stale_frames() {
 
     let mut output = [0.0f32; 4];
     for _ in 0..10_000 {
-        if consumer.consume(&mut output) == 4 {
+        if consumer.consume(&mut output) == 4 && output[0] == 50.0 {
             break;
         }
         std::thread::yield_now();
