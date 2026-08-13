@@ -10,7 +10,11 @@ domain and worker. In sequential mode, natural completion advances through the
 current visible, playable, sorted file list. Folders, filtered-out entries, and
 entries removed before completion are never selected. Completion at the last
 visible item stops normally, and explicit Stop never advances playback.
-Automatic random file selection remains separate follow-up behavior.
+In random mode, natural completion selects from the current visible playable
+list. The current file is excluded when alternatives exist, so immediate
+repeats do not occur. With one playable file, that file may be selected again.
+Randomness is injected into the transport for deterministic tests; weighted and
+smart shuffle are not supported.
 
 The current desktop bootstrap still uses `FakePlaybackService`, as established
 by the pre-existing Tauri bootstrap. The command contract returns the mode
