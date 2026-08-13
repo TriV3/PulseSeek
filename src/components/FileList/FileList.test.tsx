@@ -210,6 +210,178 @@ describe("FileList — entries display", () => {
     expect(screen.getByText("Name")).toBeInTheDocument();
   });
 
+  it("navigates horizontally with mouse controls", () => {
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/test/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    const viewport = screen.getByRole("grid", { name: "Playable files" });
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 500 },
+      scrollWidth: { configurable: true, value: 1030 },
+      scrollLeft: { configurable: true, writable: true, value: 0 },
+    });
+    viewport.scrollBy = vi.fn();
+    viewport.scrollTo = vi.fn();
+    const header = screen.getAllByRole("row")[0];
+    Array.from(header.children).forEach((column, index) => {
+      Object.defineProperty(column, "offsetLeft", {
+        configurable: true,
+        value: index * 100,
+      });
+    });
+    fireEvent.scroll(viewport);
+
+    const rightButton = screen.getByRole("button", {
+      name: "Show columns to the right",
+    });
+    const leftButton = screen.getByRole("button", {
+      name: "Show columns to the left",
+    });
+    expect(leftButton).toBeDisabled();
+    expect(rightButton).toBeEnabled();
+
+    fireEvent.mouseDown(rightButton, { button: 0 });
+    expect(viewport.scrollTo).toHaveBeenCalledWith({
+      left: 100,
+      behavior: "smooth",
+    });
+    fireEvent.mouseUp(rightButton);
+
+    Object.defineProperty(viewport, "scrollLeft", { value: 530 });
+    fireEvent.scroll(viewport);
+    expect(leftButton).toBeEnabled();
+    expect(rightButton).toBeDisabled();
+  });
+
+  it("repeats column scrolling while a navigation button is held", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <FileList
+          entries={sampleEntries}
+          selectedPath="/test/music"
+          isLoading={false}
+          error={null}
+        />,
+      );
+
+      const viewport = screen.getByRole("grid", { name: "Playable files" });
+      Object.defineProperties(viewport, {
+        clientWidth: { configurable: true, value: 500 },
+        scrollWidth: { configurable: true, value: 1030 },
+        scrollLeft: { configurable: true, writable: true, value: 0 },
+      });
+      viewport.scrollBy = vi.fn();
+      viewport.scrollTo = vi.fn();
+      const header = screen.getAllByRole("row")[0];
+      Array.from(header.children).forEach((column, index) => {
+        Object.defineProperty(column, "offsetLeft", {
+          configurable: true,
+          value: index * 100,
+        });
+      });
+      fireEvent.scroll(viewport);
+
+      const rightButton = screen.getByRole("button", {
+        name: "Show columns to the right",
+      });
+      fireEvent.mouseDown(rightButton, { button: 0 });
+      vi.advanceTimersByTime(300 + 120 * 2);
+      fireEvent.mouseUp(rightButton);
+
+      expect(viewport.scrollTo).toHaveBeenCalledTimes(3);
+      expect(viewport.scrollTo).toHaveBeenNthCalledWith(1, {
+        left: 100,
+        behavior: "smooth",
+      });
+      expect(viewport.scrollTo).toHaveBeenNthCalledWith(2, {
+        left: 100,
+        behavior: "auto",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps both navigation buttons disabled when columns fit the viewport", () => {
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/test/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    const viewport = screen.getByRole("grid", { name: "Playable files" });
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 1030 },
+      scrollWidth: { configurable: true, value: 1030 },
+      scrollLeft: { configurable: true, writable: true, value: 0 },
+    });
+    fireEvent.scroll(viewport);
+
+    expect(
+      screen.getByRole("button", { name: "Show columns to the left" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Show columns to the right" }),
+    ).toBeDisabled();
+  });
+
+  it("pans horizontally while the middle mouse button is held", () => {
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/test/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    const viewport = screen.getByRole("grid", { name: "Playable files" });
+    Object.defineProperty(viewport, "scrollLeft", {
+      configurable: true,
+      writable: true,
+      value: 200,
+    });
+
+    fireEvent.mouseDown(viewport, { button: 1, clientX: 100 });
+    fireEvent.mouseMove(viewport, { buttons: 4, clientX: 70 });
+
+    expect(viewport).toHaveProperty("scrollLeft", 230);
+  });
+
+  it("stops middle-button panning when the mouse is released", () => {
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/test/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    const viewport = screen.getByRole("grid", { name: "Playable files" });
+    Object.defineProperty(viewport, "scrollLeft", {
+      configurable: true,
+      writable: true,
+      value: 200,
+    });
+
+    fireEvent.mouseDown(viewport, { button: 1, clientX: 100 });
+    fireEvent.mouseUp(viewport, { button: 1 });
+    fireEvent.mouseMove(viewport, { buttons: 0, clientX: 70 });
+
+    expect(viewport).toHaveProperty("scrollLeft", 200);
+  });
+
   it("shows formatted metadata columns", () => {
     render(
       <FileList
