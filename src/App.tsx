@@ -37,7 +37,11 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useShortcutMappings } from "./hooks/useShortcutMappings";
 import { ShortcutEditor } from "./components/ShortcutEditor/ShortcutEditor";
 import { getShortcutPlatform } from "./shortcuts/keyboardShortcuts";
-import { pickFolder, type PlaybackMode } from "./api/commandEnvelope";
+import {
+  clearWaveformCache,
+  pickFolder,
+  type PlaybackMode,
+} from "./api/commandEnvelope";
 import { usePlayerPreferences } from "./hooks/usePlayerPreferences";
 import { useTheme } from "./hooks/useTheme";
 import { ThemeSelector } from "./components/ThemeSelector/ThemeSelector";
@@ -48,6 +52,8 @@ import {
   VisualizationSettingsControls,
 } from "./components/VisualizationSelector/VisualizationSelector";
 import { useVisualizationSettings } from "./hooks/useVisualizationSettings";
+import { ConfirmDialog } from "./components/ConfirmDialog/ConfirmDialog";
+import "./components/ConfirmDialog/ConfirmDialog.css";
 import "./styles/tokens.css";
 import "./styles/themes/light.css";
 import "./styles/themes/dark.css";
@@ -70,6 +76,9 @@ function App() {
     "browser" | "bookmarks" | "recent"
   >("browser");
   const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
+  const [optionsMenuOpen, setOptionsMenuOpen] = useState(false);
+  const [clearCacheDialogOpen, setClearCacheDialogOpen] = useState(false);
+  const [clearCacheStatus, setClearCacheStatus] = useState<string | null>(null);
   const [focusSearchRevision, setFocusSearchRevision] = useState(0);
   const [folderPickerError, setFolderPickerError] = useState<string | null>(
     null,
@@ -106,6 +115,39 @@ function App() {
   const browserTabRef = useRef<HTMLButtonElement | null>(null);
   const recentTabRef = useRef<HTMLButtonElement | null>(null);
   const bookmarksTabRef = useRef<HTMLButtonElement | null>(null);
+  const optionsMenuRef = useRef<HTMLDetailsElement | null>(null);
+
+  useEffect(() => {
+    if (!optionsMenuOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !optionsMenuRef.current?.contains(target)) {
+        optionsMenuRef.current?.removeAttribute("open");
+        setOptionsMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOptionsMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [optionsMenuOpen]);
+
+  const confirmClearWaveformCache = useCallback(async () => {
+    try {
+      await clearWaveformCache();
+      setClearCacheStatus("Waveform cache cleared.");
+    } catch {
+      setClearCacheStatus("Could not clear waveform cache.");
+    } finally {
+      setClearCacheDialogOpen(false);
+      setOptionsMenuOpen(false);
+    }
+  }, []);
 
   const handleSidebarTabKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -629,8 +671,20 @@ function App() {
                   <span role="alert">{folderPickerError}</span>
                 )}
               </div>
-              <details className="app-options-menu">
-                <summary aria-label="Open application menu">☰</summary>
+              <details
+                ref={optionsMenuRef}
+                className="app-options-menu"
+                open={optionsMenuOpen}
+              >
+                <summary
+                  aria-label="Open application menu"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    setOptionsMenuOpen((open) => !open);
+                  }}
+                >
+                  ☰
+                </summary>
                 <div className="app-options-menu-content">
                   <AudioDeviceSelector
                     {...audioDevices}
@@ -681,15 +735,26 @@ function App() {
                   <button
                     type="button"
                     className="shortcut-settings-button"
-                    onClick={(event) => {
-                      event.currentTarget
-                        .closest("details")
-                        ?.removeAttribute("open");
+                    onClick={() => {
+                      setOptionsMenuOpen(false);
                       setShortcutEditorOpen(true);
                     }}
                   >
                     Keyboard shortcuts
                   </button>
+                  <button
+                    type="button"
+                    className="shortcut-settings-button"
+                    onClick={() => {
+                      setClearCacheStatus(null);
+                      setClearCacheDialogOpen(true);
+                    }}
+                  >
+                    Clear waveform cache
+                  </button>
+                  {clearCacheStatus && (
+                    <span role="status">{clearCacheStatus}</span>
+                  )}
                 </div>
               </details>
             </div>
@@ -967,6 +1032,14 @@ function App() {
             throw new Error("Could not reset keyboard shortcuts.");
           return confirmed;
         }}
+      />
+      <ConfirmDialog
+        open={clearCacheDialogOpen}
+        title="Clear waveform cache?"
+        message="Calculated waveform data will be deleted and generated again when needed. Your settings and files will not change."
+        confirmLabel="Clear cache"
+        onCancel={() => setClearCacheDialogOpen(false)}
+        onConfirm={() => void confirmClearWaveformCache()}
       />
     </main>
   );

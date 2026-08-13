@@ -35,6 +35,28 @@ describe("application shell", () => {
     expect(fireEvent.contextMenu(container.querySelector("main")!)).toBe(false);
   });
 
+  it("closes the application menu when clicking outside it", () => {
+    const { container } = render(<App />);
+    const menu = container.querySelector(".app-options-menu")!;
+
+    fireEvent.click(screen.getByLabelText("Open application menu"));
+    expect(menu).toHaveAttribute("open");
+
+    fireEvent.pointerDown(document.body);
+    expect(menu).not.toHaveAttribute("open");
+  });
+
+  it("confirms before clearing waveform cache", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByLabelText("Open application menu"));
+    fireEvent.click(screen.getByRole("button", { name: "Clear waveform cache" }));
+
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear cache" })).toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalledWith("clear_waveform_cache");
+  });
+
   it("renders the folder tree with an accessible heading", () => {
     render(<App />);
 

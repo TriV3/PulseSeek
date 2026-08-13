@@ -37,6 +37,21 @@ fn waveform_row_count(dir: &tempfile::TempDir) -> usize {
     count as usize
 }
 
+#[test]
+fn clear_waveform_cache_removes_waveforms() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = start_cache(&dir);
+    let source = identity("/music/clear.wav", 100, 200);
+    let key = waveform_cache_key(&source);
+    cache.store_waveform(&key, &source, &sample_waveform()).expect("store waveform");
+    assert_eq!(waveform_row_count(&dir), 1);
+
+    cache.clear_waveform_cache().expect("clear waveform cache");
+
+    assert_eq!(waveform_row_count(&dir), 0);
+    assert_eq!(cache.load_waveform(&key, &source).unwrap(), None);
+}
+
 /// A stereo, two-level pyramid: coarsest 1 bucket, finest 2 buckets.
 fn sample_waveform() -> MultiresolutionWaveform {
     let coarsest = Level {

@@ -916,6 +916,11 @@ export async function clearRecentFolders(): Promise<void> {
   await invokeCommand<ClearRecentFoldersResponse>("clear_recent_folders", {});
 }
 
+/** Removes recalculable waveform data without touching user data. */
+export async function clearWaveformCache(): Promise<void> {
+  await invoke("clear_waveform_cache");
+}
+
 export interface FolderBookmarkData {
   path: string;
   name: string;

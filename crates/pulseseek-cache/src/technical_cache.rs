@@ -142,6 +142,9 @@ pub trait TechnicalCachePort: Send + Sync {
 
     /// Deletes one metadata value.
     fn remove_meta(&self, key: &str) -> Result<(), CacheError>;
+
+    /// Removes all calculated waveform data while preserving user data.
+    fn clear_waveform_cache(&self) -> Result<(), CacheError>;
 }
 
 enum WorkerCommand {
@@ -156,6 +159,9 @@ enum WorkerCommand {
     },
     Remove {
         key: String,
+        reply: SyncSender<Result<(), CacheError>>,
+    },
+    ClearWaveformCache {
         reply: SyncSender<Result<(), CacheError>>,
     },
     StoreWaveform {
@@ -271,6 +277,14 @@ impl TechnicalCachePort for TechnicalCache {
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
         self.commands
             .send(WorkerCommand::Remove { key: key.to_string(), reply: reply_tx })
+            .map_err(|_| CacheError::WorkerStopped)?;
+        reply_rx.recv().map_err(|_| CacheError::WorkerStopped)?
+    }
+
+    fn clear_waveform_cache(&self) -> Result<(), CacheError> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(WorkerCommand::ClearWaveformCache { reply: reply_tx })
             .map_err(|_| CacheError::WorkerStopped)?;
         reply_rx.recv().map_err(|_| CacheError::WorkerStopped)?
     }
@@ -414,6 +428,14 @@ fn worker_loop(receiver: Receiver<WorkerCommand>, mut database: OpenedDatabase) 
             },
             WorkerCommand::Remove { key, reply } => {
                 let _ = reply.send(remove_meta(&mut database, &key));
+            },
+            WorkerCommand::ClearWaveformCache { reply } => {
+                let result = database
+                    .connection()
+                    .execute("DELETE FROM waveform_cache", [])
+                    .map(|_| ())
+                    .map_err(CacheError::Sqlite);
+                let _ = reply.send(result);
             },
             WorkerCommand::StoreWaveform { key, identity, waveform, reply } => {
                 let result = encode(&waveform)

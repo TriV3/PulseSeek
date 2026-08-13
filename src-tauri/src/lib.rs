@@ -1,4 +1,5 @@
 pub mod audio_device_service;
+mod cache_commands;
 pub mod command_envelope;
 mod command_handlers;
 pub mod copy_service;
@@ -100,9 +101,13 @@ pub fn run() {
         .manage(active_enumerations)
         .manage(trash_service)
         .manage(external_service)
+        .manage(std::sync::Mutex::new(
+            None::<Arc<dyn TechnicalCachePort>>,
+        ))
         .invoke_handler(tauri::generate_handler![
             diagnostics::report_error,
             command_envelope::invoke_command,
+            cache_commands::clear_waveform_cache_command,
             command_envelope::pick_folder_dialog,
             player_preferences::load_player_preferences,
             player_preferences::save_player_preferences,
@@ -176,6 +181,12 @@ pub fn run() {
                         let meta_port: Arc<
                             dyn pulseseek_cache::technical_cache::TechnicalCachePort,
                         > = Arc::new(cache.clone());
+                        if let Ok(mut cache_state) = app
+                            .state::<std::sync::Mutex<Option<Arc<dyn TechnicalCachePort>>>>()
+                            .lock()
+                        {
+                            *cache_state = Some(Arc::clone(&meta_port));
+                        }
                         let bookmark_meta_port = Arc::clone(&meta_port);
                         let shortcut_port: Arc<
                             dyn pulseseek_cache::shortcut_mappings::ShortcutMappingsCachePort,
