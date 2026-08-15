@@ -21,6 +21,10 @@ export default defineConfig({
         __dirname,
         "e2e/mocks/tauri-webview.ts",
       ),
+      "@tauri-apps/api/window": path.resolve(
+        __dirname,
+        "e2e/mocks/tauri-window.ts",
+      ),
     },
   },
   server: {

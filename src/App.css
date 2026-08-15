@@ -147,6 +147,7 @@ input {
 .waveform-panel {
   min-height: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 29px 22px auto minmax(0, 1fr);
   overflow: hidden;
   background: linear-gradient(var(--bg-subtle), var(--bg-panel));
