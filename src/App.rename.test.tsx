@@ -29,6 +29,12 @@ vi.mock("@tauri-apps/api/event", () => ({
   }),
 }));
 
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({
+    onDragDropEvent: () => Promise.resolve(() => {}),
+  }),
+}));
+
 // jsdom has no layout, so the virtualizer would measure 0 height and render
 // nothing. Render all rows synchronously like the FileList tests do.
 vi.mock("@tanstack/react-virtual", () => ({

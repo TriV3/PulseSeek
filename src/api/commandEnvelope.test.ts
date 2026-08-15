@@ -784,3 +784,41 @@ describe("recent folders", () => {
     );
   });
 });
+
+describe("probePath", () => {
+  it("sends the path and returns the classified kind", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: true,
+      data: { kind: "playable" },
+    });
+
+    const { probePath } = await import("./commandEnvelope");
+    await expect(probePath("/music/song.wav")).resolves.toBe("playable");
+
+    expect(mockInvoke).toHaveBeenCalledWith("invoke_command", {
+      envelope: {
+        version: 1,
+        command: "probe_path",
+        payload: { path: "/music/song.wav" },
+      },
+    });
+  });
+
+  it("surfaces inspection failure as CommandError", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      ok: false,
+      error: {
+        category: "PermissionDenied",
+        message: "PulseSeek could not access that file.",
+        diagnostic_code: "file.operation",
+      },
+    });
+
+    const { probePath, CommandError } = await import("./commandEnvelope");
+    await expect(probePath("/private/music/song.wav")).rejects.toThrow(
+      CommandError,
+    );
+  });
+});

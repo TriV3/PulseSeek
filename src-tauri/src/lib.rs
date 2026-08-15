@@ -16,6 +16,7 @@ pub mod path_validation;
 pub mod playback_events;
 pub mod playback_service;
 pub mod player_preferences;
+pub mod probe_service;
 pub mod recent_folders_service;
 pub mod rename_service;
 pub mod shortcut_mappings_service;
@@ -93,6 +94,12 @@ pub fn run() {
             pulseseek_browser_fs::external_actions::NativeFileActions,
         )));
 
+    // Native drag-and-drop classification service. It classifies a dropped
+    // path so the UI can decide between revealing a folder and playing an
+    // audio file without ever receiving a general filesystem capability.
+    let probe_service: std::sync::Mutex<Box<dyn probe_service::ProbeService>> =
+        std::sync::Mutex::new(Box::new(probe_service::native_probe_service()));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(playback_service)
@@ -101,6 +108,7 @@ pub fn run() {
         .manage(active_enumerations)
         .manage(trash_service)
         .manage(external_service)
+        .manage(probe_service)
         .manage(std::sync::Mutex::new(
             None::<Arc<dyn TechnicalCachePort>>,
         ))

@@ -30,6 +30,12 @@ vi.mock("@tauri-apps/api/event", () => ({
   }),
 }));
 
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({
+    onDragDropEvent: () => Promise.resolve(() => {}),
+  }),
+}));
+
 vi.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: vi.fn(
     (opts: { count: number; estimateSize: () => number }) => {

@@ -893,6 +893,35 @@ export async function dragOut(paths: string[]): Promise<void> {
   } satisfies DragOutRequest);
 }
 
+// ── Drag-in probe types ────────────────────────────────────────────────
+
+/** Classification of a dropped filesystem path (FR-DI-001). */
+export type ProbePathKind =
+  "directory" | "playable" | "unsupported" | "missing";
+
+export interface ProbePathRequest {
+  path: string;
+}
+
+export interface ProbePathResponse {
+  kind: ProbePathKind;
+}
+
+/** Classifies a dropped path so the UI can decide between revealing its
+ * folder and playing it (FR-DI-001).
+ *
+ * The backend is the source of truth for filesystem and format checks: the
+ * frontend never inspects paths itself. Throws `CommandError` only when the
+ * path cannot be inspected (for example a permission denial); a missing or
+ * unsupported target is a normal `kind`, not an error.
+ */
+export async function probePath(path: string): Promise<ProbePathKind> {
+  const response = await invokeCommand<ProbePathResponse>("probe_path", {
+    path,
+  } satisfies ProbePathRequest);
+  return response.kind;
+}
+
 // ── Recent folders types ───────────────────────────────────────────────
 
 export interface RecentFolderData {

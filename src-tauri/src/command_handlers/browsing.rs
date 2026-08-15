@@ -9,8 +9,8 @@ use crate::command_envelope::types::{
     CancelEnumerationResponse, CancelMoveFilesRequest, CancelMoveFilesResponse, DragOutRequest,
     DragOutResponse, ListBrowserRootsRequest, ListBrowserRootsResponse, MoveToTrashItemResult,
     MoveToTrashRequest, MoveToTrashResponse, OpenWithRequest, OpenWithResponse, PickFolderResponse,
-    RenameFileRequest, RenameFileResponse, RevealFileRequest, RevealFileResponse,
-    StartCopyFilesRequest, StartCopyFilesResponse, StartEnumerationRequest,
+    ProbePathRequest, ProbePathResponse, RenameFileRequest, RenameFileResponse, RevealFileRequest,
+    RevealFileResponse, StartCopyFilesRequest, StartCopyFilesResponse, StartEnumerationRequest,
     StartEnumerationResponse, StartMoveFilesRequest, StartMoveFilesResponse,
 };
 use crate::command_envelope::{from_application_error, CommandResponse};
@@ -24,12 +24,14 @@ use crate::folder_enumeration_service::{ActiveEnumerations, FolderEnumerationSer
 use crate::move_service::MoveService;
 use crate::playback_events::PlaybackEventEmitter;
 use crate::playback_service::PlaybackService;
+use crate::probe_service::ProbeService;
 use crate::rename_service::RenameService;
 use crate::trash_service::TrashService;
 
 /// Handles browsing commands: start_enumeration, cancel_enumeration,
 /// move_to_trash, rename_file, start_move_files, cancel_move_files,
-/// start_copy_files, cancel_copy_files, reveal_file, open_with, and drag_out.
+/// start_copy_files, cancel_copy_files, reveal_file, open_with, drag_out, and
+/// probe_path.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle(
     command: &str,
@@ -41,6 +43,7 @@ pub(crate) fn handle(
     copy_service: &dyn CopyService,
     external_service: &dyn ExternalService,
     drag_out_service: &dyn DragOutService,
+    probe_service: &dyn ProbeService,
     playback: &mut dyn PlaybackService,
     active: &ActiveEnumerations,
     events: &Arc<dyn PlaybackEventEmitter>,
@@ -227,6 +230,18 @@ pub(crate) fn handle(
             };
             match drag_out_service.drag_out(request.paths) {
                 Ok(()) => CommandResponse::ok(serde_json::to_value(DragOutResponse {}).unwrap()),
+                Err(error) => CommandResponse::err(from_application_error(&error)),
+            }
+        },
+        "probe_path" => {
+            let request: ProbePathRequest = match parse_payload("probe_path", payload) {
+                Ok(request) => request,
+                Err(response) => return response,
+            };
+            match probe_service.probe(request.path) {
+                Ok(kind) => {
+                    CommandResponse::ok(serde_json::to_value(ProbePathResponse { kind }).unwrap())
+                },
                 Err(error) => CommandResponse::err(from_application_error(&error)),
             }
         },

@@ -13,6 +13,7 @@ use crate::folder_enumeration_service::{ActiveEnumerations, FakeFolderEnumeratio
 use crate::move_service::{FakeMoveService, MoveService};
 use crate::playback_events::{FakeEventEmitter, NoopEventEmitter};
 use crate::playback_service::FakePlaybackService;
+use crate::probe_service::{FakeProbeService, ProbeKind, ProbeService};
 use crate::recent_folders_service::InMemoryRecentFoldersService;
 use crate::rename_service::{FakeRenameService, RenameOutcome};
 use crate::shortcut_mappings_service::{InMemoryShortcutMappingsService, ShortcutMappingsService};
@@ -103,6 +104,16 @@ fn noop_drag_out() -> FakeDragOutService {
     }))
 }
 
+fn noop_probe() -> FakeProbeService {
+    FakeProbeService::new(Box::new(|_| {
+        Err(ApplicationError::new(
+            ErrorCategory::Unavailable,
+            DiagnosticContext::new(DiagnosticCode::FileOperation),
+            std::io::Error::other("fake probe not configured"),
+        ))
+    }))
+}
+
 fn noop_recent() -> InMemoryRecentFoldersService {
     InMemoryRecentFoldersService::new()
 }
@@ -124,6 +135,7 @@ fn shortcut_dispatch(
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         shortcut_service,
@@ -204,6 +216,7 @@ fn health_command_round_trip() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -237,6 +250,7 @@ fn unknown_version_rejected() {
             &noop_copy(),
             &noop_external(),
             &noop_drag_out(),
+            &noop_probe(),
             &noop_active(),
             &noop_recent(),
             &noop_events(),
@@ -271,6 +285,7 @@ fn unknown_command_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -304,6 +319,7 @@ fn invalid_payload_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -357,6 +373,7 @@ fn play_command_dispatches_to_service() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -389,6 +406,7 @@ fn play_command_invalid_payload_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -422,6 +440,7 @@ fn play_command_missing_path_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -453,6 +472,7 @@ fn set_playback_mode_dispatches_and_returns_confirmed_mode() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -483,6 +503,7 @@ fn set_playback_mode_rejects_unknown_mode() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -514,6 +535,7 @@ fn set_playback_mode_maps_service_failure() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -544,6 +566,7 @@ fn set_loop_region_dispatches_and_returns_confirmed_start() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -574,6 +597,7 @@ fn set_loop_region_rejects_reversed_points() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -604,6 +628,7 @@ fn set_loop_region_rejects_out_of_bounds_points() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -632,6 +657,7 @@ fn set_loop_region_maps_service_failure() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -659,6 +685,7 @@ fn clear_loop_region_dispatches_to_service() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -690,6 +717,7 @@ fn pause_command_dispatches_to_service() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -720,6 +748,7 @@ fn pause_command_invalid_payload_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -753,6 +782,7 @@ fn resume_command_dispatches_to_service() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -783,6 +813,7 @@ fn resume_command_invalid_payload_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -815,6 +846,7 @@ fn stop_command_dispatches_to_service() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -845,6 +877,7 @@ fn stop_command_invalid_payload_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -878,6 +911,7 @@ fn seek_command_dispatches_to_service() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -911,6 +945,7 @@ fn seek_command_invalid_payload_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -941,6 +976,7 @@ fn seek_command_missing_position_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -973,6 +1009,7 @@ fn volume_command_dispatches_to_service() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1005,6 +1042,7 @@ fn volume_command_muted_state_dispatches_to_service() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1036,6 +1074,7 @@ fn volume_command_invalid_payload_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1066,6 +1105,7 @@ fn volume_command_missing_fields_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1099,6 +1139,7 @@ fn play_service_error_maps_to_boundary_error() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1132,6 +1173,7 @@ fn pause_service_error_maps_to_boundary_error() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1164,6 +1206,7 @@ fn resume_service_error_maps_to_boundary_error() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1196,6 +1239,7 @@ fn stop_service_error_maps_to_boundary_error() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1228,6 +1272,7 @@ fn seek_service_error_maps_to_boundary_error() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1260,6 +1305,7 @@ fn volume_service_error_maps_to_boundary_error() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1294,6 +1340,7 @@ fn play_emits_playing_state_event() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -1329,6 +1376,7 @@ fn play_emits_event_only_on_success() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -1359,6 +1407,7 @@ fn pause_emits_paused_state_event() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -1393,6 +1442,7 @@ fn resume_emits_playing_state_event() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -1426,6 +1476,7 @@ fn stop_emits_stopped_state_event() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -1459,6 +1510,7 @@ fn seek_does_not_emit_state_event() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -1489,6 +1541,7 @@ fn volume_does_not_emit_state_event() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -1519,6 +1572,7 @@ fn state_event_has_versioned_envelope() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -1552,6 +1606,7 @@ fn list_devices_command_returns_devices() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1587,6 +1642,7 @@ fn list_devices_command_invalid_payload_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1619,6 +1675,7 @@ fn list_devices_service_error_maps_to_boundary() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1653,6 +1710,7 @@ fn current_device_command_returns_none_when_no_device() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1685,6 +1743,7 @@ fn current_device_command_returns_device_when_set() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1719,6 +1778,7 @@ fn current_device_service_error_maps_to_boundary() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1750,6 +1810,7 @@ fn select_device_command_dispatches_to_service() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1783,6 +1844,7 @@ fn select_device_command_invalid_payload_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1815,6 +1877,7 @@ fn select_device_command_missing_id_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1848,6 +1911,7 @@ fn select_device_service_error_maps_to_boundary() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1881,6 +1945,7 @@ fn select_device_emits_device_lost_event() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -1917,6 +1982,7 @@ fn select_device_does_not_emit_device_lost_when_not_lost() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &events,
@@ -1947,6 +2013,7 @@ fn unknown_device_command_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &noop_active(),
         &noop_recent(),
         &noop_events(),
@@ -1982,6 +2049,7 @@ fn start_enumeration_returns_session_id() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2038,6 +2106,7 @@ fn list_browser_roots_returns_typed_roots() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2080,6 +2149,7 @@ fn start_enumeration_defaults_batch_size() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2112,6 +2182,7 @@ fn start_enumeration_passes_recursive_flag() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2144,6 +2215,7 @@ fn start_enumeration_passes_show_hidden_flag() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2176,6 +2248,7 @@ fn start_enumeration_defaults_recursive_false() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2208,6 +2281,7 @@ fn start_enumeration_invalid_payload_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2241,6 +2315,7 @@ fn start_enumeration_missing_path_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2275,6 +2350,7 @@ fn start_enumeration_service_error_maps_to_boundary() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2309,6 +2385,7 @@ fn cancel_enumeration_cancels_session() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2342,6 +2419,7 @@ fn cancel_enumeration_unknown_session_idempotent() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2374,6 +2452,7 @@ fn cancel_enumeration_invalid_payload_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2414,6 +2493,7 @@ fn move_to_trash_command_dispatches_and_returns_results() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2463,6 +2543,7 @@ fn move_to_trash_reports_partial_failure() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2502,6 +2583,7 @@ fn move_to_trash_invalid_payload_rejected() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2538,6 +2620,7 @@ fn move_to_trash_empty_paths_returns_empty() {
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2608,6 +2691,7 @@ fn recent_folder_dispatch(
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         recent_service,
         &noop_events(),
@@ -2739,6 +2823,7 @@ fn rename_file_dispatch(
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -2924,6 +3009,7 @@ fn move_dispatch(payload: serde_json::Value, service: &dyn MoveService) -> Comma
         &noop_copy(),
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -3073,6 +3159,7 @@ fn copy_dispatch(payload: serde_json::Value, service: &dyn CopyService) -> Comma
         service,
         &noop_external(),
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -3181,6 +3268,7 @@ fn external_dispatch(
         &noop_copy(),
         service,
         &noop_drag_out(),
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -3297,6 +3385,7 @@ fn drag_out_dispatch(payload: serde_json::Value, service: &dyn DragOutService) -
         &noop_copy(),
         &noop_external(),
         service,
+        &noop_probe(),
         &active,
         &noop_recent(),
         &noop_events(),
@@ -3351,6 +3440,94 @@ fn drag_out_cancellation_maps_to_boundary() {
 fn drag_out_invalid_payload_rejected() {
     let drag = FakeDragOutService::new(Box::new(|_| Ok(())));
     let response = drag_out_dispatch(serde_json::json!("not_an_object"), &drag);
+    assert!(!response.ok);
+    assert_eq!(response.error.unwrap().diagnostic_code, "command.payload");
+}
+
+fn probe_path_dispatch(payload: serde_json::Value, service: &dyn ProbeService) -> CommandResponse {
+    let mut playback = FakePlaybackService::new();
+    let mut device_service = FakeAudioDeviceService::new();
+    let mut enum_service = FakeFolderEnumerationService::new();
+    let active = ActiveEnumerations::new();
+    let envelope = CommandEnvelope {
+        version: CURRENT_COMMAND_VERSION,
+        command: "probe_path".to_string(),
+        payload,
+    };
+    dispatch(
+        envelope,
+        &mut playback,
+        &mut device_service,
+        &mut enum_service,
+        &noop_trash(),
+        &noop_rename(),
+        &noop_move(),
+        &noop_copy(),
+        &noop_external(),
+        &noop_drag_out(),
+        service,
+        &active,
+        &noop_recent(),
+        &noop_events(),
+    )
+}
+
+#[test]
+fn probe_path_command_dispatches_and_returns_playable() {
+    let probe = FakeProbeService::new(Box::new(|path| {
+        assert_eq!(path, "/music/a.wav");
+        Ok(ProbeKind::Playable)
+    }));
+    let response = probe_path_dispatch(serde_json::json!({ "path": "/music/a.wav" }), &probe);
+    assert!(response.ok);
+    let value = response.data.unwrap();
+    assert_eq!(value["kind"], serde_json::json!("playable"));
+}
+
+#[test]
+fn probe_path_returns_directory() {
+    let probe = FakeProbeService::new(Box::new(|_| Ok(ProbeKind::Directory)));
+    let response = probe_path_dispatch(serde_json::json!({ "path": "/music/folder" }), &probe);
+    assert!(response.ok);
+    assert_eq!(response.data.unwrap()["kind"], serde_json::json!("directory"));
+}
+
+#[test]
+fn probe_path_returns_unsupported() {
+    let probe = FakeProbeService::new(Box::new(|_| Ok(ProbeKind::Unsupported)));
+    let response = probe_path_dispatch(serde_json::json!({ "path": "/music/notes.txt" }), &probe);
+    assert!(response.ok);
+    assert_eq!(response.data.unwrap()["kind"], serde_json::json!("unsupported"));
+}
+
+#[test]
+fn probe_path_returns_missing() {
+    let probe = FakeProbeService::new(Box::new(|_| Ok(ProbeKind::Missing)));
+    let response = probe_path_dispatch(serde_json::json!({ "path": "/music/gone.wav" }), &probe);
+    assert!(response.ok);
+    assert_eq!(response.data.unwrap()["kind"], serde_json::json!("missing"));
+}
+
+#[test]
+fn probe_path_error_maps_to_boundary() {
+    let probe = FakeProbeService::new(Box::new(|_| {
+        Err(ApplicationError::new(
+            ErrorCategory::PermissionDenied,
+            DiagnosticContext::new(DiagnosticCode::FileOperation),
+            std::io::Error::other("denied"),
+        ))
+    }));
+    let response = probe_path_dispatch(serde_json::json!({ "path": "/music/a.wav" }), &probe);
+    assert!(!response.ok);
+    let error = response.error.unwrap();
+    assert_eq!(error.category, "PermissionDenied");
+    assert_eq!(error.diagnostic_code, "file.operation");
+}
+
+#[test]
+fn probe_path_invalid_payload_rejected() {
+    let probe = FakeProbeService::new(Box::new(|_| Ok(ProbeKind::Playable)));
+    let response = probe_path_dispatch(serde_json::json!("not_an_object"), &probe);
     assert!(!response.ok);
     assert_eq!(response.error.unwrap().diagnostic_code, "command.payload");
 }

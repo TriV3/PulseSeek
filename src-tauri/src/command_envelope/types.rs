@@ -265,6 +265,16 @@ pub struct DragOutRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DragOutResponse {}
 
+#[derive(Debug, Deserialize)]
+pub struct ProbePathRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProbePathResponse {
+    pub kind: crate::probe_service::ProbeKind,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RenameFileResponse {
     pub old_path: String,
