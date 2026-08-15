@@ -40,8 +40,11 @@ import { getShortcutPlatform } from "./shortcuts/keyboardShortcuts";
 import {
   clearWaveformCache,
   pickFolder,
+  probePath,
   type PlaybackMode,
 } from "./api/commandEnvelope";
+import { useFileDrop } from "./hooks/useFileDrop";
+import { DropOverlay } from "./components/DropOverlay/DropOverlay";
 import { usePlayerPreferences } from "./hooks/usePlayerPreferences";
 import { useTheme } from "./hooks/useTheme";
 import { ThemeSelector } from "./components/ThemeSelector/ThemeSelector";
@@ -269,6 +272,59 @@ function App() {
     },
     [folderTree, playerPreferences, recentFolders],
   );
+
+  // External drag-and-drop (FR-DI-001). Every dropped path is classified by
+  // the backend; a dropped folder is revealed in the browser, otherwise the
+  // first playable audio file is played and its parent folder revealed.
+  // Non-audio and missing targets are ignored, and probe failures degrade to
+  // "ignore" so a permission denial never interrupts the drop.
+  const playDroppedFile = useCallback(
+    async (path: string) => {
+      const parent = getParentPath(path) ?? path;
+      reopenFolder(parent);
+      const name = path.split("/").filter(Boolean).at(-1) ?? path;
+      const entry = {
+        id: path,
+        name,
+        kind: "playable" as const,
+        has_subfolders: null,
+        metadata: null,
+      };
+      await selectAndRemember(entry);
+    },
+    [reopenFolder, selectAndRemember],
+  );
+
+  const handleDroppedPaths = useCallback(
+    async (paths: string[]) => {
+      const results = await Promise.all(
+        paths.map(async (path) => {
+          try {
+            const kind = await probePath(path);
+            return { path, kind };
+          } catch {
+            return { path, kind: "unsupported" as const };
+          }
+        }),
+      );
+      const droppedFolder = results.find(
+        (result) => result.kind === "directory",
+      );
+      if (droppedFolder) {
+        reopenFolder(droppedFolder.path);
+        return;
+      }
+      const audio = results.find((result) => result.kind === "playable");
+      if (audio) {
+        await playDroppedFile(audio.path);
+      }
+    },
+    [playDroppedFile, reopenFolder],
+  );
+
+  const { active: dropActive } = useFileDrop((paths) => {
+    void handleDroppedPaths(paths);
+  });
 
   const openPickedFolder = useCallback(async () => {
     setFolderPickerError(null);
@@ -1099,6 +1155,7 @@ function App() {
         onCancel={() => setClearCacheDialogOpen(false)}
         onConfirm={() => void confirmClearWaveformCache()}
       />
+      <DropOverlay active={dropActive} />
     </main>
   );
 }

@@ -16,6 +16,7 @@ use crate::folder_enumeration_service::{ActiveEnumerations, FolderEnumerationSer
 use crate::move_service::MoveService;
 use crate::playback_events::PlaybackEventEmitter;
 use crate::playback_service::PlaybackService;
+use crate::probe_service::ProbeService;
 use crate::recent_folders_service::RecentFoldersService;
 use crate::rename_service::RenameService;
 use crate::shortcut_mappings_service::{InMemoryShortcutMappingsService, ShortcutMappingsService};
@@ -34,6 +35,7 @@ pub fn dispatch(
     copy_service: &dyn CopyService,
     external_service: &dyn ExternalService,
     drag_out_service: &dyn DragOutService,
+    probe_service: &dyn ProbeService,
     active: &ActiveEnumerations,
     recent_service: &dyn RecentFoldersService,
     events: &Arc<dyn PlaybackEventEmitter>,
@@ -49,6 +51,7 @@ pub fn dispatch(
         copy_service,
         external_service,
         drag_out_service,
+        probe_service,
         active,
         recent_service,
         &InMemoryShortcutMappingsService::new(),
@@ -68,6 +71,7 @@ pub fn dispatch_with_shortcuts(
     copy_service: &dyn CopyService,
     external_service: &dyn ExternalService,
     drag_out_service: &dyn DragOutService,
+    probe_service: &dyn ProbeService,
     active: &ActiveEnumerations,
     recent_service: &dyn RecentFoldersService,
     shortcut_service: &dyn ShortcutMappingsService,
@@ -101,20 +105,23 @@ pub fn dispatch_with_shortcuts(
         },
         "list_browser_roots" | "start_enumeration" | "cancel_enumeration" | "move_to_trash"
         | "rename_file" | "start_move_files" | "cancel_move_files" | "start_copy_files"
-        | "cancel_copy_files" | "reveal_file" | "open_with" | "drag_out" => browsing::handle(
-            &envelope.command,
-            envelope.payload,
-            enum_service,
-            trash_service,
-            rename_service,
-            move_service,
-            copy_service,
-            external_service,
-            drag_out_service,
-            service,
-            active,
-            events,
-        ),
+        | "cancel_copy_files" | "reveal_file" | "open_with" | "drag_out" | "probe_path" => {
+            browsing::handle(
+                &envelope.command,
+                envelope.payload,
+                enum_service,
+                trash_service,
+                rename_service,
+                move_service,
+                copy_service,
+                external_service,
+                drag_out_service,
+                probe_service,
+                service,
+                active,
+                events,
+            )
+        },
         "list_recent_folders"
         | "record_recent_folder"
         | "clear_recent_folders"
@@ -187,6 +194,7 @@ pub fn invoke_command(
     copy_state: tauri::State<'_, std::sync::Mutex<Box<dyn CopyService>>>,
     external_state: tauri::State<'_, std::sync::Mutex<Box<dyn ExternalService>>>,
     drag_state: tauri::State<'_, std::sync::Mutex<Box<dyn DragOutService>>>,
+    probe_state: tauri::State<'_, std::sync::Mutex<Box<dyn ProbeService>>>,
     active: tauri::State<'_, ActiveEnumerations>,
     recent_state: tauri::State<'_, std::sync::Mutex<Box<dyn RecentFoldersService>>>,
     shortcut_state: tauri::State<'_, std::sync::Mutex<Box<dyn ShortcutMappingsService>>>,
@@ -201,6 +209,7 @@ pub fn invoke_command(
     let copy_service = copy_state.lock().expect("copy service lock poisoned");
     let external_service = external_state.lock().expect("external service lock poisoned");
     let drag_out_service = drag_state.lock().expect("drag-out service lock poisoned");
+    let probe_service = probe_state.lock().expect("probe service lock poisoned");
     let recent_service = recent_state.lock().expect("recent folders service lock poisoned");
     let shortcut_service = shortcut_state.lock().expect("shortcut mappings service lock poisoned");
     dispatch_with_shortcuts(
@@ -214,6 +223,7 @@ pub fn invoke_command(
         &**copy_service,
         &**external_service,
         &**drag_out_service,
+        &**probe_service,
         &active,
         &**recent_service,
         &**shortcut_service,
