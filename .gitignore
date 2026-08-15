@@ -38,3 +38,6 @@ src-tauri/gen/
 # Test and coverage output
 coverage/
 test-results/
+
+# Others
+graphify-out/
