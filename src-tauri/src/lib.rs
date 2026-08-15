@@ -381,9 +381,11 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
+        .run(|_app, _event| {
+            // Underscore params: the opened-files handling is macOS-only, so
+            // on other targets both params are intentionally unused.
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Opened { urls } = event {
+            if let tauri::RunEvent::Opened { urls } = _event {
                 use tauri::Emitter;
 
                 let paths: Vec<String> = urls
@@ -395,10 +397,10 @@ pub fn run() {
                 if paths.is_empty() {
                     return;
                 }
-                let state = app.state::<opened_files::OpenedFiles>();
+                let state = _app.state::<opened_files::OpenedFiles>();
                 state.collect(paths.clone());
                 let payload = playback_events::types::OpenedFilesPayload { paths };
-                let _ = app.emit(playback_events::EVENT_OPENED_FILES, payload);
+                let _ = _app.emit(playback_events::EVENT_OPENED_FILES, payload);
             }
         });
 }
