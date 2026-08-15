@@ -47,7 +47,7 @@ impl SymphoniaDecoder {
                 DecodeError::new(DiagnosticContext::new(DiagnosticCode::BrowserRead), e)
             })?;
 
-        let format = probed.format;
+        let mut format = probed.format;
 
         let track = format
             .tracks()
@@ -62,8 +62,8 @@ impl SymphoniaDecoder {
 
         let track_id = track.id;
         let codec_params = &track.codec_params;
-        let sample_rate = codec_params.sample_rate.unwrap_or(0);
-        let channels = codec_params.channels.map(|c| c.count() as u16).unwrap_or(0);
+        let mut sample_rate = codec_params.sample_rate.unwrap_or(0);
+        let mut channels = codec_params.channels.map(|c| c.count() as u16).unwrap_or(0);
 
         let duration_ms = codec_params
             .n_frames
@@ -76,7 +76,7 @@ impl SymphoniaDecoder {
         let codec_name = codec_name(codec);
 
         let dec_opts = DecoderOptions { verify: true };
-        let decoder =
+        let mut decoder =
             symphonia::default::get_codecs().make(&track.codec_params, &dec_opts).map_err(|e| {
                 DecodeError::new(DiagnosticContext::new(DiagnosticCode::BrowserRead), e)
             })?;
@@ -89,7 +89,28 @@ impl SymphoniaDecoder {
             ),
         );
         let cap_frames: u64 = 65536;
-        let sample_buf = SampleBuffer::<f32>::new(cap_frames, spec);
+        let mut sample_buf = SampleBuffer::<f32>::new(cap_frames, spec);
+
+        let mut pending_samples = VecDeque::new();
+
+        // Some containers (notably isomp4/m4a) do not expose the channel
+        // layout in the track's codec parameters. Decode the first packet so
+        // the actual signal spec is known; the samples are queued for playback
+        // exactly as a normal read would deliver them.
+        if channels == 0 {
+            if let Ok(packet) = format.next_packet() {
+                if let Ok(decoded) = decoder.decode(&packet) {
+                    let actual = decoded.spec();
+                    channels = actual.channels.count() as u16;
+                    if sample_rate == 0 {
+                        sample_rate = actual.rate;
+                    }
+                    sample_buf.clear();
+                    sample_buf.copy_interleaved_ref(decoded);
+                    pending_samples.extend(sample_buf.samples().iter().copied());
+                }
+            }
+        }
 
         Ok(Self {
             format,
@@ -101,7 +122,7 @@ impl SymphoniaDecoder {
             bit_depth,
             codec_name,
             sample_buf,
-            pending_samples: VecDeque::new(),
+            pending_samples,
             discard_until_ts: None,
         })
     }
@@ -159,6 +180,12 @@ fn codec_name(codec: symphonia::core::codecs::CodecType) -> &'static str {
         "FLAC"
     } else if codec == symphonia::core::codecs::CODEC_TYPE_MP3 {
         "MP3"
+    } else if codec == symphonia::core::codecs::CODEC_TYPE_VORBIS {
+        "Vorbis"
+    } else if codec == symphonia::core::codecs::CODEC_TYPE_AAC {
+        "AAC"
+    } else if codec == symphonia::core::codecs::CODEC_TYPE_ALAC {
+        "ALAC"
     } else {
         "Unknown"
     }

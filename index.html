@@ -29,6 +29,8 @@
         text-align: center;
         opacity: 1;
         transition: opacity 220ms ease-out;
+        /* Purely decorative; never intercept pointer input while visible. */
+        pointer-events: none;
       }
 
       .startup-splash__content {

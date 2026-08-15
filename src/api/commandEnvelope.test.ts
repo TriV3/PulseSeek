@@ -6,6 +6,7 @@ import {
   healthCheck,
   invokeCommand,
   loadPlayerPreferences,
+  openedAudioFiles,
   setLoopRegion,
   setPlaybackMode,
   loadShortcuts,
@@ -89,6 +90,25 @@ describe("invokeCommand", () => {
     } satisfies CommandResponse);
 
     await expect(invokeCommand("health", {})).rejects.toThrow(CommandError);
+  });
+});
+
+describe("opened audio files boundary", () => {
+  it("returns the pending opened file paths", async () => {
+    mockInvoke.mockResolvedValueOnce(["/music/a.wav", "/music/b.mp3"]);
+
+    const paths = await openedAudioFiles();
+
+    expect(paths).toEqual(["/music/a.wav", "/music/b.mp3"]);
+    expect(mockInvoke).toHaveBeenCalledWith("opened_audio_files");
+  });
+
+  it("rejects a malformed response", async () => {
+    mockInvoke.mockResolvedValueOnce(["/music/a.wav", 42]);
+
+    await expect(openedAudioFiles()).rejects.toThrow(
+      "Invalid opened files response.",
+    );
   });
 });
 

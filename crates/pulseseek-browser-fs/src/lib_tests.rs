@@ -37,6 +37,28 @@ fn create_aiff(path: &Path) {
     .expect("create AIFF fixture");
 }
 
+fn create_ogg(path: &Path) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("create parent dir");
+    }
+    fs::write(
+        path,
+        include_bytes!("../../pulseseek-decoder-symphonia/tests/fixtures/sine-stereo-44100.ogg"),
+    )
+    .expect("create OGG fixture");
+}
+
+fn create_m4a(path: &Path) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("create parent dir");
+    }
+    fs::write(
+        path,
+        include_bytes!("../../pulseseek-decoder-symphonia/tests/fixtures/sine-stereo-44100.m4a"),
+    )
+    .expect("create M4A fixture");
+}
+
 #[test]
 fn native_reads_empty_folder() {
     let dir = tempfile::tempdir().expect("create temp dir");
@@ -157,6 +179,23 @@ fn native_reads_folder_with_unicode_names() {
     let names: Vec<&str> = result.iter().map(|e| e.name()).collect();
     assert!(names.contains(&"über-jam.wav"));
     assert!(names.contains(&"alpha.wav"));
+}
+
+#[test]
+fn native_classifies_ogg_and_m4a_as_playable() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    create_ogg(&dir.path().join("song.ogg"));
+    create_m4a(&dir.path().join("song.m4a"));
+
+    let result = NativeFolderReader.read_folder(dir.path()).unwrap();
+    let names: Vec<&str> = result.iter().map(|e| e.name()).collect();
+    assert!(names.contains(&"song.ogg"));
+    assert!(names.contains(&"song.m4a"));
+    assert_eq!(
+        result.iter().filter(|e| matches!(e, BrowserEntry::PlayableFile(_))).count(),
+        2,
+        "ogg and m4a files should be playable entries"
+    );
 }
 
 #[test]

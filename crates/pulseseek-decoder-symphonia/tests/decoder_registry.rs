@@ -13,6 +13,9 @@ const WAV_FIXTURE: &[u8] = include_bytes!("fixtures/silent-stereo-44100.wav");
 const FLAC_FIXTURE: &[u8] = include_bytes!("fixtures/silent-stereo-44100.flac");
 const MP3_FIXTURE: &[u8] = include_bytes!("fixtures/silent-stereo-44100.mp3");
 const AIFF_FIXTURE: &[u8] = include_bytes!("fixtures/sine-stereo-44100.aiff");
+const OGG_FIXTURE: &[u8] = include_bytes!("fixtures/sine-stereo-44100.ogg");
+const M4A_AAC_FIXTURE: &[u8] = include_bytes!("fixtures/sine-stereo-44100.m4a");
+const M4A_ALAC_FIXTURE: &[u8] = include_bytes!("fixtures/sine-stereo-44100-alac.m4a");
 
 #[test]
 fn registry_opens_wav() {
@@ -49,6 +52,39 @@ fn registry_opens_aiff() {
     let meta = decoder.metadata().unwrap();
     assert_eq!(meta.sample_rate, 44_100);
     assert_eq!(meta.channels, 2);
+}
+
+#[test]
+fn registry_opens_ogg_vorbis() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_fixture(&dir, "test.ogg", OGG_FIXTURE);
+    let mut decoder = DecoderRegistry::open(&path).unwrap();
+    let meta = decoder.metadata().unwrap();
+    assert_eq!(meta.sample_rate, 44_100);
+    assert_eq!(meta.channels, 2);
+    assert_eq!(meta.codec, "Vorbis");
+}
+
+#[test]
+fn registry_opens_m4a_aac() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_fixture(&dir, "test.m4a", M4A_AAC_FIXTURE);
+    let mut decoder = DecoderRegistry::open(&path).unwrap();
+    let meta = decoder.metadata().unwrap();
+    assert_eq!(meta.sample_rate, 44_100);
+    assert_eq!(meta.channels, 2);
+    assert_eq!(meta.codec, "AAC");
+}
+
+#[test]
+fn registry_opens_m4a_alac() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_fixture(&dir, "test.m4a", M4A_ALAC_FIXTURE);
+    let mut decoder = DecoderRegistry::open(&path).unwrap();
+    let meta = decoder.metadata().unwrap();
+    assert_eq!(meta.sample_rate, 44_100);
+    assert_eq!(meta.channels, 2);
+    assert_eq!(meta.codec, "ALAC");
 }
 
 #[test]
@@ -107,6 +143,32 @@ fn lightweight_probe_reads_metadata_without_constructing_a_decoder() {
     assert_eq!(metadata.channels, 2);
     assert_eq!(metadata.sample_rate, 44_100);
     assert_eq!(metadata.codec, "MP3");
+}
+
+#[test]
+fn lightweight_probe_reads_ogg_vorbis_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_fixture(&dir, "test.ogg", OGG_FIXTURE);
+
+    let metadata = probe_stream_metadata(&path).expect("metadata probe");
+
+    assert_eq!(metadata.channels, 2);
+    assert_eq!(metadata.sample_rate, 44_100);
+    assert_eq!(metadata.codec, "Vorbis");
+}
+
+#[test]
+fn lightweight_probe_reads_m4a_aac_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_fixture(&dir, "test.m4a", M4A_AAC_FIXTURE);
+
+    let metadata = probe_stream_metadata(&path).expect("metadata probe");
+
+    // isomp4/m4a containers do not expose the channel layout in the track's
+    // codec parameters, so the lightweight probe reports channels as unknown
+    // (0) without constructing a decoder. The full decoder path reports them.
+    assert_eq!(metadata.sample_rate, 44_100);
+    assert_eq!(metadata.codec, "AAC");
 }
 
 #[test]

@@ -19,6 +19,13 @@ const FLAC: &[u8] =
     include_bytes!("../../../pulseseek-decoder-symphonia/tests/fixtures/silent-stereo-44100.flac");
 const MP3: &[u8] =
     include_bytes!("../../../pulseseek-decoder-symphonia/tests/fixtures/silent-stereo-44100.mp3");
+const OGG: &[u8] =
+    include_bytes!("../../../pulseseek-decoder-symphonia/tests/fixtures/sine-stereo-44100.ogg");
+const M4A_AAC: &[u8] =
+    include_bytes!("../../../pulseseek-decoder-symphonia/tests/fixtures/sine-stereo-44100.m4a");
+const M4A_ALAC: &[u8] = include_bytes!(
+    "../../../pulseseek-decoder-symphonia/tests/fixtures/sine-stereo-44100-alac.m4a"
+);
 
 fn classify(path: &Path) -> ProbeResult {
     NativeProbe.probe(path).expect("probe should succeed")
@@ -59,6 +66,38 @@ fn probe_classifies_playable_mp3() {
     let dir = tempdir().expect("create temp dir");
     let path = dir.path().join("song.mp3");
     write_fixture(&path, MP3);
+    assert_eq!(classify(&path), ProbeResult::Playable);
+}
+
+#[test]
+fn probe_classifies_playable_ogg() {
+    let dir = tempdir().expect("create temp dir");
+    let path = dir.path().join("song.ogg");
+    write_fixture(&path, OGG);
+    assert_eq!(classify(&path), ProbeResult::Playable);
+}
+
+#[test]
+fn probe_accepts_oga_alias() {
+    let dir = tempdir().expect("create temp dir");
+    let path = dir.path().join("song.oga");
+    write_fixture(&path, OGG);
+    assert_eq!(classify(&path), ProbeResult::Playable);
+}
+
+#[test]
+fn probe_classifies_playable_m4a_aac() {
+    let dir = tempdir().expect("create temp dir");
+    let path = dir.path().join("song.m4a");
+    write_fixture(&path, M4A_AAC);
+    assert_eq!(classify(&path), ProbeResult::Playable);
+}
+
+#[test]
+fn probe_classifies_playable_m4a_alac() {
+    let dir = tempdir().expect("create temp dir");
+    let path = dir.path().join("song.m4a");
+    write_fixture(&path, M4A_ALAC);
     assert_eq!(classify(&path), ProbeResult::Playable);
 }
 

@@ -8,11 +8,13 @@ import {
   isMoveItemResultData,
   isMoveProgressPayload,
   isMusicalSpectrumFramePayload,
+  isOpenedFilesPayload,
   isSpectrumFramePayload,
   isWaveformReadyPayload,
   onCopyProgress,
   onMoveProgress,
   onMusicalSpectrumFrame,
+  onOpenedFiles,
   onSpectrumFrame,
   onWaveformReady,
 } from "./playbackEvents";
@@ -373,6 +375,45 @@ describe("onMoveProgress", () => {
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler).toHaveBeenCalledWith(validMovePayload);
+  });
+});
+
+describe("opened files payload validation", () => {
+  it("accepts a list of string paths", () => {
+    expect(
+      isOpenedFilesPayload({ paths: ["/music/a.wav", "/music/b.mp3"] }),
+    ).toBe(true);
+    expect(isOpenedFilesPayload({ paths: [] })).toBe(true);
+  });
+
+  it("rejects non-string or missing paths", () => {
+    expect(isOpenedFilesPayload({ paths: [1] })).toBe(false);
+    expect(isOpenedFilesPayload({ paths: "not-an-array" })).toBe(false);
+    expect(isOpenedFilesPayload({})).toBe(false);
+    expect(isOpenedFilesPayload(null)).toBe(false);
+  });
+});
+
+describe("onOpenedFiles", () => {
+  it("registers a listener for browser:opened-files", async () => {
+    const handler = vi.fn();
+    await onOpenedFiles(handler);
+    expect(eventHandlers.has("browser:opened-files")).toBe(true);
+  });
+
+  it("invokes the handler with valid payloads only", async () => {
+    const handler = vi.fn();
+    await onOpenedFiles(handler);
+    const emit = eventHandlers.get("browser:opened-files");
+    expect(emit).toBeDefined();
+
+    const payload = { paths: ["/music/a.wav"] };
+    emit?.({ payload });
+    emit?.({ payload: { paths: [1] } });
+    emit?.({ payload: null });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(payload);
   });
 });
 
