@@ -65,6 +65,16 @@ pub struct FileChangePayload {
     pub path: String,
 }
 
+/// Payload for [`EVENT_OPENED_FILES`](super::EVENT_OPENED_FILES).
+///
+/// Signals that the operating system asked PulseSeek to open audio files while
+/// the app is already running. The frontend probes each path and plays the
+/// first compatible file.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OpenedFilesPayload {
+    pub paths: Vec<String>,
+}
+
 /// Payload for [`EVENT_WAVEFORM_READY`](super::EVENT_WAVEFORM_READY).
 ///
 /// Signals that the exact waveform pyramid is now stored and can replace the

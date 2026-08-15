@@ -123,6 +123,21 @@ fn musical_spectrum_payload_is_versioned_and_serializable() {
 }
 
 #[test]
+fn opened_files_payload_is_serializable() {
+    let payload = types::OpenedFilesPayload {
+        paths: vec!["/music/a.wav".to_string(), "/music/b.mp3".to_string()],
+    };
+
+    let envelope = EventEnvelope::new(
+        EVENT_OPENED_FILES,
+        serde_json::to_value(&payload).expect("opened files payload serialization"),
+    );
+
+    assert_eq!(envelope.event, "browser:opened-files");
+    assert_eq!(envelope.payload["paths"], serde_json::json!(["/music/a.wav", "/music/b.mp3"]));
+}
+
+#[test]
 fn throttled_emitter_tracks_dropped_events() {
     let inner = FakeEventEmitter::new();
     let throttled = ThrottledEventEmitter::new(Box::new(inner), 1000);

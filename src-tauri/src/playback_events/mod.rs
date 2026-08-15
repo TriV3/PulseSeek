@@ -17,6 +17,7 @@ pub const EVENT_COMPLETED: &str = "playback:completed";
 pub const EVENT_DEVICE_LOST: &str = "audio:device-lost";
 pub const EVENT_FOLDER_CHUNK: &str = "browser:folder-chunk";
 pub const EVENT_FILE_CHANGE: &str = "browser:file-change";
+pub const EVENT_OPENED_FILES: &str = "browser:opened-files";
 pub const EVENT_WAVEFORM_READY: &str = "waveform:ready";
 pub const EVENT_SPECTRUM_FRAME: &str = "visualization:spectrum";
 pub const EVENT_MUSICAL_SPECTRUM_FRAME: &str = "visualization:musical-spectrum";

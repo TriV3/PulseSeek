@@ -11,6 +11,12 @@ interface TauriConfig {
   };
   bundle?: {
     icon?: string[];
+    fileAssociations?: Array<{
+      ext?: string[];
+      name?: string;
+      role?: string;
+      mimeType?: string;
+    }>;
   };
 }
 
@@ -36,5 +42,23 @@ describe("Tauri frontend lifecycle", () => {
       "icons/icon.icns",
       "icons/icon.ico",
     ]);
+  });
+
+  it("declares file associations for every decodable audio format", () => {
+    const associations = config.bundle?.fileAssociations ?? [];
+    const extensions = associations
+      .flatMap((association) => association.ext ?? [])
+      .sort();
+    expect(extensions).toEqual(
+      ["aif", "aiff", "flac", "m4a", "mp3", "oga", "ogg", "wav", "wave"].sort(),
+    );
+    expect(
+      associations.every((association) => association.role === "Viewer"),
+    ).toBe(true);
+    expect(
+      associations.every((association) =>
+        String(association.mimeType ?? "").startsWith("audio/"),
+      ),
+    ).toBe(true);
   });
 });

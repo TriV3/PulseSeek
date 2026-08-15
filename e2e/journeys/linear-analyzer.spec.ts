@@ -44,6 +44,9 @@ test.describe("linear analyzer", () => {
     getCommandCalls,
   }) => {
     await page.goto("/");
+    // The startup splash is decorative and non-blocking (pointer-events: none);
+    // interactions and screenshots must target the app, not the transient splash.
+    await expect(page.locator("#startup-splash")).not.toBeAttached();
     await mockCommand("start_enumeration", { session_id: "linear-session" });
     await page.getByText("Music", { exact: true }).click();
     await emitEvent("browser:folder-chunk", {

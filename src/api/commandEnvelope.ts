@@ -971,6 +971,25 @@ export async function clearWaveformCache(): Promise<void> {
   await invoke("clear_waveform_cache");
 }
 
+// ── Opened files types ────────────────────────────────────────────────
+
+/** Returns and clears the audio files the OS asked PulseSeek to open.
+ *
+ * On macOS this drains the cold-start queue (files passed as launch
+ * arguments or delivered by `RunEvent::Opened` before the frontend
+ * subscribed). Warm opens arrive through the `browser:opened-files` event.
+ */
+export async function openedAudioFiles(): Promise<string[]> {
+  const response = await invoke<unknown>("opened_audio_files");
+  if (
+    !Array.isArray(response) ||
+    !response.every((path) => typeof path === "string")
+  ) {
+    throw new Error("Invalid opened files response.");
+  }
+  return response as string[];
+}
+
 export interface FolderBookmarkData {
   path: string;
   name: string;

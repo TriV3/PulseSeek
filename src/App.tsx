@@ -39,10 +39,12 @@ import { ShortcutEditor } from "./components/ShortcutEditor/ShortcutEditor";
 import { getShortcutPlatform } from "./shortcuts/keyboardShortcuts";
 import {
   clearWaveformCache,
+  openedAudioFiles,
   pickFolder,
   probePath,
   type PlaybackMode,
 } from "./api/commandEnvelope";
+import { onOpenedFiles } from "./api/playbackEvents";
 import { useFileDrop } from "./hooks/useFileDrop";
 import { DropOverlay } from "./components/DropOverlay/DropOverlay";
 import { usePlayerPreferences } from "./hooks/usePlayerPreferences";
@@ -326,6 +328,34 @@ function App() {
     void handleDroppedPaths(paths);
   });
 
+  // Files the operating system asked PulseSeek to open (macOS "Open With" /
+  // double-click on an associated audio file) play the first compatible file.
+  // Cold-start opens are drained once after load; warm opens arrive as events.
+  // The callback ref keeps the single subscription on the latest handler so a
+  // preference update can never re-run this effect or leak a second listener.
+  const handleOpenedPathsRef = useRef(handleDroppedPaths);
+  useEffect(() => {
+    handleOpenedPathsRef.current = handleDroppedPaths;
+  });
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void openedAudioFiles()
+      .then((paths) => {
+        if (paths.length > 0) void handleOpenedPathsRef.current(paths);
+      })
+      .catch(() => {
+        // Best-effort poll; a missing command must not break startup.
+      });
+    void onOpenedFiles(({ paths }) => {
+      if (paths.length > 0) void handleOpenedPathsRef.current(paths);
+    }).then((unlistenFn) => {
+      unlisten = unlistenFn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
   const openPickedFolder = useCallback(async () => {
     setFolderPickerError(null);
     try {
@@ -420,6 +450,17 @@ function App() {
     if (!playerPreferences.isLoaded || restoredFile.current) return;
     const lastPath = playerPreferences.preferences.last_played_file_path;
     if (!lastPath) {
+      restoredFile.current = true;
+      return;
+    }
+    // The OS-open flow can already be playing the restored file: restoring it
+    // would reset the frontend status to "idle" while the engine keeps
+    // playing, silently disabling seek. Keep the active session untouched.
+    if (
+      playback.playback.entryId === lastPath &&
+      (playback.playback.status === "playing" ||
+        playback.playback.status === "loading")
+    ) {
       restoredFile.current = true;
       return;
     }

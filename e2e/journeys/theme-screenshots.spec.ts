@@ -25,6 +25,9 @@ test.describe("theme screenshots", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "PulseSeek" }),
     ).toBeAttached();
+    // The startup splash is decorative and non-blocking (pointer-events: none);
+    // screenshots must capture the app, not the transient splash.
+    await expect(page.locator("#startup-splash")).not.toBeAttached();
 
     // Persisted preference defaults to system; pick Midnight Blue explicitly.
     await page.getByLabel("Open application menu").click();

@@ -41,6 +41,9 @@ test.describe("waveform styles", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "PulseSeek" }),
     ).toBeAttached();
+    // The startup splash is decorative and non-blocking (pointer-events: none);
+    // interactions and screenshots must target the app, not the transient splash.
+    await expect(page.locator("#startup-splash")).not.toBeAttached();
 
     await expect(page.getByText("Music", { exact: true })).toBeVisible();
     await mockCommand("start_enumeration", { session_id: "session-1" });
@@ -91,6 +94,9 @@ test.describe("waveform styles", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "PulseSeek" }),
     ).toBeAttached();
+    // The startup splash is decorative and non-blocking (pointer-events: none);
+    // interactions and screenshots must target the app, not the transient splash.
+    await expect(page.locator("#startup-splash")).not.toBeAttached();
 
     await expect(page.getByText("Music", { exact: true })).toBeVisible();
     await mockCommand("start_enumeration", { session_id: "session-1" });

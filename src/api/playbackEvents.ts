@@ -59,6 +59,10 @@ export interface FileChangePayload {
   path: string;
 }
 
+export interface OpenedFilesPayload {
+  paths: string[];
+}
+
 export interface WaveformReadyPayload {
   path: string;
 }
@@ -191,6 +195,16 @@ export function isFileChangePayload(
   value: unknown,
 ): value is FileChangePayload {
   return isRecord(value) && typeof value.path === "string";
+}
+
+export function isOpenedFilesPayload(
+  value: unknown,
+): value is OpenedFilesPayload {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.paths) &&
+    value.paths.every((path) => typeof path === "string")
+  );
 }
 
 export function isWaveformReadyPayload(
@@ -367,6 +381,7 @@ export const EVENT_TRACK_CHANGED = "playback:track-changed";
 export const EVENT_DEVICE_LOST = "audio:device-lost";
 export const EVENT_FOLDER_CHUNK = "browser:folder-chunk";
 export const EVENT_FILE_CHANGE = "browser:file-change";
+export const EVENT_OPENED_FILES = "browser:opened-files";
 export const EVENT_WAVEFORM_READY = "waveform:ready";
 export const EVENT_SPECTRUM_FRAME = "visualization:spectrum";
 export const EVENT_MUSICAL_SPECTRUM_FRAME = "visualization:musical-spectrum";
@@ -564,6 +579,23 @@ export function onFileChanged(
 ): Promise<UnlistenFn> {
   return listen<FileChangePayload>(EVENT_FILE_CHANGE, (event) => {
     if (isFileChangePayload(event.payload)) {
+      handler(event.payload);
+    }
+  });
+}
+
+/**
+ * Listens for audio files the operating system asked PulseSeek to open while
+ * it is already running.
+ *
+ * Cold-start opens are drained through `openedAudioFiles()`; this event covers
+ * the warm path. Returns an `unlisten` function to stop listening.
+ */
+export function onOpenedFiles(
+  handler: (payload: OpenedFilesPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<OpenedFilesPayload>(EVENT_OPENED_FILES, (event) => {
+    if (isOpenedFilesPayload(event.payload)) {
       handler(event.payload);
     }
   });

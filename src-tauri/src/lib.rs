@@ -12,6 +12,7 @@ pub mod folder_enumeration_service;
 pub mod move_service;
 pub mod native_audio_device_service;
 pub mod native_playback_service;
+pub mod opened_files;
 pub mod path_validation;
 pub mod playback_events;
 pub mod playback_service;
@@ -102,6 +103,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(opened_files::OpenedFiles::new())
         .manage(playback_service)
         .manage(audio_device_service)
         .manage(enum_service)
@@ -127,9 +129,23 @@ pub fn run() {
             playback_events::acknowledge_musical_spectrum_frame,
             visualization_settings_service::load_visualization_settings,
             visualization_settings_service::save_visualization_settings,
-            command_handlers::waveform::get_waveform
+            command_handlers::waveform::get_waveform,
+            opened_files::opened_audio_files
         ])
         .setup(|app| {
+            // macOS passes files opened from Finder as command-line arguments
+            // on a cold launch. Seed the pending set so the frontend can play
+            // them once ready; warm launches arrive through RunEvent::Opened.
+            let pending_paths: Vec<String> = std::env::args()
+                .skip(1)
+                .map(std::path::PathBuf::from)
+                .filter(|path| path.is_file())
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect();
+            if !pending_paths.is_empty() {
+                app.state::<opened_files::OpenedFiles>().collect(pending_paths);
+            }
+
             let event_emitter: Arc<dyn playback_events::PlaybackEventEmitter> =
                 Arc::new(playback_events::TauriEventEmitter::new(app.handle().clone()));
 
@@ -363,6 +379,26 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = event {
+                use tauri::Emitter;
+
+                let paths: Vec<String> = urls
+                    .iter()
+                    .filter_map(opened_files::file_url_to_path)
+                    .filter(|path| path.is_file())
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect();
+                if paths.is_empty() {
+                    return;
+                }
+                let state = app.state::<opened_files::OpenedFiles>();
+                state.collect(paths.clone());
+                let payload = playback_events::types::OpenedFilesPayload { paths };
+                let _ = app.emit(playback_events::EVENT_OPENED_FILES, payload);
+            }
+        });
 }
