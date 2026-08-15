@@ -99,6 +99,59 @@ describe("WaveformPanel", () => {
     ]);
   });
 
+  it("hides the A/B controls row in compact mode", () => {
+    const { container } = render(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+        compact
+      />,
+    );
+    const panel = container.querySelector(".waveform-panel")!;
+
+    expect(
+      screen.queryByLabelText("A-B repeat region"),
+    ).not.toBeInTheDocument();
+    expect([...panel.children].map((child) => child.className)).toEqual([
+      "now-playing",
+      "audio-summary",
+      "visualization-workspace",
+    ]);
+  });
+
+  it("renders the compact toggle in the header and hides the brand in compact mode", () => {
+    const onToggle = vi.fn();
+    const { rerender } = render(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+        onToggleCompact={onToggle}
+      />,
+    );
+
+    const toggle = screen.getByRole("button", { name: "Toggle compact mode" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(toggle);
+    expect(onToggle).toHaveBeenCalled();
+
+    rerender(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+        compact
+        onToggleCompact={onToggle}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByLabelText("PulseSeek")).not.toBeInTheDocument();
+  });
+
   it("shows only the waveform by default", () => {
     render(
       <WaveformPanel

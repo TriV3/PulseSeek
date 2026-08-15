@@ -29,8 +29,55 @@ vi.mock("@tauri-apps/api/webview", () => ({
   }),
 }));
 
+const { mockSetSize, mockIsMaximized, mockInnerSize, mockScaleFactor } =
+  vi.hoisted(() => ({
+    mockSetSize: vi.fn(async () => {}),
+    mockIsMaximized: vi.fn(async () => false),
+    mockInnerSize: vi.fn(async () => ({ width: 1200, height: 800 })),
+    mockScaleFactor: vi.fn(async () => 1),
+  }));
+
+const { resizeHandlers, mockOnResized } = vi.hoisted(() => {
+  const resizeHandlers: Array<(event: unknown) => void> = [];
+  return {
+    resizeHandlers,
+    mockOnResized: vi.fn(async (handler: (event: unknown) => void) => {
+      resizeHandlers.push(handler);
+      return () => {};
+    }),
+  };
+});
+
+const { mockSetMinSize } = vi.hoisted(() => ({
+  mockSetMinSize: vi.fn(async () => {}),
+}));
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    isMaximized: mockIsMaximized,
+    innerSize: mockInnerSize,
+    scaleFactor: mockScaleFactor,
+    setSize: mockSetSize,
+    setMinSize: mockSetMinSize,
+    onResized: mockOnResized,
+  }),
+  LogicalSize: class {
+    width: number;
+    height: number;
+    constructor(width: number, height: number) {
+      this.width = width;
+      this.height = height;
+    }
+  },
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
+  resizeHandlers.length = 0;
+  mockInnerSize.mockResolvedValue({ width: 1200, height: 800 });
+  mockIsMaximized.mockResolvedValue(false);
+  mockSetSize.mockResolvedValue(undefined);
+  mockSetMinSize.mockResolvedValue(undefined);
   vi.mocked(invoke).mockReset();
 });
 
@@ -296,6 +343,531 @@ describe("application shell", () => {
     expect(
       screen.getByRole("slider", { name: "Musical spectrum seek" }),
     ).toBeInTheDocument();
+  });
+});
+
+describe("compact mode", () => {
+  function mockBackend() {
+    vi.mocked(invoke).mockImplementation(async (command: string, args) => {
+      if (command === "load_player_preferences") {
+        return { version: 1, preferences: DEFAULT_PLAYER_PREFERENCES };
+      }
+      if (command === "save_player_preferences") {
+        const preferences = (args as { preferences: PlayerPreferences })
+          .preferences;
+        return { version: 1, preferences };
+      }
+      return undefined;
+    });
+  }
+
+  it("hides the sidebar, the transport options, and shrinks the window", async () => {
+    mockBackend();
+    render(<App />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Toggle compact mode" }),
+      ).toHaveAttribute("aria-pressed", "false"),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    );
+
+    await waitFor(() =>
+      expect(mockSetSize).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 440, height: 600 }),
+      ),
+    );
+    expect(
+      screen.queryByRole("tab", { name: "Browser" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("separator", { name: "Resize browser" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Visualization")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("region", { name: "File list" }),
+    ).toBeInTheDocument();
+  });
+
+  it("remembers the window size and restores it when leaving compact mode", async () => {
+    mockBackend();
+    render(<App />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Toggle compact mode" }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    );
+    await waitFor(() => expect(mockSetSize).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    );
+
+    await waitFor(() =>
+      expect(mockSetSize).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 1200, height: 800 }),
+      ),
+    );
+    expect(screen.getByRole("tab", { name: "Browser" })).toBeInTheDocument();
+  });
+
+  it("keeps the window size when maximized and persists the preference", async () => {
+    mockIsMaximized.mockResolvedValue(true);
+    mockBackend();
+    render(<App />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Toggle compact mode" }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Toggle compact mode" }),
+      ).toHaveAttribute("aria-pressed", "true"),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mockSetSize).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(invoke)
+          .mock.calls.some(
+            ([command, args]) =>
+              command === "save_player_preferences" &&
+              (args as { preferences: { compact_mode?: boolean } }).preferences
+                ?.compact_mode === true,
+          ),
+      ).toBe(true),
+    );
+    mockIsMaximized.mockResolvedValue(false);
+  });
+
+  it("switches between Files and Folders tabs in compact mode", async () => {
+    mockBackend();
+    render(<App />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Toggle compact mode" }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    );
+
+    const filesTab = await screen.findByRole("tab", { name: "Files" });
+    const foldersTab = screen.getByRole("tab", { name: "Folders" });
+    expect(filesTab).toHaveAttribute("aria-selected", "true");
+    expect(foldersTab).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("region", { name: "File list" })).toBeVisible();
+
+    fireEvent.click(foldersTab);
+    expect(foldersTab).toHaveAttribute("aria-selected", "true");
+    expect(filesTab).toHaveAttribute("aria-selected", "false");
+    const filesPanel = document.getElementById("compact-panel-files")!;
+    const foldersPanel = document.getElementById("compact-panel-folders")!;
+    expect(filesPanel).toHaveAttribute("hidden");
+    expect(foldersPanel).not.toHaveAttribute("hidden");
+    expect(screen.getByRole("tree", { name: "Folder browser" })).toBeVisible();
+
+    fireEvent.click(filesTab);
+    expect(filesPanel).not.toHaveAttribute("hidden");
+    expect(foldersPanel).toHaveAttribute("hidden");
+    expect(screen.getByRole("region", { name: "File list" })).toBeVisible();
+  });
+
+  it("restores the persisted window size after restarting in compact mode", async () => {
+    mockSetSize.mockClear();
+    vi.mocked(invoke).mockImplementation(async (command: string, args) => {
+      if (command === "load_player_preferences") {
+        return {
+          version: 1,
+          preferences: {
+            ...DEFAULT_PLAYER_PREFERENCES,
+            compact_mode: true,
+            window_width: 960,
+            window_height: 640,
+          },
+        };
+      }
+      if (command === "save_player_preferences") {
+        return {
+          version: 1,
+          preferences: (args as { preferences: PlayerPreferences }).preferences,
+        };
+      }
+      return undefined;
+    });
+    render(<App />);
+
+    const toggle = await screen.findByRole("button", {
+      name: "Toggle compact mode",
+    });
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "true"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mockSetSize).not.toHaveBeenCalled();
+
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(mockSetSize).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 960, height: 640 }),
+      ),
+    );
+  });
+
+  it("shows bookmarks and recent folders tabs in compact mode", async () => {
+    mockBackend();
+    render(<App />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Toggle compact mode" }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    );
+
+    const filesTab = await screen.findByRole("tab", { name: "Files" });
+    expect(screen.getByRole("tab", { name: "Folders" })).toBeInTheDocument();
+    const bookmarksTab = screen.getByRole("tab", { name: "Bookmarks" });
+    const recentTab = screen.getByRole("tab", { name: "Recent folders" });
+    expect(filesTab).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(bookmarksTab);
+    expect(bookmarksTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("No bookmarks yet.")).toBeVisible();
+
+    fireEvent.click(recentTab);
+    expect(recentTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("No recent folders yet.")).toBeVisible();
+  });
+
+  it("reopens a recent folder into the folders tab in compact mode", async () => {
+    vi.mocked(invoke).mockImplementation(async (command: string, args) => {
+      if (command === "load_player_preferences") {
+        return { version: 1, preferences: DEFAULT_PLAYER_PREFERENCES };
+      }
+      if (command === "save_player_preferences") {
+        return {
+          version: 1,
+          preferences: (args as { preferences: PlayerPreferences }).preferences,
+        };
+      }
+      if (command === "invoke_command") {
+        const envelope = (args as { envelope: { command: string } }).envelope;
+        if (envelope.command === "list_recent_folders") {
+          return {
+            version: 1,
+            ok: true,
+            data: {
+              folders: [{ path: "/music", name: "music", last_opened_ms: 1 }],
+            },
+          };
+        }
+        if (envelope.command === "list_devices") {
+          return { version: 1, ok: true, data: { devices: [] } };
+        }
+        if (envelope.command === "current_device") {
+          return { version: 1, ok: true, data: { device: null } };
+        }
+        if (envelope.command === "list_folder_bookmarks") {
+          return { version: 1, ok: true, data: { bookmarks: [] } };
+        }
+        return { version: 1, ok: true, data: {} };
+      }
+      return undefined;
+    });
+    render(<App />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Toggle compact mode" }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    );
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Recent folders" }));
+    fireEvent.click(await screen.findByRole("button", { name: "music" }));
+
+    expect(screen.getByRole("tab", { name: "Folders" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("persists the compact window size after resizing", async () => {
+    mockBackend();
+    render(<App />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Toggle compact mode" }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    );
+    await waitFor(() => expect(mockSetSize).toHaveBeenCalledTimes(1));
+
+    mockInnerSize.mockResolvedValue({ width: 500, height: 700 });
+    for (const handler of resizeHandlers) handler({});
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(invoke)
+          .mock.calls.some(
+            ([command, args]) =>
+              command === "save_player_preferences" &&
+              (args as { preferences: { compact_window_width?: number } })
+                .preferences?.compact_window_width === 500,
+          ),
+      ).toBe(true),
+    );
+  });
+
+  it("restores the persisted compact window size after restarting in compact mode", async () => {
+    mockSetSize.mockClear();
+    vi.mocked(invoke).mockImplementation(async (command: string, args) => {
+      if (command === "load_player_preferences") {
+        return {
+          version: 1,
+          preferences: {
+            ...DEFAULT_PLAYER_PREFERENCES,
+            compact_mode: true,
+            compact_window_width: 460,
+            compact_window_height: 640,
+          },
+        };
+      }
+      if (command === "save_player_preferences") {
+        return {
+          version: 1,
+          preferences: (args as { preferences: PlayerPreferences }).preferences,
+        };
+      }
+      return undefined;
+    });
+    render(<App />);
+
+    const toggle = await screen.findByRole("button", {
+      name: "Toggle compact mode",
+    });
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "true"));
+    await waitFor(() =>
+      expect(mockSetSize).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 460, height: 640 }),
+      ),
+    );
+  });
+
+  it("clamps a persisted compact size below the minimum on restart", async () => {
+    mockSetSize.mockClear();
+    vi.mocked(invoke).mockImplementation(async (command: string, args) => {
+      if (command === "load_player_preferences") {
+        return {
+          version: 1,
+          preferences: {
+            ...DEFAULT_PLAYER_PREFERENCES,
+            compact_mode: true,
+            compact_window_width: 300,
+            compact_window_height: 400,
+          },
+        };
+      }
+      if (command === "save_player_preferences") {
+        return {
+          version: 1,
+          preferences: (args as { preferences: PlayerPreferences }).preferences,
+        };
+      }
+      return undefined;
+    });
+    render(<App />);
+
+    const toggle = await screen.findByRole("button", {
+      name: "Toggle compact mode",
+    });
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "true"));
+    await waitFor(() =>
+      expect(mockSetSize).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 440, height: 600 }),
+      ),
+    );
+  });
+
+  it("clamps persisted resizes to the compact minimum", async () => {
+    mockBackend();
+    render(<App />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Toggle compact mode" }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    );
+    await waitFor(() => expect(mockSetSize).toHaveBeenCalledTimes(1));
+
+    mockInnerSize.mockResolvedValue({ width: 300, height: 400 });
+    for (const handler of resizeHandlers) handler({});
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    await waitFor(() =>
+      expect(
+        vi.mocked(invoke).mock.calls.some(
+          ([command, args]) =>
+            command === "save_player_preferences" &&
+            (
+              args as {
+                preferences: {
+                  compact_window_width?: number;
+                  compact_window_height?: number;
+                };
+              }
+            ).preferences?.compact_window_width === 440 &&
+            (
+              args as {
+                preferences: {
+                  compact_window_width?: number;
+                  compact_window_height?: number;
+                };
+              }
+            ).preferences?.compact_window_height === 600,
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("enforces the compact minimum on the live window and lifts it on exit", async () => {
+    mockBackend();
+    render(<App />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Toggle compact mode" }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    );
+
+    await waitFor(() =>
+      expect(mockSetMinSize).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 440, height: 600 }),
+      ),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    );
+    await waitFor(() => expect(mockSetMinSize).toHaveBeenCalledWith(null));
+  });
+
+  it("enforces the compact minimum when restarting in compact mode", async () => {
+    mockSetMinSize.mockClear();
+    vi.mocked(invoke).mockImplementation(async (command: string, args) => {
+      if (command === "load_player_preferences") {
+        return {
+          version: 1,
+          preferences: {
+            ...DEFAULT_PLAYER_PREFERENCES,
+            compact_mode: true,
+            compact_window_width: 460,
+            compact_window_height: 640,
+          },
+        };
+      }
+      if (command === "save_player_preferences") {
+        return {
+          version: 1,
+          preferences: (args as { preferences: PlayerPreferences }).preferences,
+        };
+      }
+      return undefined;
+    });
+    render(<App />);
+
+    const toggle = await screen.findByRole("button", {
+      name: "Toggle compact mode",
+    });
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "true"));
+    await waitFor(() =>
+      expect(mockSetMinSize).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 440, height: 600 }),
+      ),
+    );
+  });
+
+  it("still resizes to the compact minimum when setMinSize is rejected", async () => {
+    mockSetSize.mockClear();
+    mockSetMinSize.mockRejectedValue(new Error("not allowed"));
+    mockBackend();
+    render(<App />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Toggle compact mode" }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    );
+
+    await waitFor(() =>
+      expect(mockSetSize).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 440, height: 600 }),
+      ),
+    );
+  });
+
+  it("still restores the window size when lifting the minimum is rejected", async () => {
+    mockSetMinSize.mockRejectedValue(new Error("not allowed"));
+    mockBackend();
+    render(<App />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Toggle compact mode" }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    );
+    await waitFor(() => expect(mockSetSize).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    );
+    await waitFor(() =>
+      expect(mockSetSize).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 1200, height: 800 }),
+      ),
+    );
   });
 });
 

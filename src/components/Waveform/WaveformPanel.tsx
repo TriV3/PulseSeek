@@ -43,6 +43,10 @@ export interface WaveformPanelProps {
     point: "a" | "b",
     positionMs: number,
   ) => void | Promise<boolean>;
+  /** Hides the A/B row and other chrome for the compact player mode. */
+  compact?: boolean;
+  /** Toggles the compact player mode from the header control. */
+  onToggleCompact?: () => void;
   /** Clears the confirmed region and placed points. */
   onClearAB?: () => void | Promise<boolean>;
 }
@@ -116,6 +120,8 @@ export function WaveformPanel({
   abError = null,
   onSetAbPoint,
   onClearAB,
+  compact = false,
+  onToggleCompact,
 }: WaveformPanelProps) {
   const [resolution, setResolution] = useState<{
     entryPath: string | null;
@@ -136,71 +142,90 @@ export function WaveformPanel({
     waveformHandleRef.current?.getPlayheadPosition() ?? playheadPositionMs;
 
   return (
-    <section className="waveform-panel" aria-label="Audio visualization">
+    <section
+      className={
+        compact ? "waveform-panel waveform-panel--compact" : "waveform-panel"
+      }
+      aria-label="Audio visualization"
+    >
       <header className="now-playing">
         <div>
           <span className="now-playing-label">Play:</span>{" "}
           <strong>{entryName}</strong>
         </div>
-        <div className="brand-mark" aria-label="PulseSeek">
-          <span className="brand-wave" aria-hidden="true">
-            ∿
-          </span>
-          pulseseek
-        </div>
+        {!compact && (
+          <div className="brand-mark" aria-label="PulseSeek">
+            <span className="brand-wave" aria-hidden="true">
+              ∿
+            </span>
+            pulseseek
+          </div>
+        )}
+        <button
+          type="button"
+          className="compact-toggle"
+          aria-pressed={compact}
+          aria-label="Toggle compact mode"
+          title="Toggle compact mode"
+          onClick={onToggleCompact}
+        >
+          ⇲
+        </button>
       </header>
       <div className="audio-summary">{formatAudioSummary(metadata)}</div>
-      <div className="ab-controls" aria-label="A-B repeat region">
-        <button
-          type="button"
-          className="ab-control"
-          onClick={() => void onSetAbPoint?.("a", placementPlayhead())}
-          disabled={
-            entryPath === null || durationMs === null || durationMs <= 0
-          }
-          title="Set A at the playhead position"
-        >
-          Set A point
-        </button>
-        <button
-          type="button"
-          className="ab-control"
-          onClick={() => void onSetAbPoint?.("b", placementPlayhead())}
-          disabled={
-            entryPath === null || durationMs === null || durationMs <= 0
-          }
-          title="Set B at the playhead position"
-        >
-          Set B point
-        </button>
-        <span className="ab-readout" data-testid="ab-readout-start">
-          A {formatAbTime(abPoints.startMs)}
-        </span>
-        <span className="ab-readout" data-testid="ab-readout-end">
-          B {formatAbTime(abPoints.endMs)}
-        </span>
-        {loopRegion ? (
-          <span className="ab-readout ab-readout--active">Looping A–B</span>
-        ) : null}
-        <button
-          type="button"
-          className="ab-control"
-          onClick={() => void onClearAB?.()}
-          disabled={
-            abPoints.startMs === null &&
-            abPoints.endMs === null &&
-            loopRegion === null
-          }
-          title="Clear the A-B region"
-        >
-          Clear A-B
-        </button>
-        {abError ? (
-          <p className="ab-controls-error" role="alert">
-            {abError}
-          </p>
-        ) : null}
-      </div>
+      {!compact && (
+        <div className="ab-controls" aria-label="A-B repeat region">
+          <button
+            type="button"
+            className="ab-control"
+            onClick={() => void onSetAbPoint?.("a", placementPlayhead())}
+            disabled={
+              entryPath === null || durationMs === null || durationMs <= 0
+            }
+            title="Set A at the playhead position"
+          >
+            Set A point
+          </button>
+          <button
+            type="button"
+            className="ab-control"
+            onClick={() => void onSetAbPoint?.("b", placementPlayhead())}
+            disabled={
+              entryPath === null || durationMs === null || durationMs <= 0
+            }
+            title="Set B at the playhead position"
+          >
+            Set B point
+          </button>
+          <span className="ab-readout" data-testid="ab-readout-start">
+            A {formatAbTime(abPoints.startMs)}
+          </span>
+          <span className="ab-readout" data-testid="ab-readout-end">
+            B {formatAbTime(abPoints.endMs)}
+          </span>
+          {loopRegion ? (
+            <span className="ab-readout ab-readout--active">Looping A–B</span>
+          ) : null}
+          <button
+            type="button"
+            className="ab-control"
+            onClick={() => void onClearAB?.()}
+            disabled={
+              abPoints.startMs === null &&
+              abPoints.endMs === null &&
+              loopRegion === null
+            }
+            title="Clear the A-B region"
+          >
+            Clear A-B
+          </button>
+          {abError ? (
+            <p className="ab-controls-error" role="alert">
+              {abError}
+            </p>
+          ) : null}
+        </div>
+      )}
       <div className="visualization-workspace">
         {visualization === "waveform" ? (
           <div className="waveform-canvas">
