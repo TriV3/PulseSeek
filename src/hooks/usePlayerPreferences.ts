@@ -24,6 +24,11 @@ export const DEFAULT_PLAYER_PREFERENCES: PlayerPreferences = {
   seek_step_mode: "auto",
   show_hidden_folders: false,
   gapless_playback: true,
+  compact_mode: false,
+  window_width: null,
+  window_height: null,
+  compact_window_width: null,
+  compact_window_height: null,
 };
 
 export function usePlayerPreferences() {

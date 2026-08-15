@@ -216,6 +216,8 @@ interface FileListProps {
   onRecursiveChange?: (recursive: boolean) => void;
   shortcutBindings?: ShortcutBindings;
   focusSearchRevision?: number;
+  /** Reduces columns to Name and Duration for the compact player mode. */
+  compact?: boolean;
 }
 
 /** Column headers that act as clickable sort controls. */
@@ -258,6 +260,7 @@ export function FileList({
   onRecursiveChange,
   shortcutBindings,
   focusSearchRevision = 0,
+  compact = false,
 }: FileListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
@@ -1268,181 +1271,183 @@ export function FileList({
 
   return (
     <div className="file-list" role="region" aria-label="File list">
-      <div className="file-list-actions">
-        <button
-          type="button"
-          onClick={() => {
-            const selected = visibleEntries.find(
-              (entry) => entry.id === primarySelectedId,
-            );
-            if (selected) requestTrash(selected);
-          }}
-          disabled={!primarySelectedId || trashStatus === "moving"}
-        >
-          Move to Trash
-        </button>
-        <details className="file-list-action-menu">
-          <summary>File actions</summary>
-          <div className="file-list-action-menu-content">
-            <button
-              type="button"
-              className="file-list-rename-button"
-              onClick={() => {
-                if (primarySelectedEntry) requestRename(primarySelectedEntry);
-              }}
-              disabled={!canRenamePrimary || renameStatus === "renaming"}
-            >
-              Rename
-            </button>
-            <button
-              type="button"
-              className="file-list-move-button"
-              onClick={requestMove}
-              disabled={!canMoveSelection || moveStatus === "moving"}
-            >
-              Move…
-            </button>
-            <button
-              type="button"
-              className="file-list-copy-button"
-              onClick={requestCopy}
-              disabled={!canCopySelection || copyStatus === "moving"}
-            >
-              Copy…
-            </button>
-            <button
-              type="button"
-              className="file-list-reveal-button"
-              onClick={() => {
-                void runExternalAction(revealFile);
-              }}
-              disabled={!hasPlayablePrimary || externalBusy}
-            >
-              Reveal
-            </button>
-            <button
-              type="button"
-              className="file-list-open-with-button"
-              onClick={() => {
-                void runExternalAction(openWith);
-              }}
-              disabled={!hasPlayablePrimary || externalBusy}
-            >
-              Open With…
-            </button>
-          </div>
-        </details>
-        {externalError && (
-          <span className="file-list-external-error" role="alert">
-            {externalError}
-          </span>
-        )}
-        <button
-          type="button"
-          className="file-list-recursive-toggle"
-          aria-pressed={recursive}
-          onClick={() => onRecursiveChange?.(!recursive)}
-        >
-          Recursive view
-        </button>
-        <input
-          ref={searchRef}
-          type="search"
-          className="file-list-search"
-          aria-label="Search files"
-          placeholder="Search files"
-          value={searchQuery}
-          onChange={(event) => onSearchQueryChange?.(event.target.value)}
-        />
-        <details className="file-list-filter-menu">
-          <summary>Filters</summary>
-          <div className="file-list-filter-menu-content">
-            <fieldset className="file-list-format-filter">
-              <legend>Filter by format</legend>
-              {FORMAT_OPTIONS.map((option) => (
-                <label key={option.value} className="file-list-format-option">
-                  <input
-                    type="checkbox"
-                    checked={formatFilter.includes(option.value)}
-                    onChange={() => toggleFormat(option.value)}
-                  />
-                  <span>{option.label}</span>
-                </label>
-              ))}
+      {!compact && (
+        <div className="file-list-actions">
+          <button
+            type="button"
+            onClick={() => {
+              const selected = visibleEntries.find(
+                (entry) => entry.id === primarySelectedId,
+              );
+              if (selected) requestTrash(selected);
+            }}
+            disabled={!primarySelectedId || trashStatus === "moving"}
+          >
+            Move to Trash
+          </button>
+          <details className="file-list-action-menu">
+            <summary>File actions</summary>
+            <div className="file-list-action-menu-content">
               <button
                 type="button"
-                aria-label="Reset format filter"
-                onClick={resetFormats}
-                disabled={formatFilter.length === 0}
+                className="file-list-rename-button"
+                onClick={() => {
+                  if (primarySelectedEntry) requestRename(primarySelectedEntry);
+                }}
+                disabled={!canRenamePrimary || renameStatus === "renaming"}
               >
-                Reset
-              </button>
-            </fieldset>
-          </div>
-        </details>
-        <details className="file-list-mark-menu">
-          <summary>Marks</summary>
-          <div className="file-list-mark-menu-content">
-            <fieldset className="file-list-mark-controls">
-              <legend>Mark selection</legend>
-              {SESSION_MARKS.map((mark) => (
-                <button
-                  key={mark}
-                  type="button"
-                  aria-label={`Mark ${SESSION_MARK_LABELS[mark]}`}
-                  className={`file-list-mark-button file-list-mark-button--${mark}`}
-                  disabled={selectedIds.size === 0}
-                  onClick={() => applyMarkToSelection(mark)}
-                >
-                  {SESSION_MARK_LABELS[mark]}
-                </button>
-              ))}
-              <button
-                type="button"
-                aria-label="Clear mark"
-                disabled={selectedIds.size === 0}
-                onClick={clearMarkOnSelection}
-              >
-                Clear
+                Rename
               </button>
               <button
                 type="button"
-                aria-label="Select marked"
-                disabled={markedVisibleIds.length === 0}
-                onClick={selectMarked}
+                className="file-list-move-button"
+                onClick={requestMove}
+                disabled={!canMoveSelection || moveStatus === "moving"}
               >
-                Select marked
+                Move…
               </button>
-            </fieldset>
-            <label className="file-list-mark-filter">
-              <span>Filter by mark</span>
-              <select
-                aria-label="Filter by mark"
-                value={markFilter}
-                onChange={(event) =>
-                  onMarkFilterChange?.(event.target.value as MarkFilter)
-                }
+              <button
+                type="button"
+                className="file-list-copy-button"
+                onClick={requestCopy}
+                disabled={!canCopySelection || copyStatus === "moving"}
               >
-                {MARK_FILTERS.map((filter) => (
-                  <option key={filter} value={filter}>
-                    {MARK_FILTER_LABELS[filter]}
-                  </option>
+                Copy…
+              </button>
+              <button
+                type="button"
+                className="file-list-reveal-button"
+                onClick={() => {
+                  void runExternalAction(revealFile);
+                }}
+                disabled={!hasPlayablePrimary || externalBusy}
+              >
+                Reveal
+              </button>
+              <button
+                type="button"
+                className="file-list-open-with-button"
+                onClick={() => {
+                  void runExternalAction(openWith);
+                }}
+                disabled={!hasPlayablePrimary || externalBusy}
+              >
+                Open With…
+              </button>
+            </div>
+          </details>
+          {externalError && (
+            <span className="file-list-external-error" role="alert">
+              {externalError}
+            </span>
+          )}
+          <button
+            type="button"
+            className="file-list-recursive-toggle"
+            aria-pressed={recursive}
+            onClick={() => onRecursiveChange?.(!recursive)}
+          >
+            Recursive view
+          </button>
+          <input
+            ref={searchRef}
+            type="search"
+            className="file-list-search"
+            aria-label="Search files"
+            placeholder="Search files"
+            value={searchQuery}
+            onChange={(event) => onSearchQueryChange?.(event.target.value)}
+          />
+          <details className="file-list-filter-menu">
+            <summary>Filters</summary>
+            <div className="file-list-filter-menu-content">
+              <fieldset className="file-list-format-filter">
+                <legend>Filter by format</legend>
+                {FORMAT_OPTIONS.map((option) => (
+                  <label key={option.value} className="file-list-format-option">
+                    <input
+                      type="checkbox"
+                      checked={formatFilter.includes(option.value)}
+                      onChange={() => toggleFormat(option.value)}
+                    />
+                    <span>{option.label}</span>
+                  </label>
                 ))}
-              </select>
-            </label>
-          </div>
-        </details>
-        {trashStatus === "moving" ? (
-          <span role="status" aria-live="polite">
-            Moving to Trash…
-          </span>
-        ) : null}
-        {trashError ? (
-          <span className="file-list-trash-error" role="alert">
-            {trashError}
-          </span>
-        ) : null}
-      </div>
+                <button
+                  type="button"
+                  aria-label="Reset format filter"
+                  onClick={resetFormats}
+                  disabled={formatFilter.length === 0}
+                >
+                  Reset
+                </button>
+              </fieldset>
+            </div>
+          </details>
+          <details className="file-list-mark-menu">
+            <summary>Marks</summary>
+            <div className="file-list-mark-menu-content">
+              <fieldset className="file-list-mark-controls">
+                <legend>Mark selection</legend>
+                {SESSION_MARKS.map((mark) => (
+                  <button
+                    key={mark}
+                    type="button"
+                    aria-label={`Mark ${SESSION_MARK_LABELS[mark]}`}
+                    className={`file-list-mark-button file-list-mark-button--${mark}`}
+                    disabled={selectedIds.size === 0}
+                    onClick={() => applyMarkToSelection(mark)}
+                  >
+                    {SESSION_MARK_LABELS[mark]}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  aria-label="Clear mark"
+                  disabled={selectedIds.size === 0}
+                  onClick={clearMarkOnSelection}
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  aria-label="Select marked"
+                  disabled={markedVisibleIds.length === 0}
+                  onClick={selectMarked}
+                >
+                  Select marked
+                </button>
+              </fieldset>
+              <label className="file-list-mark-filter">
+                <span>Filter by mark</span>
+                <select
+                  aria-label="Filter by mark"
+                  value={markFilter}
+                  onChange={(event) =>
+                    onMarkFilterChange?.(event.target.value as MarkFilter)
+                  }
+                >
+                  {MARK_FILTERS.map((filter) => (
+                    <option key={filter} value={filter}>
+                      {MARK_FILTER_LABELS[filter]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </details>
+          {trashStatus === "moving" ? (
+            <span role="status" aria-live="polite">
+              Moving to Trash…
+            </span>
+          ) : null}
+          {trashError ? (
+            <span className="file-list-trash-error" role="alert">
+              {trashError}
+            </span>
+          ) : null}
+        </div>
+      )}
 
       {error ? (
         <div className="file-list-state file-list-state--error">
@@ -1460,51 +1465,53 @@ export function FileList({
         </div>
       ) : (
         <>
-          <div
-            className="file-list-horizontal-controls"
-            aria-label="Horizontal column navigation"
-          >
-            <button
-              type="button"
-              aria-label="Show columns to the left"
-              onMouseDown={(event) => {
-                if (event.button === 0) startHorizontalScroll("left");
-              }}
-              onMouseUp={stopHorizontalScroll}
-              onMouseLeave={stopHorizontalScroll}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowLeft" && !event.repeat) {
-                  event.preventDefault();
-                  startHorizontalScroll("left");
-                }
-              }}
-              onKeyUp={stopHorizontalScroll}
-              onBlur={stopHorizontalScroll}
-              disabled={!canScrollLeft}
+          {!compact && (
+            <div
+              className="file-list-horizontal-controls"
+              aria-label="Horizontal column navigation"
             >
-              ←
-            </button>
-            <button
-              type="button"
-              aria-label="Show columns to the right"
-              onMouseDown={(event) => {
-                if (event.button === 0) startHorizontalScroll("right");
-              }}
-              onMouseUp={stopHorizontalScroll}
-              onMouseLeave={stopHorizontalScroll}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowRight" && !event.repeat) {
-                  event.preventDefault();
-                  startHorizontalScroll("right");
-                }
-              }}
-              onKeyUp={stopHorizontalScroll}
-              onBlur={stopHorizontalScroll}
-              disabled={!canScrollRight}
-            >
-              →
-            </button>
-          </div>
+              <button
+                type="button"
+                aria-label="Show columns to the left"
+                onMouseDown={(event) => {
+                  if (event.button === 0) startHorizontalScroll("left");
+                }}
+                onMouseUp={stopHorizontalScroll}
+                onMouseLeave={stopHorizontalScroll}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowLeft" && !event.repeat) {
+                    event.preventDefault();
+                    startHorizontalScroll("left");
+                  }
+                }}
+                onKeyUp={stopHorizontalScroll}
+                onBlur={stopHorizontalScroll}
+                disabled={!canScrollLeft}
+              >
+                ←
+              </button>
+              <button
+                type="button"
+                aria-label="Show columns to the right"
+                onMouseDown={(event) => {
+                  if (event.button === 0) startHorizontalScroll("right");
+                }}
+                onMouseUp={stopHorizontalScroll}
+                onMouseLeave={stopHorizontalScroll}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowRight" && !event.repeat) {
+                    event.preventDefault();
+                    startHorizontalScroll("right");
+                  }
+                }}
+                onKeyUp={stopHorizontalScroll}
+                onBlur={stopHorizontalScroll}
+                disabled={!canScrollRight}
+              >
+                →
+              </button>
+            </div>
+          )}
           <div
             ref={parentRef}
             className="file-list-viewport"
@@ -1518,11 +1525,16 @@ export function FileList({
             role="grid"
             aria-label="Playable files"
             aria-multiselectable="true"
-            aria-colcount={10}
+            aria-colcount={compact ? 2 : 10}
             aria-rowcount={visibleEntries.length + 1}
           >
             <div ref={headerRef} className="file-list-header" role="row">
-              {SORTABLE_HEADERS.map((header) => {
+              {SORTABLE_HEADERS.filter(
+                (header) =>
+                  !compact ||
+                  header.field === "name" ||
+                  header.field === "duration",
+              ).map((header) => {
                 const isActive = sort.field === header.field;
                 return (
                   <button
@@ -1549,12 +1561,16 @@ export function FileList({
                   </button>
                 );
               })}
-              <span role="columnheader">Channels</span>
-              <span role="columnheader">Sample rate</span>
-              <span role="columnheader">Bit depth</span>
-              <span role="columnheader">Codec</span>
-              <span role="columnheader">Status</span>
-              <span role="columnheader">Mark</span>
+              {!compact && (
+                <>
+                  <span role="columnheader">Channels</span>
+                  <span role="columnheader">Sample rate</span>
+                  <span role="columnheader">Bit depth</span>
+                  <span role="columnheader">Codec</span>
+                  <span role="columnheader">Status</span>
+                  <span role="columnheader">Mark</span>
+                </>
+              )}
             </div>
             <div
               className="file-list-inner"
@@ -1618,15 +1634,21 @@ export function FileList({
                       <span className="file-list-row-name" role="gridcell">
                         {entry.name}
                       </span>
-                      <span role="gridcell" aria-hidden="true"></span>
-                      <span role="gridcell" aria-hidden="true"></span>
-                      <span role="gridcell" aria-hidden="true"></span>
-                      <span role="gridcell" aria-hidden="true"></span>
-                      <span role="gridcell" aria-hidden="true"></span>
-                      <span role="gridcell" aria-hidden="true"></span>
-                      <span role="gridcell" aria-hidden="true"></span>
-                      <span role="gridcell">Folder</span>
-                      <span role="gridcell" aria-hidden="true"></span>
+                      {compact ? (
+                        <span role="gridcell" aria-hidden="true"></span>
+                      ) : (
+                        <>
+                          <span role="gridcell" aria-hidden="true"></span>
+                          <span role="gridcell" aria-hidden="true"></span>
+                          <span role="gridcell" aria-hidden="true"></span>
+                          <span role="gridcell" aria-hidden="true"></span>
+                          <span role="gridcell" aria-hidden="true"></span>
+                          <span role="gridcell" aria-hidden="true"></span>
+                          <span role="gridcell" aria-hidden="true"></span>
+                          <span role="gridcell">Folder</span>
+                          <span role="gridcell" aria-hidden="true"></span>
+                        </>
+                      )}
                     </div>
                   );
                 }
@@ -1750,54 +1772,58 @@ export function FileList({
                         metadataLoading,
                       )}
                     </span>
-                    <span role="gridcell">
-                      {metadataValue(
-                        formatSize(metadata?.size_bytes ?? null),
-                        metadataLoading,
-                      )}
-                    </span>
-                    <span role="gridcell">
-                      {metadataValue(
-                        formatModified(metadata?.modified_at_ms ?? null),
-                        metadataLoading,
-                      )}
-                    </span>
-                    <span role="gridcell">
-                      {metadataValue(
-                        formatChannels(metadata?.channels ?? null),
-                        metadataLoading,
-                      )}
-                    </span>
-                    <span role="gridcell">
-                      {metadataValue(
-                        formatSampleRate(metadata?.sample_rate ?? null),
-                        metadataLoading,
-                      )}
-                    </span>
-                    <span role="gridcell">
-                      {metadataValue(
-                        metadata?.bit_depth == null
-                          ? UNAVAILABLE
-                          : `${metadata.bit_depth}-bit`,
-                        metadataLoading,
-                      )}
-                    </span>
-                    <span role="gridcell">
-                      {metadataValue(
-                        metadata?.codec ?? UNAVAILABLE,
-                        metadataLoading,
-                      )}
-                    </span>
-                    <span role="gridcell">{statusLabel}</span>
-                    <span role="gridcell">
-                      {marks[entry.id] ? (
-                        <span
-                          className={`file-list-mark file-list-mark--${marks[entry.id]}`}
-                        >
-                          {SESSION_MARK_LABELS[marks[entry.id]]}
+                    {!compact && (
+                      <>
+                        <span role="gridcell">
+                          {metadataValue(
+                            formatSize(metadata?.size_bytes ?? null),
+                            metadataLoading,
+                          )}
                         </span>
-                      ) : null}
-                    </span>
+                        <span role="gridcell">
+                          {metadataValue(
+                            formatModified(metadata?.modified_at_ms ?? null),
+                            metadataLoading,
+                          )}
+                        </span>
+                        <span role="gridcell">
+                          {metadataValue(
+                            formatChannels(metadata?.channels ?? null),
+                            metadataLoading,
+                          )}
+                        </span>
+                        <span role="gridcell">
+                          {metadataValue(
+                            formatSampleRate(metadata?.sample_rate ?? null),
+                            metadataLoading,
+                          )}
+                        </span>
+                        <span role="gridcell">
+                          {metadataValue(
+                            metadata?.bit_depth == null
+                              ? UNAVAILABLE
+                              : `${metadata.bit_depth}-bit`,
+                            metadataLoading,
+                          )}
+                        </span>
+                        <span role="gridcell">
+                          {metadataValue(
+                            metadata?.codec ?? UNAVAILABLE,
+                            metadataLoading,
+                          )}
+                        </span>
+                        <span role="gridcell">{statusLabel}</span>
+                        <span role="gridcell">
+                          {marks[entry.id] ? (
+                            <span
+                              className={`file-list-mark file-list-mark--${marks[entry.id]}`}
+                            >
+                              {SESSION_MARK_LABELS[marks[entry.id]]}
+                            </span>
+                          ) : null}
+                        </span>
+                      </>
+                    )}
                   </div>
                 );
               })}

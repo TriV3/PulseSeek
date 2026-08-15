@@ -48,6 +48,16 @@ pub struct PlayerPreferences {
     pub show_hidden_folders: bool,
     #[serde(default = "default_gapless_playback")]
     pub gapless_playback: bool,
+    #[serde(default)]
+    pub compact_mode: bool,
+    #[serde(default)]
+    pub window_width: Option<u32>,
+    #[serde(default)]
+    pub window_height: Option<u32>,
+    #[serde(default)]
+    pub compact_window_width: Option<u32>,
+    #[serde(default)]
+    pub compact_window_height: Option<u32>,
 }
 
 fn default_gapless_playback() -> bool {
@@ -75,6 +85,11 @@ impl Default for PlayerPreferences {
             seek_step_mode: default_seek_step_mode(),
             show_hidden_folders: false,
             gapless_playback: true,
+            compact_mode: false,
+            window_width: None,
+            window_height: None,
+            compact_window_width: None,
+            compact_window_height: None,
         }
     }
 }
@@ -263,6 +278,125 @@ mod tests {
     #[test]
     fn seek_step_mode_defaults_to_auto() {
         assert_eq!(PlayerPreferences::default().seek_step_mode, "auto");
+    }
+
+    #[test]
+    fn compact_mode_defaults_to_false() {
+        assert!(!PlayerPreferences::default().compact_mode);
+    }
+
+    #[test]
+    fn compact_mode_round_trips_through_repository() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("player-preferences.json");
+        let mut repository = JsonPlayerPreferencesRepository::new(path.clone());
+        let preferences = PlayerPreferences { compact_mode: true, ..PlayerPreferences::default() };
+        repository.save(preferences.clone()).unwrap();
+        assert!(repository.load().unwrap().compact_mode);
+    }
+
+    #[test]
+    fn window_size_defaults_to_none() {
+        assert_eq!(PlayerPreferences::default().window_width, None);
+        assert_eq!(PlayerPreferences::default().window_height, None);
+    }
+
+    #[test]
+    fn compact_window_size_defaults_to_none() {
+        assert_eq!(PlayerPreferences::default().compact_window_width, None);
+        assert_eq!(PlayerPreferences::default().compact_window_height, None);
+    }
+
+    #[test]
+    fn compact_window_size_round_trips_through_repository() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("player-preferences.json");
+        let mut repository = JsonPlayerPreferencesRepository::new(path.clone());
+        let preferences = PlayerPreferences {
+            compact_window_width: Some(440),
+            compact_window_height: Some(600),
+            ..PlayerPreferences::default()
+        };
+        repository.save(preferences.clone()).unwrap();
+        let loaded = repository.load().unwrap();
+        assert_eq!(loaded.compact_window_width, Some(440));
+        assert_eq!(loaded.compact_window_height, Some(600));
+    }
+
+    #[test]
+    fn legacy_file_without_compact_window_size_deserializes_with_none() {
+        let serialized = r#"{
+            "schema_version": 1,
+            "revision": 3,
+            "playback_mode": "loop-current",
+            "output_device_id": null,
+            "volume": 0.5,
+            "muted": true,
+            "waveform_size": 40,
+            "browser_size": 25,
+            "selected_folder_path": "/music",
+            "expanded_folder_paths": ["/music"],
+            "last_played_file_path": "/music/track.wav"
+        }"#;
+        let preferences: PlayerPreferences = serde_json::from_str(serialized).unwrap();
+        assert_eq!(preferences.compact_window_width, None);
+        assert_eq!(preferences.compact_window_height, None);
+    }
+
+    #[test]
+    fn window_size_round_trips_through_repository() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("player-preferences.json");
+        let mut repository = JsonPlayerPreferencesRepository::new(path.clone());
+        let preferences = PlayerPreferences {
+            window_width: Some(960),
+            window_height: Some(640),
+            ..PlayerPreferences::default()
+        };
+        repository.save(preferences.clone()).unwrap();
+        let loaded = repository.load().unwrap();
+        assert_eq!(loaded.window_width, Some(960));
+        assert_eq!(loaded.window_height, Some(640));
+    }
+
+    #[test]
+    fn legacy_file_without_window_size_deserializes_with_none() {
+        let serialized = r#"{
+            "schema_version": 1,
+            "revision": 3,
+            "playback_mode": "loop-current",
+            "output_device_id": null,
+            "volume": 0.5,
+            "muted": true,
+            "waveform_size": 40,
+            "browser_size": 25,
+            "selected_folder_path": "/music",
+            "expanded_folder_paths": ["/music"],
+            "last_played_file_path": "/music/track.wav"
+        }"#;
+        let preferences: PlayerPreferences = serde_json::from_str(serialized).unwrap();
+        assert_eq!(preferences.window_width, None);
+        assert_eq!(preferences.window_height, None);
+    }
+
+    #[test]
+    fn legacy_file_without_compact_mode_field_deserializes_with_default() {
+        let serialized = r#"{
+            "schema_version": 1,
+            "revision": 3,
+            "playback_mode": "loop-current",
+            "output_device_id": null,
+            "volume": 0.5,
+            "muted": true,
+            "waveform_size": 40,
+            "browser_size": 25,
+            "selected_folder_path": "/music",
+            "expanded_folder_paths": ["/music"],
+            "last_played_file_path": "/music/track.wav"
+        }"#;
+        let preferences: PlayerPreferences = serde_json::from_str(serialized).unwrap();
+        assert!(!preferences.compact_mode);
+        assert_eq!(preferences.theme, "system");
     }
 
     #[test]

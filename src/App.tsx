@@ -48,6 +48,7 @@ import { onOpenedFiles } from "./api/playbackEvents";
 import { useFileDrop } from "./hooks/useFileDrop";
 import { DropOverlay } from "./components/DropOverlay/DropOverlay";
 import { usePlayerPreferences } from "./hooks/usePlayerPreferences";
+import { useCompactWindow } from "./hooks/useCompactWindow";
 import { useTheme } from "./hooks/useTheme";
 import { ThemeSelector } from "./components/ThemeSelector/ThemeSelector";
 import { WaveformStyleSelector } from "./components/WaveformStyleSelector/WaveformStyleSelector";
@@ -85,6 +86,9 @@ function App() {
   const [sidebarView, setSidebarView] = useState<
     "browser" | "bookmarks" | "recent"
   >("browser");
+  const [compactPane, setCompactPane] = useState<
+    "files" | "folders" | "bookmarks" | "recent"
+  >("files");
   const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
   const [optionsMenuOpen, setOptionsMenuOpen] = useState(false);
   const [clearCacheDialogOpen, setClearCacheDialogOpen] = useState(false);
@@ -95,6 +99,36 @@ function App() {
   );
   const sessionMarks = useSessionMarks();
   const playerPreferences = usePlayerPreferences();
+  const compactMode = playerPreferences.preferences.compact_mode;
+  useCompactWindow(compactMode, {
+    savedSize:
+      playerPreferences.preferences.window_width !== null &&
+      playerPreferences.preferences.window_height !== null
+        ? {
+            width: playerPreferences.preferences.window_width,
+            height: playerPreferences.preferences.window_height,
+          }
+        : null,
+    savedCompactSize:
+      playerPreferences.preferences.compact_window_width !== null &&
+      playerPreferences.preferences.compact_window_height !== null
+        ? {
+            width: playerPreferences.preferences.compact_window_width,
+            height: playerPreferences.preferences.compact_window_height,
+          }
+        : null,
+    onRememberSize: (size) =>
+      playerPreferences.update({
+        window_width: size.width,
+        window_height: size.height,
+      }),
+    onRememberCompactSize: (size) =>
+      playerPreferences.update({
+        compact_window_width: size.width,
+        compact_window_height: size.height,
+      }),
+    loaded: playerPreferences.isLoaded,
+  });
   const visualizationSettings = useVisualizationSettings();
   const folderTree = useFolderTree(
     playerPreferences.preferences.show_hidden_folders,
@@ -125,6 +159,10 @@ function App() {
   const browserTabRef = useRef<HTMLButtonElement | null>(null);
   const recentTabRef = useRef<HTMLButtonElement | null>(null);
   const bookmarksTabRef = useRef<HTMLButtonElement | null>(null);
+  const compactFilesTabRef = useRef<HTMLButtonElement | null>(null);
+  const compactFoldersTabRef = useRef<HTMLButtonElement | null>(null);
+  const compactBookmarksTabRef = useRef<HTMLButtonElement | null>(null);
+  const compactRecentTabRef = useRef<HTMLButtonElement | null>(null);
   const optionsMenuRef = useRef<HTMLDetailsElement | null>(null);
 
   useEffect(() => {
@@ -179,6 +217,29 @@ function App() {
       })[next].current?.focus();
     },
     [sidebarView],
+  );
+
+  const handleCompactTabKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>) => {
+      const tabs = ["files", "folders", "bookmarks", "recent"] as const;
+      const current = tabs.indexOf(compactPane);
+      let next: (typeof tabs)[number] | null = null;
+      if (event.key === "Home") next = "files";
+      if (event.key === "End") next = "recent";
+      if (event.key === "ArrowLeft")
+        next = tabs[(current + tabs.length - 1) % tabs.length];
+      if (event.key === "ArrowRight") next = tabs[(current + 1) % tabs.length];
+      if (!next) return;
+      event.preventDefault();
+      setCompactPane(next);
+      ({
+        files: compactFilesTabRef,
+        folders: compactFoldersTabRef,
+        bookmarks: compactBookmarksTabRef,
+        recent: compactRecentTabRef,
+      })[next].current?.focus();
+    },
+    [compactPane],
   );
 
   const fileListFolder = state.folders[state.selectedPath ?? ""] ?? undefined;
@@ -583,6 +644,12 @@ function App() {
     [],
   );
 
+  const toggleCompactMode = useCallback(() => {
+    playerPreferences.update({
+      compact_mode: !playerPreferences.preferences.compact_mode,
+    });
+  }, [playerPreferences]);
+
   const selectPlaybackMode = useCallback(
     async (mode: PlaybackMode) => {
       const confirmed = await playbackMode.selectMode(mode);
@@ -645,9 +712,133 @@ function App() {
     shortcutMappings.bindings,
   );
 
+  const folderTreeSection = (
+    <FolderTree
+      {...folderTree}
+      activeFilePath={playback.playback.entryId}
+      isBookmarked={folderBookmarks.isBookmarked(state.selectedPath)}
+      isPathBookmarked={folderBookmarks.isBookmarked}
+      toggleBookmark={(path) => {
+        void folderBookmarks.toggle(path);
+      }}
+      toggleExpand={(path) => {
+        const expanded = new Set(
+          Object.entries(state.folders)
+            .filter(([, folder]) => folder.expanded)
+            .map(([folderPath]) => folderPath),
+        );
+        if (state.folders[path]?.expanded) expanded.delete(path);
+        else expanded.add(path);
+        playerPreferences.update({
+          expanded_folder_paths: [...expanded],
+        });
+        folderTree.toggleExpand(path);
+      }}
+      selectFolder={(path) => {
+        openFolder(path);
+      }}
+      navigateUp={() => {
+        const parent = state.selectedPath
+          ? getParentPath(state.selectedPath)
+          : null;
+        if (parent) {
+          const expanded = Object.entries(state.folders)
+            .filter(([path, folder]) => folder.expanded && path !== parent)
+            .map(([path]) => path);
+          playerPreferences.update({
+            selected_folder_path: parent,
+            expanded_folder_paths: expanded,
+          });
+          recentFolders.record(parent);
+        }
+        folderTree.navigateUp();
+      }}
+    />
+  );
+
+  const fileListSection = (
+    <>
+      <div className="file-list-heading">File list</div>
+      <FileList
+        entries={sortedFileListEntries}
+        selectedPath={state.selectedPath}
+        isLoading={fileListFolder?.isLoading ?? false}
+        error={fileListFolder?.error ?? null}
+        onFileSelect={selectAndRemember}
+        compact={compactMode}
+        playbackEntryId={playback.playback.entryId}
+        playbackStatus={playback.playback.status}
+        playbackError={playback.playback.error}
+        sort={fileSort}
+        onSortChange={setFileSort}
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
+        formatFilter={formatFilter}
+        onFormatFilterChange={setFormatFilter}
+        marks={sessionMarks.marks}
+        onMarkChange={(ids, mark) => {
+          if (mark === null) sessionMarks.unmark(ids);
+          else sessionMarks.setMark(ids, mark);
+        }}
+        markFilter={markFilter}
+        onMarkFilterChange={setMarkFilter}
+        onSelectFolder={(path) => {
+          openFolder(path, { expand: true });
+        }}
+        isFolderBookmarked={folderBookmarks.isBookmarked}
+        onToggleFolderBookmark={(path) => {
+          void folderBookmarks.toggle(path);
+        }}
+        onEntriesTrashed={(entryIds) => {
+          if (state.selectedPath) {
+            folderTree.removeEntries(state.selectedPath, entryIds);
+          }
+        }}
+        onEntryRenamed={(oldId, newId, newName) => {
+          if (state.selectedPath) {
+            folderTree.renameEntry(state.selectedPath, oldId, newId, newName);
+          }
+          playback.reconcile(oldId, newId);
+          sessionMarks.reconcile(oldId, newId);
+          if (playerPreferences.preferences.last_played_file_path === oldId) {
+            playerPreferences.update({ last_played_file_path: newId });
+          }
+        }}
+        onEntriesMoved={(moved) => {
+          if (state.selectedPath) {
+            folderTree.removeEntries(
+              state.selectedPath,
+              moved.map((entry) => entry.oldId),
+            );
+          }
+          for (const entry of moved) {
+            playback.reconcile(entry.oldId, entry.newId);
+            sessionMarks.reconcile(entry.oldId, entry.newId);
+            if (
+              playerPreferences.preferences.last_played_file_path ===
+              entry.oldId
+            ) {
+              playerPreferences.update({
+                last_played_file_path: entry.newId,
+              });
+            }
+          }
+        }}
+        recursive={recursiveView}
+        onRecursiveChange={(next) => {
+          if (state.selectedPath) {
+            folderTree.setRecursive(state.selectedPath, next);
+          }
+        }}
+        shortcutBindings={shortcutMappings.bindings}
+        focusSearchRevision={focusSearchRevision}
+      />
+    </>
+  );
+
   return (
     <main
-      className="app-shell"
+      className={compactMode ? "app-shell app-shell--compact" : "app-shell"}
       onContextMenu={(event) => event.preventDefault()}
     >
       <h1 className="visually-hidden">PulseSeek</h1>
@@ -685,6 +876,8 @@ function App() {
             transport.setAbPoint(point, positionMs)
           }
           onClearAB={() => transport.clearAB()}
+          compact={compactMode}
+          onToggleCompact={toggleCompactMode}
         />
         <div
           className="splitter splitter--horizontal"
@@ -756,418 +949,426 @@ function App() {
                 }
               }}
             />
-            <div className="transport-options">
-              <div className="transport-settings">
-                <PlaybackModeSelector
-                  mode={playbackMode.mode}
-                  error={playbackMode.error}
-                  onChange={async (mode) => {
-                    const confirmed = await playbackMode.selectMode(mode);
-                    if (confirmed) {
-                      playerPreferences.update({ playback_mode: confirmed });
-                    }
-                  }}
-                />
-                <VisualizationSelector
-                  value={visualizationSettings.settings.mode}
-                  onChange={(mode) => visualizationSettings.update({ mode })}
-                />
-                {visualizationSettings.effectiveMode === "waveform" && (
-                  <WaveformStyleSelector
-                    style={playerPreferences.preferences.waveform_style}
-                    onChange={(waveform_style) => {
-                      playerPreferences.update({ waveform_style });
-                    }}
-                  />
-                )}
-                {visualizationSettings.error && (
-                  <span role="alert">{visualizationSettings.error}</span>
-                )}
-                {shortcutMappings.isLoading && (
-                  <span role="status">Loading shortcuts…</span>
-                )}
-                {shortcutMappings.error && (
-                  <span role="alert">{shortcutMappings.error}</span>
-                )}
-                {folderPickerError && (
-                  <span role="alert">{folderPickerError}</span>
-                )}
-              </div>
-              <details
-                ref={optionsMenuRef}
-                className="app-options-menu"
-                open={optionsMenuOpen}
-              >
-                <summary
-                  aria-label="Open application menu"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    setOptionsMenuOpen((open) => !open);
-                  }}
-                >
-                  ☰
-                </summary>
-                <div className="app-options-menu-content">
-                  <AudioDeviceSelector
-                    {...audioDevices}
-                    onChange={async (deviceId) => {
-                      const confirmed = await audioDevices.choose(deviceId);
+            {!compactMode && (
+              <div className="transport-options">
+                <div className="transport-settings">
+                  <PlaybackModeSelector
+                    mode={playbackMode.mode}
+                    error={playbackMode.error}
+                    onChange={async (mode) => {
+                      const confirmed = await playbackMode.selectMode(mode);
                       if (confirmed) {
-                        playerPreferences.update({
-                          output_device_id: confirmed,
-                        });
+                        playerPreferences.update({ playback_mode: confirmed });
                       }
                     }}
-                    onRetry={audioDevices.refresh}
                   />
-                  <ThemeSelector
-                    theme={playerPreferences.preferences.theme}
-                    onChange={(theme) => {
-                      playerPreferences.update({ theme });
-                    }}
+                  <VisualizationSelector
+                    value={visualizationSettings.settings.mode}
+                    onChange={(mode) => visualizationSettings.update({ mode })}
                   />
-                  <label className="app-option-row" htmlFor="seek-step">
-                    <span>Seek step</span>
-                    <select
-                      id="seek-step"
-                      value={playerPreferences.preferences.seek_step_mode}
-                      onChange={(event) =>
-                        playerPreferences.update({
-                          seek_step_mode: event.currentTarget
-                            .value as SeekStepMode,
-                        })
-                      }
-                    >
-                      <option value="auto">Auto</option>
-                      {SEEK_STEP_PRESETS.map((seconds) => (
-                        <option key={seconds} value={`${seconds}s`}>
-                          {seconds} s
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <VisualizationSettingsControls
-                    enabled={visualizationSettings.settings.enabled}
-                    quality={visualizationSettings.settings.quality}
-                    reducedMotion={visualizationSettings.reducedMotion}
-                    onEnabledChange={(enabled) =>
-                      visualizationSettings.update({ enabled })
-                    }
-                    onQualityChange={(quality) =>
-                      visualizationSettings.update({ quality })
-                    }
-                  />
-                  <div className="app-option-row">
-                    <label htmlFor="show-hidden-folders">
-                      Show hidden folders
-                    </label>
-                    <input
-                      id="show-hidden-folders"
-                      type="checkbox"
-                      checked={
-                        playerPreferences.preferences.show_hidden_folders
-                      }
-                      onChange={(event) => {
-                        playerPreferences.update({
-                          show_hidden_folders: event.currentTarget.checked,
-                        });
+                  {visualizationSettings.effectiveMode === "waveform" && (
+                    <WaveformStyleSelector
+                      style={playerPreferences.preferences.waveform_style}
+                      onChange={(waveform_style) => {
+                        playerPreferences.update({ waveform_style });
                       }}
                     />
-                  </div>
-                  <div className="app-option-row">
-                    <label htmlFor="gapless-playback">Gapless playback</label>
-                    <input
-                      id="gapless-playback"
-                      type="checkbox"
-                      checked={playerPreferences.preferences.gapless_playback}
-                      onChange={(event) =>
-                        playerPreferences.update({
-                          gapless_playback: event.currentTarget.checked,
-                        })
-                      }
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    className="shortcut-settings-button"
-                    onClick={() => {
-                      setOptionsMenuOpen(false);
-                      setShortcutEditorOpen(true);
-                    }}
-                  >
-                    Keyboard shortcuts
-                  </button>
-                  <button
-                    type="button"
-                    className="shortcut-settings-button"
-                    onClick={() => {
-                      setClearCacheStatus(null);
-                      setClearCacheDialogOpen(true);
-                    }}
-                  >
-                    Clear waveform cache
-                  </button>
-                  {clearCacheStatus && (
-                    <span role="status">{clearCacheStatus}</span>
+                  )}
+                  {visualizationSettings.error && (
+                    <span role="alert">{visualizationSettings.error}</span>
+                  )}
+                  {shortcutMappings.isLoading && (
+                    <span role="status">Loading shortcuts…</span>
+                  )}
+                  {shortcutMappings.error && (
+                    <span role="alert">{shortcutMappings.error}</span>
+                  )}
+                  {folderPickerError && (
+                    <span role="alert">{folderPickerError}</span>
                   )}
                 </div>
-              </details>
-            </div>
+                <details
+                  ref={optionsMenuRef}
+                  className="app-options-menu"
+                  open={optionsMenuOpen}
+                >
+                  <summary
+                    aria-label="Open application menu"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      setOptionsMenuOpen((open) => !open);
+                    }}
+                  >
+                    ☰
+                  </summary>
+                  <div className="app-options-menu-content">
+                    <AudioDeviceSelector
+                      {...audioDevices}
+                      onChange={async (deviceId) => {
+                        const confirmed = await audioDevices.choose(deviceId);
+                        if (confirmed) {
+                          playerPreferences.update({
+                            output_device_id: confirmed,
+                          });
+                        }
+                      }}
+                      onRetry={audioDevices.refresh}
+                    />
+                    <ThemeSelector
+                      theme={playerPreferences.preferences.theme}
+                      onChange={(theme) => {
+                        playerPreferences.update({ theme });
+                      }}
+                    />
+                    <label className="app-option-row" htmlFor="seek-step">
+                      <span>Seek step</span>
+                      <select
+                        id="seek-step"
+                        value={playerPreferences.preferences.seek_step_mode}
+                        onChange={(event) =>
+                          playerPreferences.update({
+                            seek_step_mode: event.currentTarget
+                              .value as SeekStepMode,
+                          })
+                        }
+                      >
+                        <option value="auto">Auto</option>
+                        {SEEK_STEP_PRESETS.map((seconds) => (
+                          <option key={seconds} value={`${seconds}s`}>
+                            {seconds} s
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <VisualizationSettingsControls
+                      enabled={visualizationSettings.settings.enabled}
+                      quality={visualizationSettings.settings.quality}
+                      reducedMotion={visualizationSettings.reducedMotion}
+                      onEnabledChange={(enabled) =>
+                        visualizationSettings.update({ enabled })
+                      }
+                      onQualityChange={(quality) =>
+                        visualizationSettings.update({ quality })
+                      }
+                    />
+                    <div className="app-option-row">
+                      <label htmlFor="show-hidden-folders">
+                        Show hidden folders
+                      </label>
+                      <input
+                        id="show-hidden-folders"
+                        type="checkbox"
+                        checked={
+                          playerPreferences.preferences.show_hidden_folders
+                        }
+                        onChange={(event) => {
+                          playerPreferences.update({
+                            show_hidden_folders: event.currentTarget.checked,
+                          });
+                        }}
+                      />
+                    </div>
+                    <div className="app-option-row">
+                      <label htmlFor="gapless-playback">Gapless playback</label>
+                      <input
+                        id="gapless-playback"
+                        type="checkbox"
+                        checked={playerPreferences.preferences.gapless_playback}
+                        onChange={(event) =>
+                          playerPreferences.update({
+                            gapless_playback: event.currentTarget.checked,
+                          })
+                        }
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="shortcut-settings-button"
+                      onClick={() => {
+                        setOptionsMenuOpen(false);
+                        setShortcutEditorOpen(true);
+                      }}
+                    >
+                      Keyboard shortcuts
+                    </button>
+                    <button
+                      type="button"
+                      className="shortcut-settings-button"
+                      onClick={() => {
+                        setClearCacheStatus(null);
+                        setClearCacheDialogOpen(true);
+                      }}
+                    >
+                      Clear waveform cache
+                    </button>
+                    {clearCacheStatus && (
+                      <span role="status">{clearCacheStatus}</span>
+                    )}
+                  </div>
+                </details>
+              </div>
+            )}
           </div>
           <div
             className="browser-workspace"
-            style={{ gridTemplateColumns: `${browserSize}% 7px 1fr` }}
+            style={{
+              gridTemplateColumns: compactMode
+                ? "1fr"
+                : `${browserSize}% 7px 1fr`,
+            }}
           >
-            <aside className="app-sidebar">
-              <div
-                className="sidebar-tabs"
-                role="tablist"
-                aria-label="Browser views"
-              >
-                <button
-                  ref={browserTabRef}
-                  id="sidebar-tab-browser"
-                  type="button"
-                  role="tab"
-                  aria-controls="sidebar-panel-browser"
-                  aria-selected={sidebarView === "browser"}
-                  tabIndex={sidebarView === "browser" ? 0 : -1}
-                  onClick={() => setSidebarView("browser")}
-                  onKeyDown={handleSidebarTabKeyDown}
-                >
-                  Browser
-                </button>
-                <button
-                  ref={bookmarksTabRef}
-                  id="sidebar-tab-bookmarks"
-                  type="button"
-                  role="tab"
-                  aria-controls="sidebar-panel-bookmarks"
-                  aria-selected={sidebarView === "bookmarks"}
-                  tabIndex={sidebarView === "bookmarks" ? 0 : -1}
-                  onClick={() => setSidebarView("bookmarks")}
-                  onKeyDown={handleSidebarTabKeyDown}
-                >
-                  Bookmarks
-                </button>
-                <button
-                  ref={recentTabRef}
-                  id="sidebar-tab-recent"
-                  type="button"
-                  role="tab"
-                  aria-controls="sidebar-panel-recent"
-                  aria-selected={sidebarView === "recent"}
-                  tabIndex={sidebarView === "recent" ? 0 : -1}
-                  onClick={() => setSidebarView("recent")}
-                  onKeyDown={handleSidebarTabKeyDown}
-                >
-                  Recent folders
-                </button>
-              </div>
-              <div
-                id="sidebar-panel-browser"
-                className="sidebar-panel"
-                role="tabpanel"
-                aria-labelledby="sidebar-tab-browser"
-                hidden={sidebarView !== "browser"}
-              >
-                <FolderTree
-                  {...folderTree}
-                  activeFilePath={playback.playback.entryId}
-                  isBookmarked={folderBookmarks.isBookmarked(
-                    state.selectedPath,
+            {!compactMode && (
+              <>
+                <aside className="app-sidebar">
+                  <div
+                    className="sidebar-tabs"
+                    role="tablist"
+                    aria-label="Browser views"
+                  >
+                    <button
+                      ref={browserTabRef}
+                      id="sidebar-tab-browser"
+                      type="button"
+                      role="tab"
+                      aria-controls="sidebar-panel-browser"
+                      aria-selected={sidebarView === "browser"}
+                      tabIndex={sidebarView === "browser" ? 0 : -1}
+                      onClick={() => setSidebarView("browser")}
+                      onKeyDown={handleSidebarTabKeyDown}
+                    >
+                      Browser
+                    </button>
+                    <button
+                      ref={bookmarksTabRef}
+                      id="sidebar-tab-bookmarks"
+                      type="button"
+                      role="tab"
+                      aria-controls="sidebar-panel-bookmarks"
+                      aria-selected={sidebarView === "bookmarks"}
+                      tabIndex={sidebarView === "bookmarks" ? 0 : -1}
+                      onClick={() => setSidebarView("bookmarks")}
+                      onKeyDown={handleSidebarTabKeyDown}
+                    >
+                      Bookmarks
+                    </button>
+                    <button
+                      ref={recentTabRef}
+                      id="sidebar-tab-recent"
+                      type="button"
+                      role="tab"
+                      aria-controls="sidebar-panel-recent"
+                      aria-selected={sidebarView === "recent"}
+                      tabIndex={sidebarView === "recent" ? 0 : -1}
+                      onClick={() => setSidebarView("recent")}
+                      onKeyDown={handleSidebarTabKeyDown}
+                    >
+                      Recent folders
+                    </button>
+                  </div>
+                  <div
+                    id="sidebar-panel-browser"
+                    className="sidebar-panel"
+                    role="tabpanel"
+                    aria-labelledby="sidebar-tab-browser"
+                    hidden={sidebarView !== "browser"}
+                  >
+                    {folderTreeSection}
+                  </div>
+                  <div
+                    id="sidebar-panel-bookmarks"
+                    className="sidebar-panel"
+                    role="tabpanel"
+                    aria-labelledby="sidebar-tab-bookmarks"
+                    hidden={sidebarView !== "bookmarks"}
+                  >
+                    <Bookmarks
+                      bookmarks={folderBookmarks.bookmarks}
+                      isLoading={folderBookmarks.isLoading}
+                      error={folderBookmarks.error}
+                      onReopen={(path) => {
+                        setSidebarView("browser");
+                        reopenFolder(path);
+                      }}
+                      onRemove={(path) => {
+                        void folderBookmarks.toggle(path);
+                      }}
+                    />
+                  </div>
+                  <div
+                    id="sidebar-panel-recent"
+                    className="sidebar-panel"
+                    role="tabpanel"
+                    aria-labelledby="sidebar-tab-recent"
+                    hidden={sidebarView !== "recent"}
+                  >
+                    <RecentFolders
+                      folders={recentFolders.folders}
+                      isLoading={recentFolders.isLoading}
+                      error={recentFolders.error}
+                      onReopen={(path) => {
+                        setSidebarView("browser");
+                        reopenFolder(path);
+                      }}
+                      onClear={() => {
+                        void recentFolders.clear();
+                      }}
+                    />
+                  </div>
+                </aside>
+                <div
+                  className="splitter splitter--vertical"
+                  role="separator"
+                  aria-label="Resize browser"
+                  aria-orientation="vertical"
+                  aria-valuemin={16}
+                  aria-valuemax={46}
+                  aria-valuenow={browserSize}
+                  tabIndex={0}
+                  onPointerDown={startResize(
+                    "vertical",
+                    setBrowserSize,
+                    (size) => playerPreferences.update({ browser_size: size }),
                   )}
-                  isPathBookmarked={folderBookmarks.isBookmarked}
-                  toggleBookmark={(path) => {
-                    void folderBookmarks.toggle(path);
-                  }}
-                  toggleExpand={(path) => {
-                    const expanded = new Set(
-                      Object.entries(state.folders)
-                        .filter(([, folder]) => folder.expanded)
-                        .map(([folderPath]) => folderPath),
-                    );
-                    if (state.folders[path]?.expanded) expanded.delete(path);
-                    else expanded.add(path);
-                    playerPreferences.update({
-                      expanded_folder_paths: [...expanded],
-                    });
-                    folderTree.toggleExpand(path);
-                  }}
-                  selectFolder={(path) => {
-                    openFolder(path);
-                  }}
-                  navigateUp={() => {
-                    const parent = state.selectedPath
-                      ? getParentPath(state.selectedPath)
-                      : null;
-                    if (parent) {
-                      const expanded = Object.entries(state.folders)
-                        .filter(
-                          ([path, folder]) =>
-                            folder.expanded && path !== parent,
-                        )
-                        .map(([path]) => path);
-                      playerPreferences.update({
-                        selected_folder_path: parent,
-                        expanded_folder_paths: expanded,
-                      });
-                      recentFolders.record(parent);
-                    }
-                    folderTree.navigateUp();
-                  }}
-                />
-              </div>
-              <div
-                id="sidebar-panel-bookmarks"
-                className="sidebar-panel"
-                role="tabpanel"
-                aria-labelledby="sidebar-tab-bookmarks"
-                hidden={sidebarView !== "bookmarks"}
-              >
-                <Bookmarks
-                  bookmarks={folderBookmarks.bookmarks}
-                  isLoading={folderBookmarks.isLoading}
-                  error={folderBookmarks.error}
-                  onReopen={(path) => {
-                    setSidebarView("browser");
-                    reopenFolder(path);
-                  }}
-                  onRemove={(path) => {
-                    void folderBookmarks.toggle(path);
-                  }}
-                />
-              </div>
-              <div
-                id="sidebar-panel-recent"
-                className="sidebar-panel"
-                role="tabpanel"
-                aria-labelledby="sidebar-tab-recent"
-                hidden={sidebarView !== "recent"}
-              >
-                <RecentFolders
-                  folders={recentFolders.folders}
-                  isLoading={recentFolders.isLoading}
-                  error={recentFolders.error}
-                  onReopen={(path) => {
-                    setSidebarView("browser");
-                    reopenFolder(path);
-                  }}
-                  onClear={() => {
-                    void recentFolders.clear();
-                  }}
-                />
-              </div>
-            </aside>
-            <div
-              className="splitter splitter--vertical"
-              role="separator"
-              aria-label="Resize browser"
-              aria-orientation="vertical"
-              aria-valuemin={16}
-              aria-valuemax={46}
-              aria-valuenow={browserSize}
-              tabIndex={0}
-              onPointerDown={startResize("vertical", setBrowserSize, (size) =>
-                playerPreferences.update({ browser_size: size }),
-              )}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
-                  event.preventDefault();
-                  const next = clamp(
-                    browserSize + (event.key === "ArrowRight" ? 2 : -2),
-                    16,
-                    46,
-                  );
-                  setBrowserSize(next);
-                  playerPreferences.update({ browser_size: next });
-                }
-              }}
-            />
-            <section className="app-content">
-              <div className="file-list-heading">File list</div>
-              <FileList
-                entries={sortedFileListEntries}
-                selectedPath={state.selectedPath}
-                isLoading={fileListFolder?.isLoading ?? false}
-                error={fileListFolder?.error ?? null}
-                onFileSelect={selectAndRemember}
-                playbackEntryId={playback.playback.entryId}
-                playbackStatus={playback.playback.status}
-                playbackError={playback.playback.error}
-                sort={fileSort}
-                onSortChange={setFileSort}
-                searchQuery={searchQuery}
-                onSearchQueryChange={setSearchQuery}
-                formatFilter={formatFilter}
-                onFormatFilterChange={setFormatFilter}
-                marks={sessionMarks.marks}
-                onMarkChange={(ids, mark) => {
-                  if (mark === null) sessionMarks.unmark(ids);
-                  else sessionMarks.setMark(ids, mark);
-                }}
-                markFilter={markFilter}
-                onMarkFilterChange={setMarkFilter}
-                onSelectFolder={(path) => {
-                  openFolder(path, { expand: true });
-                }}
-                isFolderBookmarked={folderBookmarks.isBookmarked}
-                onToggleFolderBookmark={(path) => {
-                  void folderBookmarks.toggle(path);
-                }}
-                onEntriesTrashed={(entryIds) => {
-                  if (state.selectedPath) {
-                    folderTree.removeEntries(state.selectedPath, entryIds);
-                  }
-                }}
-                onEntryRenamed={(oldId, newId, newName) => {
-                  if (state.selectedPath) {
-                    folderTree.renameEntry(
-                      state.selectedPath,
-                      oldId,
-                      newId,
-                      newName,
-                    );
-                  }
-                  playback.reconcile(oldId, newId);
-                  sessionMarks.reconcile(oldId, newId);
-                  if (
-                    playerPreferences.preferences.last_played_file_path ===
-                    oldId
-                  ) {
-                    playerPreferences.update({ last_played_file_path: newId });
-                  }
-                }}
-                onEntriesMoved={(moved) => {
-                  if (state.selectedPath) {
-                    folderTree.removeEntries(
-                      state.selectedPath,
-                      moved.map((entry) => entry.oldId),
-                    );
-                  }
-                  for (const entry of moved) {
-                    playback.reconcile(entry.oldId, entry.newId);
-                    sessionMarks.reconcile(entry.oldId, entry.newId);
+                  onKeyDown={(event) => {
                     if (
-                      playerPreferences.preferences.last_played_file_path ===
-                      entry.oldId
+                      event.key === "ArrowRight" ||
+                      event.key === "ArrowLeft"
                     ) {
-                      playerPreferences.update({
-                        last_played_file_path: entry.newId,
-                      });
+                      event.preventDefault();
+                      const next = clamp(
+                        browserSize + (event.key === "ArrowRight" ? 2 : -2),
+                        16,
+                        46,
+                      );
+                      setBrowserSize(next);
+                      playerPreferences.update({ browser_size: next });
                     }
-                  }
-                }}
-                recursive={recursiveView}
-                onRecursiveChange={(next) => {
-                  if (state.selectedPath) {
-                    folderTree.setRecursive(state.selectedPath, next);
-                  }
-                }}
-                shortcutBindings={shortcutMappings.bindings}
-                focusSearchRevision={focusSearchRevision}
-              />
-            </section>
+                  }}
+                />
+              </>
+            )}
+            {compactMode ? (
+              <div className="compact-browser">
+                <div
+                  className="compact-browser-tabs"
+                  role="tablist"
+                  aria-label="Compact browser views"
+                >
+                  <button
+                    ref={compactFilesTabRef}
+                    id="compact-tab-files"
+                    type="button"
+                    role="tab"
+                    aria-controls="compact-panel-files"
+                    aria-selected={compactPane === "files"}
+                    tabIndex={compactPane === "files" ? 0 : -1}
+                    onClick={() => setCompactPane("files")}
+                    onKeyDown={handleCompactTabKeyDown}
+                  >
+                    Files
+                  </button>
+                  <button
+                    ref={compactFoldersTabRef}
+                    id="compact-tab-folders"
+                    type="button"
+                    role="tab"
+                    aria-controls="compact-panel-folders"
+                    aria-selected={compactPane === "folders"}
+                    tabIndex={compactPane === "folders" ? 0 : -1}
+                    onClick={() => setCompactPane("folders")}
+                    onKeyDown={handleCompactTabKeyDown}
+                  >
+                    Folders
+                  </button>
+                  <button
+                    ref={compactBookmarksTabRef}
+                    id="compact-tab-bookmarks"
+                    type="button"
+                    role="tab"
+                    aria-controls="compact-panel-bookmarks"
+                    aria-selected={compactPane === "bookmarks"}
+                    tabIndex={compactPane === "bookmarks" ? 0 : -1}
+                    onClick={() => setCompactPane("bookmarks")}
+                    onKeyDown={handleCompactTabKeyDown}
+                  >
+                    Bookmarks
+                  </button>
+                  <button
+                    ref={compactRecentTabRef}
+                    id="compact-tab-recent"
+                    type="button"
+                    role="tab"
+                    aria-controls="compact-panel-recent"
+                    aria-selected={compactPane === "recent"}
+                    tabIndex={compactPane === "recent" ? 0 : -1}
+                    onClick={() => setCompactPane("recent")}
+                    onKeyDown={handleCompactTabKeyDown}
+                  >
+                    Recent folders
+                  </button>
+                </div>
+                <div
+                  id="compact-panel-files"
+                  className="compact-browser-panel"
+                  role="tabpanel"
+                  aria-labelledby="compact-tab-files"
+                  hidden={compactPane !== "files"}
+                >
+                  {fileListSection}
+                </div>
+                <div
+                  id="compact-panel-folders"
+                  className="compact-browser-panel"
+                  role="tabpanel"
+                  aria-labelledby="compact-tab-folders"
+                  hidden={compactPane !== "folders"}
+                >
+                  {folderTreeSection}
+                </div>
+                <div
+                  id="compact-panel-bookmarks"
+                  className="compact-browser-panel"
+                  role="tabpanel"
+                  aria-labelledby="compact-tab-bookmarks"
+                  hidden={compactPane !== "bookmarks"}
+                >
+                  <Bookmarks
+                    bookmarks={folderBookmarks.bookmarks}
+                    isLoading={folderBookmarks.isLoading}
+                    error={folderBookmarks.error}
+                    onReopen={(path) => {
+                      setCompactPane("folders");
+                      reopenFolder(path);
+                    }}
+                    onRemove={(path) => {
+                      void folderBookmarks.toggle(path);
+                    }}
+                  />
+                </div>
+                <div
+                  id="compact-panel-recent"
+                  className="compact-browser-panel"
+                  role="tabpanel"
+                  aria-labelledby="compact-tab-recent"
+                  hidden={compactPane !== "recent"}
+                >
+                  <RecentFolders
+                    folders={recentFolders.folders}
+                    isLoading={recentFolders.isLoading}
+                    error={recentFolders.error}
+                    onReopen={(path) => {
+                      setCompactPane("folders");
+                      reopenFolder(path);
+                    }}
+                    onClear={() => {
+                      void recentFolders.clear();
+                    }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <section className="app-content">{fileListSection}</section>
+            )}
           </div>
         </section>
       </div>

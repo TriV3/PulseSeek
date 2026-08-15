@@ -1,6 +1,28 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import { afterEach } from "vitest";
+import { afterEach, vi } from "vitest";
+
+// The compact-mode window hook (useCompactWindow) drives the real Tauri
+// window. Tests render App without a Tauri runtime, so provide an inert
+// stub window that records nothing and never resizes.
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    isMaximized: async () => false,
+    innerSize: async () => ({ width: 1200, height: 800 }),
+    scaleFactor: async () => 1,
+    setSize: async () => {},
+    setMinSize: async () => {},
+    onResized: async () => () => {},
+  }),
+  LogicalSize: class {
+    width: number;
+    height: number;
+    constructor(width: number, height: number) {
+      this.width = width;
+      this.height = height;
+    }
+  },
+}));
 
 // jsdom does not implement window.matchMedia. The theme system and its tests
 // depend on it, so provide a minimal inert stub that tests can replace.

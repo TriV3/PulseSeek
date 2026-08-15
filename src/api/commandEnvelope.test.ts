@@ -180,6 +180,167 @@ describe("player preferences boundary", () => {
       "Invalid player preferences response.",
     );
   });
+
+  it("defaults compact_mode to false for legacy files without the field", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      preferences: {
+        schema_version: 1,
+        revision: 0,
+        playback_mode: "one-shot",
+        output_device_id: null,
+        volume: 1,
+        muted: false,
+        waveform_size: 38,
+        browser_size: 24,
+        selected_folder_path: null,
+        expanded_folder_paths: [],
+        last_played_file_path: null,
+        last_played_position_ms: 0,
+        last_played_duration_ms: null,
+        theme: "system",
+        waveform_style: "outline",
+        seek_step_mode: "auto",
+        show_hidden_folders: false,
+      },
+    });
+
+    await expect(loadPlayerPreferences()).resolves.toMatchObject({
+      compact_mode: false,
+    });
+  });
+
+  it("accepts a compact_mode boolean and rejects non-boolean values", async () => {
+    const base = {
+      schema_version: 1,
+      revision: 0,
+      playback_mode: "one-shot" as const,
+      output_device_id: null,
+      volume: 1,
+      muted: false,
+      waveform_size: 38,
+      browser_size: 24,
+      selected_folder_path: null,
+      expanded_folder_paths: [],
+      last_played_file_path: null,
+      last_played_position_ms: 0,
+      last_played_duration_ms: null,
+      theme: "system" as const,
+      waveform_style: "outline" as const,
+      seek_step_mode: "auto" as const,
+      show_hidden_folders: false,
+    };
+
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      preferences: { ...base, compact_mode: true },
+    });
+    await expect(loadPlayerPreferences()).resolves.toMatchObject({
+      compact_mode: true,
+    });
+
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      preferences: { ...base, compact_mode: "yes" },
+    });
+    await expect(loadPlayerPreferences()).rejects.toThrow(
+      "Invalid player preferences response.",
+    );
+  });
+
+  it("defaults window size to null and accepts persisted logical sizes", async () => {
+    const base = {
+      schema_version: 1,
+      revision: 0,
+      playback_mode: "one-shot" as const,
+      output_device_id: null,
+      volume: 1,
+      muted: false,
+      waveform_size: 38,
+      browser_size: 24,
+      selected_folder_path: null,
+      expanded_folder_paths: [],
+      last_played_file_path: null,
+      last_played_position_ms: 0,
+      last_played_duration_ms: null,
+      theme: "system" as const,
+      waveform_style: "outline" as const,
+      seek_step_mode: "auto" as const,
+      show_hidden_folders: false,
+    };
+
+    mockInvoke.mockResolvedValueOnce({ version: 1, preferences: base });
+    await expect(loadPlayerPreferences()).resolves.toMatchObject({
+      window_width: null,
+      window_height: null,
+    });
+
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      preferences: { ...base, window_width: 960, window_height: 640 },
+    });
+    await expect(loadPlayerPreferences()).resolves.toMatchObject({
+      window_width: 960,
+      window_height: 640,
+    });
+
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      preferences: { ...base, window_width: "wide" },
+    });
+    await expect(loadPlayerPreferences()).rejects.toThrow(
+      "Invalid player preferences response.",
+    );
+  });
+
+  it("defaults compact window size to null and accepts persisted logical sizes", async () => {
+    const base = {
+      schema_version: 1,
+      revision: 0,
+      playback_mode: "one-shot" as const,
+      output_device_id: null,
+      volume: 1,
+      muted: false,
+      waveform_size: 38,
+      browser_size: 24,
+      selected_folder_path: null,
+      expanded_folder_paths: [],
+      last_played_file_path: null,
+      last_played_position_ms: 0,
+      last_played_duration_ms: null,
+      theme: "system" as const,
+      waveform_style: "outline" as const,
+      seek_step_mode: "auto" as const,
+      show_hidden_folders: false,
+    };
+
+    mockInvoke.mockResolvedValueOnce({ version: 1, preferences: base });
+    await expect(loadPlayerPreferences()).resolves.toMatchObject({
+      compact_window_width: null,
+      compact_window_height: null,
+    });
+
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      preferences: {
+        ...base,
+        compact_window_width: 440,
+        compact_window_height: 600,
+      },
+    });
+    await expect(loadPlayerPreferences()).resolves.toMatchObject({
+      compact_window_width: 440,
+      compact_window_height: 600,
+    });
+
+    mockInvoke.mockResolvedValueOnce({
+      version: 1,
+      preferences: { ...base, compact_window_width: "wide" },
+    });
+    await expect(loadPlayerPreferences()).rejects.toThrow(
+      "Invalid player preferences response.",
+    );
+  });
 });
 
 describe("visualization settings boundary", () => {

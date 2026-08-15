@@ -210,6 +210,87 @@ describe("FileList — entries display", () => {
     expect(screen.getByText("Name")).toBeInTheDocument();
   });
 
+  it("shows only Name and Duration columns in compact mode", () => {
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/test/music"
+        isLoading={false}
+        error={null}
+        compact
+      />,
+    );
+
+    expect(
+      screen.getByRole("columnheader", { name: "Name" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: "Duration" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: "Size" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: "Modified" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: "Channels" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("grid", { name: "Playable files" }),
+    ).toHaveAttribute("aria-colcount", "2");
+  });
+
+  it("hides the actions bar and horizontal arrows in compact mode", () => {
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/test/music"
+        isLoading={false}
+        error={null}
+        compact
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Move to Trash" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Show columns to the left" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Show columns to the right" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("searchbox", { name: "Search files" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "File list" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("song1.mp3")).toBeInTheDocument();
+  });
+
+  it("keeps the actions bar and horizontal arrows outside compact mode", () => {
+    render(
+      <FileList
+        entries={sampleEntries}
+        selectedPath="/test/music"
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Move to Trash" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("searchbox", { name: "Search files" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show columns to the left" }),
+    ).toBeInTheDocument();
+  });
+
   it("navigates horizontally with mouse controls", () => {
     render(
       <FileList

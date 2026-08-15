@@ -43,12 +43,117 @@ input {
   background: var(--bg-subtle);
 }
 
+.app-shell--compact .app-layout {
+  min-width: 440px;
+  min-height: 600px;
+}
+
+.app-shell--compact .file-list-heading {
+  display: none;
+}
+
+.compact-browser {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.compact-browser-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--bg-browser-tabs);
+}
+
+.compact-browser-tabs button {
+  flex: 1 1 25%;
+  min-width: 0;
+  padding: 4px 8px 3px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: var(--bg-browser-tabs);
+  color: var(--text-muted);
+  text-align: left;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.compact-browser-tabs button:last-child {
+  border-right: 0;
+}
+
+.compact-browser-tabs button[aria-selected="true"] {
+  background: var(--bg-surface);
+  color: var(--text-strong);
+  font-weight: 700;
+  box-shadow: inset 0 -2px 0 var(--accent-strong);
+}
+
+.compact-browser-tabs button:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.compact-browser-panel {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.compact-browser-panel[hidden] {
+  display: none;
+}
+
+.compact-browser-panel > .file-list {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+}
+
+.compact-browser-panel > .folder-tree {
+  width: 100%;
+  height: 100%;
+}
+
+.compact-toggle {
+  flex-shrink: 0;
+  align-self: center;
+  min-width: 28px;
+  height: 25px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--bg-surface);
+  color: var(--text-strong);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.compact-toggle[aria-pressed="true"] {
+  background: var(--bg-hover);
+  box-shadow: inset 0 0 0 1px var(--accent-strong);
+}
+
+.compact-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
 .waveform-panel {
   min-height: 0;
   display: grid;
   grid-template-rows: 29px 22px auto minmax(0, 1fr);
   overflow: hidden;
   background: linear-gradient(var(--bg-subtle), var(--bg-panel));
+}
+
+.waveform-panel--compact {
+  grid-template-rows: 29px 22px minmax(0, 1fr);
 }
 
 .now-playing,
@@ -65,6 +170,17 @@ input {
   font-size: 13px;
   color: var(--text-strong);
   background: var(--bg-surface);
+}
+
+.now-playing > div:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.now-playing > .brand-mark {
+  flex-shrink: 0;
 }
 
 .now-playing-label {

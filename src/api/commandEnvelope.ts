@@ -142,6 +142,11 @@ export interface PlayerPreferences {
   seek_step_mode: SeekStepMode;
   show_hidden_folders: boolean;
   gapless_playback: boolean;
+  compact_mode: boolean;
+  window_width: number | null;
+  window_height: number | null;
+  compact_window_width: number | null;
+  compact_window_height: number | null;
 }
 
 interface PlayerPreferencesResponse {
@@ -189,7 +194,21 @@ function isPlayerPreferences(value: unknown): value is PlayerPreferences {
       )) &&
     typeof candidate.show_hidden_folders === "boolean" &&
     (candidate.gapless_playback === undefined ||
-      typeof candidate.gapless_playback === "boolean")
+      typeof candidate.gapless_playback === "boolean") &&
+    (candidate.compact_mode === undefined ||
+      typeof candidate.compact_mode === "boolean") &&
+    (candidate.window_width === undefined ||
+      candidate.window_width === null ||
+      typeof candidate.window_width === "number") &&
+    (candidate.window_height === undefined ||
+      candidate.window_height === null ||
+      typeof candidate.window_height === "number") &&
+    (candidate.compact_window_width === undefined ||
+      candidate.compact_window_width === null ||
+      typeof candidate.compact_window_width === "number") &&
+    (candidate.compact_window_height === undefined ||
+      candidate.compact_window_height === null ||
+      typeof candidate.compact_window_height === "number")
   );
 }
 
@@ -202,6 +221,11 @@ function preferencesFromResponse(
   return {
     ...response.preferences,
     gapless_playback: response.preferences.gapless_playback ?? true,
+    compact_mode: response.preferences.compact_mode ?? false,
+    window_width: response.preferences.window_width ?? null,
+    window_height: response.preferences.window_height ?? null,
+    compact_window_width: response.preferences.compact_window_width ?? null,
+    compact_window_height: response.preferences.compact_window_height ?? null,
   };
 }
 
