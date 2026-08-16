@@ -23,6 +23,8 @@ pub(crate) struct PreparedTrack {
     pub(crate) duration_ms: Option<u64>,
     pub(crate) pending: VecDeque<f32>,
     pub(crate) eof: bool,
+    pub(crate) boundary_appended: bool,
+    pub(crate) track_change_sequence: Option<u64>,
 }
 
 /// for a real-time audio callback to consume.
@@ -63,6 +65,8 @@ pub(crate) struct BufferedSample {
     /// When `Some(frames)`, the consumer resets its position clock to
     /// `frames` when this sample is consumed (A–B wrap marker).
     pub(crate) position_reset: Option<u64>,
+    /// Sequence made visible to observers when callback consumes this sample.
+    pub(crate) track_change_sequence: Option<u64>,
 }
 
 impl PlaybackEngine {
@@ -110,7 +114,9 @@ impl PlaybackEngine {
             output_active: Arc::new(AtomicBool::new(false)),
             terminal: Arc::new(AtomicU8::new(TERMINAL_ACTIVE)),
             position_frames: Arc::new(AtomicU64::new(0)),
-            track_change: Arc::new(Mutex::new(None)),
+            next_track_change_sequence: Arc::new(AtomicU64::new(0)),
+            reached_track_change_sequence: Arc::new(AtomicU64::new(0)),
+            track_changes: Arc::new(Mutex::new(VecDeque::new())),
         };
         (
             Self {
@@ -188,7 +194,15 @@ impl PlaybackEngine {
                 break;
             }
             let position_reset = self.pending_position_reset.take();
-            if self.producer.try_push(BufferedSample { value, generation, position_reset }).is_err()
+            if self
+                .producer
+                .try_push(BufferedSample {
+                    value,
+                    generation,
+                    position_reset,
+                    track_change_sequence: None,
+                })
+                .is_err()
             {
                 if position_reset.is_some() {
                     self.pending_position_reset = position_reset;
@@ -304,6 +318,8 @@ impl PlaybackEngine {
             duration_ms,
             pending: VecDeque::new(),
             eof: false,
+            boundary_appended: false,
+            track_change_sequence: None,
         });
     }
 
@@ -312,7 +328,15 @@ impl PlaybackEngine {
     }
 
     pub(crate) fn take_prepared(&mut self) -> bool {
-        if self.prepared.as_ref().is_some_and(|prepared| !prepared.pending.is_empty()) {
+        // Before its boundary enters the ring, prepared audio remains
+        // replaceable look-ahead. Afterwards it is committed: promote it and
+        // move remaining PCM into active pending storage before another
+        // PrepareNext command can reuse the prepared slot.
+        if self
+            .prepared
+            .as_ref()
+            .is_some_and(|prepared| !prepared.pending.is_empty() && !prepared.boundary_appended)
+        {
             return false;
         }
         let Some(prepared) = self.prepared.take() else {
@@ -324,10 +348,6 @@ impl PlaybackEngine {
         self.eof = false;
         self.pending = prepared.pending;
         self.decoder_position_ms = 0;
-        self.control.publish_track_change(crate::control::TrackChange {
-            path: prepared.path,
-            duration_ms: prepared.duration_ms,
-        });
         true
     }
 
@@ -361,21 +381,36 @@ impl PlaybackEngine {
 
     pub(crate) fn append_prepared(&mut self) -> bool {
         let Some(prepared) = self.prepared.as_mut() else { return false };
+        if prepared.track_change_sequence.is_none()
+            && !prepared.pending.is_empty()
+            && self.producer.vacant_len() > 0
+        {
+            prepared.track_change_sequence =
+                Some(self.control.publish_track_change(crate::control::TrackChange {
+                    path: prepared.path.clone(),
+                    duration_ms: prepared.duration_ms,
+                }));
+        }
         let mut appended = false;
         while self.producer.vacant_len() > 0 {
             let Some(sample) = prepared.pending.pop_front() else { break };
+            let is_boundary = !prepared.boundary_appended;
             if self
                 .producer
                 .try_push(BufferedSample {
                     value: sample,
                     generation: self.control.generation(),
-                    position_reset: if !appended { Some(0) } else { None },
+                    position_reset: is_boundary.then_some(0),
+                    track_change_sequence: is_boundary
+                        .then_some(prepared.track_change_sequence)
+                        .flatten(),
                 })
                 .is_err()
             {
                 prepared.pending.push_front(sample);
                 break;
             }
+            prepared.boundary_appended = true;
             appended = true;
         }
         appended
@@ -441,7 +476,12 @@ impl PlaybackEngine {
                 if self.loop_cache_offset == 0 { Some(self.region_start_frames()) } else { None };
             let value = self.loop_cache[self.loop_cache_offset];
             self.loop_cache_offset = (self.loop_cache_offset + 1) % self.loop_cache.len();
-            let _ = self.producer.try_push(BufferedSample { value, generation, position_reset });
+            let _ = self.producer.try_push(BufferedSample {
+                value,
+                generation,
+                position_reset,
+                track_change_sequence: None,
+            });
             self.frames_written += 1;
             pushed = true;
         }

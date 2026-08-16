@@ -15,6 +15,7 @@ import "./MusicalSpectrumCanvas.css";
 export interface MusicalSpectrumCanvasProps {
   enabled: boolean;
   theme: ResolvedTheme;
+  trackId?: string | null;
   durationMs?: number | null;
   restoredPositionMs?: number;
   resetRevision?: number;
@@ -24,6 +25,7 @@ export interface MusicalSpectrumCanvasProps {
 export function MusicalSpectrumCanvas({
   enabled,
   theme,
+  trackId,
   durationMs = null,
   restoredPositionMs = 0,
   resetRevision = 0,
@@ -141,6 +143,7 @@ export function MusicalSpectrumCanvas({
       />
       {enabled && (
         <WaveformCanvas
+          trackId={trackId}
           waveform={null}
           durationMs={durationMs}
           restoredPositionMs={restoredPositionMs}

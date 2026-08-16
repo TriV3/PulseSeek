@@ -365,6 +365,23 @@ describe("WaveformCanvas", () => {
     ).not.toBeVisible();
   });
 
+  it("resets the playhead when track changes before waveform data arrives", () => {
+    const { container, rerender } = render(
+      <WaveformCanvas trackId="a.wav" waveform={LEVEL} durationMs={2_000} />,
+    );
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    emitPosition(1_500);
+    flushRaf();
+    expect(canvas).toHaveAttribute("aria-valuenow", "1500");
+
+    rerender(
+      <WaveformCanvas trackId="b.wav" waveform={LEVEL} durationMs={4_000} />,
+    );
+    flushRaf();
+
+    expect(canvas).toHaveAttribute("aria-valuenow", "0");
+  });
+
   it("keeps the playhead when only the duration updates", () => {
     const { container, rerender } = render(
       <WaveformCanvas waveform={LEVEL} durationMs={null} />,

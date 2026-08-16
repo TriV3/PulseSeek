@@ -15,6 +15,7 @@ import "./LogAnalyzerCanvas.css";
 export interface LogAnalyzerCanvasProps {
   enabled: boolean;
   theme: ResolvedTheme;
+  trackId?: string | null;
   durationMs?: number | null;
   restoredPositionMs?: number;
   resetRevision?: number;
@@ -24,6 +25,7 @@ export interface LogAnalyzerCanvasProps {
 export function LogAnalyzerCanvas({
   enabled,
   theme,
+  trackId,
   durationMs = null,
   restoredPositionMs = 0,
   resetRevision = 0,
@@ -146,6 +148,7 @@ export function LogAnalyzerCanvas({
       />
       {enabled && (
         <WaveformCanvas
+          trackId={trackId}
           waveform={null}
           durationMs={durationMs}
           restoredPositionMs={restoredPositionMs}

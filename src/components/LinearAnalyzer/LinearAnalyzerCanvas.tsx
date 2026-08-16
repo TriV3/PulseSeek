@@ -15,6 +15,7 @@ import "./LinearAnalyzerCanvas.css";
 export interface LinearAnalyzerCanvasProps {
   enabled: boolean;
   theme: ResolvedTheme;
+  trackId?: string | null;
   durationMs?: number | null;
   restoredPositionMs?: number;
   resetRevision?: number;
@@ -24,6 +25,7 @@ export interface LinearAnalyzerCanvasProps {
 export function LinearAnalyzerCanvas({
   enabled,
   theme,
+  trackId,
   durationMs = null,
   restoredPositionMs = 0,
   resetRevision = 0,
@@ -145,6 +147,7 @@ export function LinearAnalyzerCanvas({
       />
       {enabled && (
         <WaveformCanvas
+          trackId={trackId}
           waveform={null}
           durationMs={durationMs}
           restoredPositionMs={restoredPositionMs}

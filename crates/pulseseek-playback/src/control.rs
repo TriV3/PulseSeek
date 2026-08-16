@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -40,7 +41,15 @@ pub struct PlaybackControl {
     pub(crate) output_active: Arc<AtomicBool>,
     pub(crate) terminal: Arc<AtomicU8>,
     pub(crate) position_frames: Arc<AtomicU64>,
-    pub(crate) track_change: Arc<Mutex<Option<TrackChange>>>,
+    pub(crate) next_track_change_sequence: Arc<AtomicU64>,
+    pub(crate) reached_track_change_sequence: Arc<AtomicU64>,
+    pub(crate) track_changes: Arc<Mutex<VecDeque<PendingTrackChange>>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PendingTrackChange {
+    sequence: u64,
+    change: TrackChange,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -101,14 +110,23 @@ impl PlaybackControl {
         self.position_frames.store(frames, Ordering::Release);
     }
 
-    pub(crate) fn publish_track_change(&self, change: TrackChange) {
-        if let Ok(mut pending) = self.track_change.lock() {
-            *pending = Some(change);
+    pub(crate) fn publish_track_change(&self, change: TrackChange) -> u64 {
+        let sequence = self.next_track_change_sequence.fetch_add(1, Ordering::AcqRel) + 1;
+        if let Ok(mut pending) = self.track_changes.lock() {
+            pending.push_back(PendingTrackChange { sequence, change });
         }
+        sequence
     }
 
     pub fn take_track_change(&self) -> Option<TrackChange> {
-        self.track_change.lock().ok().and_then(|mut pending| pending.take())
+        let reached = self.reached_track_change_sequence.load(Ordering::Acquire);
+        self.track_changes.lock().ok().and_then(|mut pending| {
+            if pending.front().is_some_and(|change| change.sequence <= reached) {
+                pending.pop_front().map(|change| change.change)
+            } else {
+                None
+            }
+        })
     }
 
     pub(crate) fn generation(&self) -> u64 {
@@ -210,7 +228,12 @@ impl PlaybackConsumer {
         }
         let mut written = 0;
         for sample in buf.iter_mut() {
-            let mut buffered = [BufferedSample { value: 0.0, generation: 0, position_reset: None }];
+            let mut buffered = [BufferedSample {
+                value: 0.0,
+                generation: 0,
+                position_reset: None,
+                track_change_sequence: None,
+            }];
             if self.consume_current(&mut buffered) == 0 {
                 break;
             }
@@ -388,6 +411,9 @@ impl PlaybackConsumer {
         }
         if let Some(frames) = output[0].position_reset {
             self.control.set_position_frames(frames);
+        }
+        if let Some(sequence) = output[0].track_change_sequence {
+            self.control.reached_track_change_sequence.store(sequence, Ordering::Release);
         }
         1
     }

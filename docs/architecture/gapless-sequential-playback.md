@@ -27,9 +27,24 @@ primes bounded PCM data for next decoder, then appends it to same SPSC ring
 buffer used by current decoder. Audio callback consumes one continuous stream;
 it does not stop/restart stream or communicate with React at track boundary.
 
-Worker publishes track-change metadata outside callback. Frontend updates
-selection, duration, and position from this event without issuing another
-`play` command.
+Worker queues track-change metadata before the prepared audio enters the ring
+buffer. The first prepared sample carries a one-shot transition marker. The
+audio callback resets its frame clock and acknowledges that marker with an
+atomic store; it never locks, allocates, or emits an event. The position
+reporter publishes the queued metadata only after observing that
+acknowledgement, so track identity changes when output starts consuming the new
+track rather than when worker decoding finishes.
+
+Once that first sample enters the ring, the prepared track is committed and
+immediately promoted to active decoder ownership. Any primed PCM that did not
+fit in the ring moves to active pending storage. This frees the prepared slot
+for the following track without allowing a new `prepare_next` request to
+replace or truncate the track currently crossing the audio boundary.
+
+Frontend applies path, zero position, and duration from the track-change event
+before changing selection, without issuing another `play` command. Waveform and
+analyzer seek canvases reset from path identity immediately; they do not wait
+for the next waveform extraction result.
 
 The output stream remains authoritative for playback clock. Visualizers and UI
 events are observers and cannot delay or own transition.
@@ -44,7 +59,9 @@ events are observers and cannot delay or own transition.
 
 ## Verification
 
-Playback tests cover worker preparation, sequential transitions, stale manual
-selection protection, and mode changes. Manual verification must use split mix
-files, short files, mixed sample rates, filtering during playback, invalid next
-files, and final-entry completion.
+Playback tests cover worker preparation, partial ring-buffer refills, the exact
+consumed transition boundary, sequential transitions, stale manual selection
+protection, and mode changes. Frontend tests cover atomic path/position/duration
+updates and playhead reset before new waveform data arrives. Manual
+verification must use split mix files, short files, mixed sample rates,
+filtering during playback, invalid next files, and final-entry completion.

@@ -350,6 +350,9 @@ export function usePlaybackTransport({
           (candidate) => candidate.id === payload.path,
         );
         if (!entry) return;
+        setPositionEntryId(payload.path);
+        setPositionMs(0);
+        setDurationMs(payload.duration_ms);
         void context.onSelectEntry(entry, { alreadyPlaying: true });
       }),
     )
