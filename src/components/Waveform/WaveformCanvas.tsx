@@ -28,6 +28,8 @@ import {
 } from "./waveformRenderer";
 
 export interface WaveformCanvasProps {
+  /** Stable file identity used to reset state before new waveform data arrives. */
+  trackId?: string | null;
   waveform: WaveformLevel | null;
   durationMs: number | null;
   restoredPositionMs?: number;
@@ -90,6 +92,7 @@ export const WaveformCanvas = forwardRef<
   WaveformCanvasProps
 >(function WaveformCanvas(
   {
+    trackId,
     waveform,
     durationMs,
     restoredPositionMs,
@@ -775,11 +778,15 @@ export const WaveformCanvas = forwardRef<
   // playhead is reset only when the file's waveform changes, so the same
   // file's first duration update never wipes a freshly confirmed position.
   const lastWaveformRef = useRef<WaveformLevel | null>(waveform);
+  const lastTrackIdRef = useRef<string | null | undefined>(trackId);
   const receivedPositionEventRef = useRef(false);
   const lastResetRevisionRef = useRef(resetRevision);
   useEffect(() => {
+    const trackChanged = lastTrackIdRef.current !== trackId;
+    const waveformChanged = lastWaveformRef.current !== waveform;
+    if (trackChanged) lastTrackIdRef.current = trackId;
     durationRef.current = durationMs;
-    if (lastWaveformRef.current !== waveform && durationMs !== null) {
+    if ((waveformChanged || trackChanged) && durationMs !== null) {
       const nextViewport = { startMs: 0, endMs: durationMs };
       viewportRef.current = nextViewport;
       setViewport(nextViewport);
@@ -795,8 +802,11 @@ export const WaveformCanvas = forwardRef<
       viewportRef.current = { startMs: 0, endMs: durationMs };
       setViewport(viewportRef.current);
     }
-    if (lastWaveformRef.current !== waveform) {
-      lastWaveformRef.current = waveform;
+    if (waveformChanged) lastWaveformRef.current = waveform;
+    if (trackChanged) {
+      receivedPositionEventRef.current = false;
+      positionRef.current = restoredPositionMs ?? 0;
+    } else if (waveformChanged) {
       receivedPositionEventRef.current = false;
       positionRef.current = restoredPositionMs ?? null;
     } else if (
@@ -809,7 +819,7 @@ export const WaveformCanvas = forwardRef<
     scheduleDraw();
     // style is intentionally not part of the refetch path: a style change only
     // repaints the canvas and never re-requests waveform data (FR-VS-004).
-  }, [waveform, durationMs, restoredPositionMs, style, scheduleDraw]);
+  }, [trackId, waveform, durationMs, restoredPositionMs, style, scheduleDraw]);
 
   useEffect(() => {
     if (!waveform || widthRef.current <= 0) return;

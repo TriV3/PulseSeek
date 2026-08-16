@@ -276,6 +276,94 @@ fn prepared_track_appends_without_silence_at_boundary() {
 }
 
 #[test]
+fn prepared_track_resets_position_once_across_partial_appends() {
+    let (mut engine, mut consumer) = PlaybackEngine::new(Box::new(RampDecoder::new(4)), 4);
+    engine.prepare_next(
+        Box::new(RampDecoder::new(6)),
+        None,
+        1_000,
+        "next.wav".to_string(),
+        Some(6),
+    );
+    engine.prime_prepared().expect("prime next track");
+    assert!(engine.process_chunk().expect("decode current track"));
+
+    let mut current = [0.0; 4];
+    assert_eq!(consumer.consume_channels(&mut current, 1, 1), 4);
+    assert!(!engine.process_chunk().expect("reach current track EOF"));
+    assert!(engine.append_prepared());
+
+    let control = consumer.control();
+    let mut first_next = [0.0; 2];
+    assert_eq!(consumer.consume_channels(&mut first_next, 1, 1), 2);
+    assert_eq!(control.position_frames(), 2);
+
+    assert!(engine.append_prepared());
+    assert!(engine.take_prepared());
+    let mut remaining_next = [0.0; 3];
+    assert_eq!(consumer.consume_channels(&mut remaining_next, 1, 1), 3);
+
+    assert_eq!(control.position_frames(), 5);
+}
+
+#[test]
+fn prepared_track_change_becomes_visible_at_consumed_boundary() {
+    let (mut engine, mut consumer) = PlaybackEngine::new(Box::new(RampDecoder::new(4)), 4);
+    engine.prepare_next(
+        Box::new(RampDecoder::new(6)),
+        None,
+        1_000,
+        "next.wav".to_string(),
+        Some(6),
+    );
+    engine.prime_prepared().expect("prime next track");
+    assert!(engine.process_chunk().expect("decode current track"));
+
+    let mut current = [0.0; 4];
+    assert_eq!(consumer.consume(&mut current), 4);
+    assert!(!engine.process_chunk().expect("reach current track EOF"));
+    assert!(engine.append_prepared());
+    assert!(engine.take_prepared());
+
+    let control = consumer.control();
+    assert_eq!(control.take_track_change(), None);
+
+    let mut first_next = [0.0; 1];
+    assert_eq!(consumer.consume(&mut first_next), 1);
+    assert_eq!(
+        control.take_track_change(),
+        Some(crate::control::TrackChange { path: "next.wav".to_string(), duration_ms: Some(6) })
+    );
+    assert_eq!(control.take_track_change(), None);
+}
+
+#[test]
+fn committed_prepared_track_keeps_ownership_when_following_track_is_prepared() {
+    let (mut engine, mut consumer) = PlaybackEngine::new(Box::new(RampDecoder::new(4)), 4);
+    engine.prepare_next(Box::new(RampDecoder::new(6)), None, 1_000, "b.wav".to_string(), Some(6));
+    engine.prime_prepared().expect("prime B");
+    assert!(engine.process_chunk().expect("decode A"));
+
+    let mut current = [0.0; 4];
+    assert_eq!(consumer.consume(&mut current), 4);
+    assert!(!engine.process_chunk().expect("reach A EOF"));
+    assert!(engine.append_prepared());
+    assert_eq!(engine.prepared.as_ref().map(|track| track.pending.len()), Some(2));
+
+    assert!(engine.take_prepared(), "B owns its remaining PCM once its boundary is buffered");
+    assert_eq!(engine.pending.len(), 2);
+    engine.prepare_next(Box::new(RampDecoder::new(4)), None, 1_000, "c.wav".to_string(), Some(4));
+    assert_eq!(engine.pending.len(), 2, "preparing C must not discard B's remaining PCM");
+
+    let mut first_b = [0.0; 2];
+    assert_eq!(consumer.consume(&mut first_b), 2);
+    assert!(engine.process_chunk().expect("drain remaining B PCM"));
+    let mut rest_b = [0.0; 4];
+    assert_eq!(consumer.consume(&mut rest_b), 4);
+    assert_eq!(rest_b, [2.0, 3.0, 4.0, 5.0]);
+}
+
+#[test]
 fn invalid_decoder_frame_count_returns_error() {
     let (mut engine, _) = PlaybackEngine::new(Box::new(InvalidFrameDecoder), 16);
 

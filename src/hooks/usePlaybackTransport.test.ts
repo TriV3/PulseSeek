@@ -136,6 +136,47 @@ describe("usePlaybackTransport", () => {
     expect(onSelectEntry).toHaveBeenCalledWith(entries[1]);
   });
 
+  it("applies gapless track identity, position, and duration atomically", async () => {
+    let trackChanged:
+      | ((payload: { path: string; duration_ms: number | null }) => void)
+      | undefined;
+    onTrackChangedMock.mockImplementationOnce(
+      async (
+        handler: (payload: {
+          path: string;
+          duration_ms: number | null;
+        }) => void,
+      ) => {
+        trackChanged = handler;
+        return () => undefined;
+      },
+    );
+    const onSelectEntry = vi.fn().mockResolvedValue(undefined);
+    const { result, rerender } = renderHook(
+      ({ selectedEntryId }) =>
+        usePlaybackTransport({
+          entries,
+          selectedEntryId,
+          playbackStatus: "playing",
+          playbackMode: "sequential",
+          onSelectEntry,
+        }),
+      { initialProps: { selectedEntryId: "a.wav" } },
+    );
+    await act(async () => undefined);
+
+    await act(async () => {
+      trackChanged?.({ path: "b.wav", duration_ms: 4_000 });
+    });
+    rerender({ selectedEntryId: "b.wav" });
+
+    expect(onSelectEntry).toHaveBeenCalledWith(entries[1], {
+      alreadyPlaying: true,
+    });
+    expect(result.current.positionMs).toBe(0);
+    expect(result.current.durationMs).toBe(4_000);
+  });
+
   it("keeps the completion listener while switching from one-shot to sequential", async () => {
     let complete: (() => void) | undefined;
     onCompletedMock.mockImplementationOnce(async (handler: () => void) => {

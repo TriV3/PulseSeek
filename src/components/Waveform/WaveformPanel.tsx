@@ -236,6 +236,7 @@ export function WaveformPanel({
             ) : (
               <WaveformCanvas
                 ref={waveformHandleRef}
+                trackId={entryPath}
                 waveform={waveform}
                 durationMs={durationMs}
                 restoredPositionMs={restoredPositionMs}
@@ -259,6 +260,7 @@ export function WaveformPanel({
           <LogAnalyzerCanvas
             enabled
             theme={theme}
+            trackId={entryPath}
             durationMs={durationMs}
             restoredPositionMs={restoredPositionMs}
             resetRevision={resetRevision}
@@ -268,6 +270,7 @@ export function WaveformPanel({
           <LinearAnalyzerCanvas
             enabled
             theme={theme}
+            trackId={entryPath}
             durationMs={durationMs}
             restoredPositionMs={restoredPositionMs}
             resetRevision={resetRevision}
@@ -277,6 +280,7 @@ export function WaveformPanel({
           <MusicalSpectrumCanvas
             enabled
             theme={theme}
+            trackId={entryPath}
             durationMs={durationMs}
             restoredPositionMs={restoredPositionMs}
             resetRevision={resetRevision}

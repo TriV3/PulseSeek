@@ -11,7 +11,7 @@ use pulseseek_domain::playback::loop_region::LoopRegion;
 use pulseseek_domain::playback::mode::PlaybackMode;
 use pulseseek_domain::playback::position::{Duration, Position};
 use pulseseek_domain::visualization::{VisualizationMode, VisualizationSettings};
-use pulseseek_playback::{PlaybackControl, PlaybackWorker};
+use pulseseek_playback::{PlaybackControl, PlaybackWorker, TrackChange};
 
 use crate::playback_events::{NoopEventEmitter, PlaybackEventEmitter, EVENT_COMPLETED};
 use crate::playback_service::PlaybackService;
@@ -22,15 +22,20 @@ pub struct NativePlaybackService {
     worker: Option<PlaybackWorker>,
     control: Option<PlaybackControl>,
     events: Arc<dyn PlaybackEventEmitter>,
-    current_path: Option<String>,
-    current_metadata: Option<StreamMetadata>,
-    current_channels: usize,
+    active_track: Arc<Mutex<Option<ActiveTrack>>>,
     mode: PlaybackMode,
     buffer_frames: usize,
     output_sample_rate: Option<u32>,
     position_reporter: Option<PositionReporter>,
     visualization: Option<VisualizationPipeline>,
     visualization_settings: VisualizationSettings,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ActiveTrack {
+    path: String,
+    duration_ms: Option<u64>,
+    channels: usize,
 }
 
 struct PositionReporter {
@@ -43,6 +48,7 @@ impl PositionReporter {
         control: PlaybackControl,
         sample_rate: u32,
         duration_ms: Option<u64>,
+        active_track: Arc<Mutex<Option<ActiveTrack>>>,
         events: Arc<dyn PlaybackEventEmitter>,
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
@@ -56,18 +62,13 @@ impl PositionReporter {
                     break;
                 }
                 let position_ms = frames_to_millis(control.position_frames(), sample_rate);
-                let _ = events.emit_position(position_ms, current_duration_ms);
-                if let Some(change) = control.take_track_change() {
-                    current_duration_ms = change.duration_ms;
-                    let _ = events.emit_position(0, current_duration_ms);
-                    let _ = events.emit(
-                        "playback:track-changed",
-                        serde_json::json!({
-                            "path": change.path,
-                            "duration_ms": change.duration_ms,
-                        }),
-                    );
-                }
+                report_position_tick(
+                    position_ms,
+                    control.take_track_change(),
+                    &mut current_duration_ms,
+                    &active_track,
+                    events.as_ref(),
+                );
             }
             if !reporter_stop.load(Ordering::Acquire) && control.is_completed() {
                 let _ = events.emit(EVENT_COMPLETED, serde_json::json!({}));
@@ -83,6 +84,32 @@ impl PositionReporter {
             let _ = join.join();
         }
     }
+}
+
+fn report_position_tick(
+    position_ms: u64,
+    change: Option<TrackChange>,
+    current_duration_ms: &mut Option<u64>,
+    active_track: &Arc<Mutex<Option<ActiveTrack>>>,
+    events: &dyn PlaybackEventEmitter,
+) {
+    if let Some(change) = change {
+        *current_duration_ms = change.duration_ms;
+        if let Ok(mut active) = active_track.lock() {
+            if let Some(track) = active.as_mut() {
+                track.path.clone_from(&change.path);
+                track.duration_ms = change.duration_ms;
+            }
+        }
+        let _ = events.emit(
+            "playback:track-changed",
+            serde_json::json!({
+                "path": change.path,
+                "duration_ms": change.duration_ms,
+            }),
+        );
+    }
+    let _ = events.emit_position(position_ms, *current_duration_ms);
 }
 
 impl Drop for PositionReporter {
@@ -114,9 +141,7 @@ impl NativePlaybackService {
             worker: None,
             control: None,
             events: Arc::new(NoopEventEmitter),
-            current_path: None,
-            current_metadata: None,
-            current_channels: 0,
+            active_track: Arc::new(Mutex::new(None)),
             mode: PlaybackMode::OneShot,
             // Ring buffer capacity. Combined with the 5ms sleep in the
             // worker loop (instead of thread::yield_now), this buffer gives
@@ -253,17 +278,17 @@ impl PlaybackService for NativePlaybackService {
 
         self.worker = Some(worker);
         self.control = Some(control.clone());
-        self.current_path = Some(path.to_string());
-        self.current_metadata = Some(metadata);
-        self.current_channels = channels;
+        let duration_ms = metadata_duration_ms(&metadata);
+        *self.active_track.lock().map_err(|_| Self::unavailable("active track lock poisoned"))? =
+            Some(ActiveTrack { path: path.to_string(), duration_ms, channels });
         self.output_sample_rate = Some(output_sample_rate);
         self.visualization = visualization;
 
-        let duration_ms = self.current_metadata.as_ref().and_then(metadata_duration_ms);
         self.position_reporter = Some(PositionReporter::start(
             control,
             output_sample_rate,
             duration_ms,
+            Arc::clone(&self.active_track),
             Arc::clone(&self.events),
         ));
 
@@ -292,7 +317,14 @@ impl PlaybackService for NativePlaybackService {
             )
         })?;
         let channels = if metadata.channels == 0 { 2 } else { metadata.channels as usize };
-        if channels != self.current_channels {
+        let current_channels = self
+            .active_track
+            .lock()
+            .map_err(|_| Self::unavailable("active track lock poisoned"))?
+            .as_ref()
+            .map(|track| track.channels)
+            .ok_or_else(|| Self::unavailable("no active playback"))?;
+        if channels != current_channels {
             return Err(Self::unavailable("gapless preparation requires matching channel count"));
         }
         let source_rate = if metadata.sample_rate == 0 { 44_100 } else { metadata.sample_rate };
@@ -365,9 +397,8 @@ impl PlaybackService for NativePlaybackService {
         self.visualization = None;
         self.worker = None;
         self.control = None;
-        self.current_path = None;
-        self.current_metadata = None;
-        self.current_channels = 0;
+        *self.active_track.lock().map_err(|_| Self::unavailable("active track lock poisoned"))? =
+            None;
         self.output_sample_rate = None;
         let _ = self.events.emit_state("stopped");
         Ok(())
@@ -391,7 +422,12 @@ impl PlaybackService for NativePlaybackService {
             let frames = actual.as_millis().saturating_mul(u64::from(sample_rate)) / 1_000;
             control.set_position_frames(frames);
         }
-        let duration_ms = self.current_metadata.as_ref().and_then(metadata_duration_ms);
+        let duration_ms = self
+            .active_track
+            .lock()
+            .map_err(|_| Self::unavailable("active track lock poisoned"))?
+            .as_ref()
+            .and_then(|track| track.duration_ms);
         let _ = self.events.emit_position(actual.as_millis(), duration_ms);
         Ok(actual.as_millis())
     }
@@ -437,9 +473,11 @@ impl PlaybackService for NativePlaybackService {
 
     fn set_loop_region(&mut self, start_ms: u64, end_ms: u64) -> Result<u64, ApplicationError> {
         let duration_ms = self
-            .current_metadata
+            .active_track
+            .lock()
+            .map_err(|_| Self::unavailable("active track lock poisoned"))?
             .as_ref()
-            .and_then(metadata_duration_ms)
+            .and_then(|track| track.duration_ms)
             .ok_or_else(|| Self::invalid_region("no active playback with a known duration"))?;
         let region = LoopRegion::new(
             Position::from_millis(start_ms),
@@ -466,13 +504,17 @@ impl PlaybackService for NativePlaybackService {
     }
 
     fn reconcile_path(&mut self, old_path: &str, new_path: &str) -> Result<bool, ApplicationError> {
-        let Some(current) = self.current_path.as_deref() else {
+        let mut active = self
+            .active_track
+            .lock()
+            .map_err(|_| Self::unavailable("active track lock poisoned"))?;
+        let Some(current) = active.as_mut() else {
             return Ok(false);
         };
-        if current != old_path {
+        if current.path != old_path {
             return Ok(false);
         }
-        self.current_path = Some(new_path.to_string());
+        current.path = new_path.to_string();
         Ok(true)
     }
 
@@ -499,8 +541,11 @@ impl PlaybackService for NativePlaybackService {
         }
 
         let path = self
-            .current_path
-            .clone()
+            .active_track
+            .lock()
+            .map_err(|_| Self::unavailable("active track lock poisoned"))?
+            .as_ref()
+            .map(|track| track.path.clone())
             .ok_or_else(|| Self::unavailable("active playback path unavailable"))?;
         let sample_rate = self.output_sample_rate.unwrap_or(44_100);
         let position_ms = self
@@ -525,8 +570,8 @@ impl PlaybackService for NativePlaybackService {
         self.worker = None;
         self.visualization = None;
         self.control = None;
-        self.current_path = None;
-        self.current_metadata = None;
+        *self.active_track.lock().map_err(|_| Self::unavailable("active track lock poisoned"))? =
+            None;
         self.output_sample_rate = None;
 
         self.play(&path)?;
@@ -546,17 +591,63 @@ mod tests {
 
     use pulseseek_audio_cpal::CpalAudioOutput;
     use pulseseek_domain::error::ErrorContract;
+    use pulseseek_playback::TrackChange;
 
     use super::*;
+    use crate::playback_events::{FakeEventEmitter, EVENT_POSITION};
 
     fn service() -> NativePlaybackService {
         NativePlaybackService::new(Arc::new(Mutex::new(CpalAudioOutput::new())))
+    }
+
+    fn set_active_track(service: &NativePlaybackService, path: &str, duration_ms: Option<u64>) {
+        *service.active_track.lock().expect("active track mutex poisoned") =
+            Some(ActiveTrack { path: path.to_string(), duration_ms, channels: 2 });
+    }
+
+    fn active_path(service: &NativePlaybackService) -> Option<String> {
+        service
+            .active_track
+            .lock()
+            .expect("active track mutex poisoned")
+            .as_ref()
+            .map(|track| track.path.clone())
     }
 
     #[test]
     fn output_frames_are_converted_to_wall_clock_milliseconds() {
         assert_eq!(frames_to_millis(48_000, 48_000), 1_000);
         assert_eq!(frames_to_millis(44_100, 44_100), 1_000);
+    }
+
+    #[test]
+    fn consumed_track_change_updates_active_state_before_emitting_position() {
+        let active_track = Arc::new(Mutex::new(Some(ActiveTrack {
+            path: "a.wav".to_string(),
+            duration_ms: Some(10_000),
+            channels: 2,
+        })));
+        let events = Arc::new(FakeEventEmitter::new());
+        let mut current_duration_ms = Some(10_000);
+
+        report_position_tick(
+            3,
+            Some(TrackChange { path: "b.wav".to_string(), duration_ms: Some(4_000) }),
+            &mut current_duration_ms,
+            &active_track,
+            events.as_ref(),
+        );
+
+        let active = active_track.lock().expect("active track mutex poisoned");
+        assert_eq!(active.as_ref().map(|track| track.path.as_str()), Some("b.wav"));
+        assert_eq!(active.as_ref().and_then(|track| track.duration_ms), Some(4_000));
+        drop(active);
+        let recorded = events.recorded_events();
+        assert_eq!(recorded.len(), 2);
+        assert_eq!(recorded[0].event, "playback:track-changed");
+        assert_eq!(recorded[1].event, EVENT_POSITION);
+        assert_eq!(recorded[1].payload["position_ms"], 3);
+        assert_eq!(recorded[1].payload["duration_ms"], 4_000);
     }
 
     #[test]
@@ -571,25 +662,25 @@ mod tests {
     #[test]
     fn reconcile_path_updates_current_path_when_playing_renamed_file() {
         let mut service = service();
-        service.current_path = Some("/music/track.wav".to_string());
+        set_active_track(&service, "/music/track.wav", None);
 
         let reconciled = service
             .reconcile_path("/music/track.wav", "/music/renamed.wav")
             .expect("reconcile succeeds");
         assert!(reconciled, "renamed file is the playing file");
-        assert_eq!(service.current_path.as_deref(), Some("/music/renamed.wav"));
+        assert_eq!(active_path(&service).as_deref(), Some("/music/renamed.wav"));
     }
 
     #[test]
     fn reconcile_path_ignores_rename_of_other_file() {
         let mut service = service();
-        service.current_path = Some("/music/track.wav".to_string());
+        set_active_track(&service, "/music/track.wav", None);
 
         let reconciled = service
             .reconcile_path("/music/other.wav", "/music/other-renamed.wav")
             .expect("reconcile succeeds");
         assert!(!reconciled, "rename of another file is not reconciled");
-        assert_eq!(service.current_path.as_deref(), Some("/music/track.wav"));
+        assert_eq!(active_path(&service).as_deref(), Some("/music/track.wav"));
     }
 
     #[test]
@@ -600,23 +691,13 @@ mod tests {
             .reconcile_path("/music/track.wav", "/music/renamed.wav")
             .expect("reconcile succeeds");
         assert!(!reconciled, "no active session means no reconciliation");
-        assert!(service.current_path.is_none());
-    }
-
-    fn metadata_with_duration(ms: u64) -> StreamMetadata {
-        StreamMetadata {
-            sample_rate: 44_100,
-            channels: 2,
-            duration: Duration::from_millis(ms),
-            bit_depth: Some(16),
-            codec: "PCM",
-        }
+        assert!(active_path(&service).is_none());
     }
 
     #[test]
     fn set_loop_region_rejects_reversed_points_before_touching_worker() {
         let mut service = service();
-        service.current_metadata = Some(metadata_with_duration(10_000));
+        set_active_track(&service, "/music/track.wav", Some(10_000));
 
         let error = service.set_loop_region(5_000, 2_000).expect_err("reversed region is rejected");
         assert_eq!(error.user_descriptor().category(), ErrorCategory::InvalidInput);
@@ -626,7 +707,7 @@ mod tests {
     #[test]
     fn set_loop_region_rejects_points_beyond_duration() {
         let mut service = service();
-        service.current_metadata = Some(metadata_with_duration(10_000));
+        set_active_track(&service, "/music/track.wav", Some(10_000));
 
         let error =
             service.set_loop_region(9_000, 11_000).expect_err("out-of-bounds end is rejected");
@@ -645,7 +726,7 @@ mod tests {
     #[test]
     fn set_loop_region_requires_a_running_worker() {
         let mut service = service();
-        service.current_metadata = Some(metadata_with_duration(10_000));
+        set_active_track(&service, "/music/track.wav", Some(10_000));
 
         let error = service.set_loop_region(1_000, 5_000).expect_err("no worker means no engine");
         assert_eq!(error.user_descriptor().category(), ErrorCategory::Unavailable);
