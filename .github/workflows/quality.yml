@@ -16,6 +16,11 @@ concurrency:
 jobs:
   commitlint:
     name: Commit messages
+    # Only feature work targets develop. Release PRs to main span the entire
+    # history since the last tag, including legacy commits that predate
+    # Conventional Commits and cannot be rewritten; their commits are
+    # reviewed manually instead.
+    if: github.event.pull_request.base.ref == 'develop'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
