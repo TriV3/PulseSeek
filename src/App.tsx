@@ -65,6 +65,7 @@ import {
 } from "./shortcuts/seekStep";
 import { ConfirmDialog } from "./components/ConfirmDialog/ConfirmDialog";
 import "./components/ConfirmDialog/ConfirmDialog.css";
+import { APP_VERSION } from "./version";
 import "./styles/tokens.css";
 import "./styles/themes/light.css";
 import "./styles/themes/dark.css";
@@ -957,6 +958,9 @@ function App() {
             Clear waveform cache
           </button>
           {clearCacheStatus && <span role="status">{clearCacheStatus}</span>}
+          <span className="app-version" role="text">
+            PulseSeek v{APP_VERSION}
+          </span>
         </div>
       )}
     </div>

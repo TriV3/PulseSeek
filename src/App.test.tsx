@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import App from "./App";
+import { APP_VERSION } from "./version";
 import { DEFAULT_PLAYER_PREFERENCES } from "./hooks/usePlayerPreferences";
 import type { PlayerPreferences } from "./api/commandEnvelope";
 import { DEFAULT_SHORTCUTS } from "./shortcuts/keyboardShortcuts";
@@ -123,6 +124,14 @@ describe("application shell", () => {
       screen.getByRole("button", { name: "Clear cache" }),
     ).toBeInTheDocument();
     expect(invoke).not.toHaveBeenCalledWith("clear_waveform_cache");
+  });
+
+  it("shows the application version at the bottom of the Options menu", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Options" }));
+
+    expect(screen.getByText(`PulseSeek v${APP_VERSION}`)).toBeInTheDocument();
   });
 
   it("renders the folder tree with an accessible heading", () => {

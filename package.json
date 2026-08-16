@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit --pretty false -p tsconfig.json && tsc --noEmit --pretty false -p tsconfig.node.json",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "bench": "playwright test --config playwright.bench.config.ts"
+    "bench": "playwright test --config playwright.bench.config.ts",
+    "prepare": "husky"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.8",
@@ -25,6 +26,8 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.2",
+    "@commitlint/config-conventional": "^21.2.2",
     "@eslint/js": "^9.39.5",
     "@playwright/test": "^1.62.0",
     "@tauri-apps/cli": "^2.0.0",
@@ -39,6 +42,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",
     "globals": "^17.7.0",
+    "husky": "^9.1.7",
     "jsdom": "^29.1.1",
     "prettier": "^3.9.6",
     "typescript": "^5.6.0",
