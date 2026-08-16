@@ -163,19 +163,22 @@ function App() {
   const compactFoldersTabRef = useRef<HTMLButtonElement | null>(null);
   const compactBookmarksTabRef = useRef<HTMLButtonElement | null>(null);
   const compactRecentTabRef = useRef<HTMLButtonElement | null>(null);
-  const optionsMenuRef = useRef<HTMLDetailsElement | null>(null);
+  const optionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const optionsButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (!optionsMenuOpen) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
       const target = event.target;
       if (target instanceof Node && !optionsMenuRef.current?.contains(target)) {
-        optionsMenuRef.current?.removeAttribute("open");
         setOptionsMenuOpen(false);
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOptionsMenuOpen(false);
+      if (event.key === "Escape") {
+        setOptionsMenuOpen(false);
+        optionsButtonRef.current?.focus();
+      }
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer);
     document.addEventListener("keydown", closeOnEscape);
@@ -836,6 +839,129 @@ function App() {
     </>
   );
 
+  const optionsMenu = (
+    <div ref={optionsMenuRef} className="app-options-menu">
+      <button
+        ref={optionsButtonRef}
+        type="button"
+        className="app-options-trigger"
+        aria-expanded={optionsMenuOpen}
+        aria-controls="app-options-menu-content"
+        onClick={(event) => {
+          event.preventDefault();
+          setOptionsMenuOpen((open) => !open);
+        }}
+      >
+        Options
+      </button>
+      {optionsMenuOpen && (
+        <div id="app-options-menu-content" className="app-options-menu-content">
+          <PlaybackModeSelector
+            mode={playbackMode.mode}
+            error={playbackMode.error}
+            onChange={async (mode) => {
+              const confirmed = await playbackMode.selectMode(mode);
+              if (confirmed) {
+                playerPreferences.update({ playback_mode: confirmed });
+              }
+            }}
+          />
+          <AudioDeviceSelector
+            {...audioDevices}
+            onChange={async (deviceId) => {
+              const confirmed = await audioDevices.choose(deviceId);
+              if (confirmed) {
+                playerPreferences.update({ output_device_id: confirmed });
+              }
+            }}
+            onRetry={audioDevices.refresh}
+          />
+          <ThemeSelector
+            theme={playerPreferences.preferences.theme}
+            onChange={(theme) => playerPreferences.update({ theme })}
+          />
+          <label className="app-option-row" htmlFor="seek-step">
+            <span>Seek step</span>
+            <select
+              id="seek-step"
+              value={playerPreferences.preferences.seek_step_mode}
+              onChange={(event) =>
+                playerPreferences.update({
+                  seek_step_mode: event.currentTarget.value as SeekStepMode,
+                })
+              }
+            >
+              <option value="auto">Auto</option>
+              {SEEK_STEP_PRESETS.map((seconds) => (
+                <option key={seconds} value={`${seconds}s`}>
+                  {seconds} s
+                </option>
+              ))}
+            </select>
+          </label>
+          <VisualizationSettingsControls
+            enabled={visualizationSettings.settings.enabled}
+            quality={visualizationSettings.settings.quality}
+            reducedMotion={visualizationSettings.reducedMotion}
+            onEnabledChange={(enabled) =>
+              visualizationSettings.update({ enabled })
+            }
+            onQualityChange={(quality) =>
+              visualizationSettings.update({ quality })
+            }
+          />
+          <div className="app-option-row">
+            <label htmlFor="show-hidden-folders">Show hidden folders</label>
+            <input
+              id="show-hidden-folders"
+              type="checkbox"
+              checked={playerPreferences.preferences.show_hidden_folders}
+              onChange={(event) =>
+                playerPreferences.update({
+                  show_hidden_folders: event.currentTarget.checked,
+                })
+              }
+            />
+          </div>
+          <div className="app-option-row">
+            <label htmlFor="gapless-playback">Gapless playback</label>
+            <input
+              id="gapless-playback"
+              type="checkbox"
+              checked={playerPreferences.preferences.gapless_playback}
+              onChange={(event) =>
+                playerPreferences.update({
+                  gapless_playback: event.currentTarget.checked,
+                })
+              }
+            />
+          </div>
+          <button
+            type="button"
+            className="shortcut-settings-button"
+            onClick={() => {
+              setOptionsMenuOpen(false);
+              setShortcutEditorOpen(true);
+            }}
+          >
+            Keyboard shortcuts
+          </button>
+          <button
+            type="button"
+            className="shortcut-settings-button"
+            onClick={() => {
+              setClearCacheStatus(null);
+              setClearCacheDialogOpen(true);
+            }}
+          >
+            Clear waveform cache
+          </button>
+          {clearCacheStatus && <span role="status">{clearCacheStatus}</span>}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <main
       className={compactMode ? "app-shell app-shell--compact" : "app-shell"}
@@ -878,6 +1004,7 @@ function App() {
           onClearAB={() => transport.clearAB()}
           compact={compactMode}
           onToggleCompact={toggleCompactMode}
+          headerActions={optionsMenu}
         />
         <div
           className="splitter splitter--horizontal"
@@ -952,16 +1079,6 @@ function App() {
             {!compactMode && (
               <div className="transport-options">
                 <div className="transport-settings">
-                  <PlaybackModeSelector
-                    mode={playbackMode.mode}
-                    error={playbackMode.error}
-                    onChange={async (mode) => {
-                      const confirmed = await playbackMode.selectMode(mode);
-                      if (confirmed) {
-                        playerPreferences.update({ playback_mode: confirmed });
-                      }
-                    }}
-                  />
                   <VisualizationSelector
                     value={visualizationSettings.settings.mode}
                     onChange={(mode) => visualizationSettings.update({ mode })}
@@ -987,125 +1104,6 @@ function App() {
                     <span role="alert">{folderPickerError}</span>
                   )}
                 </div>
-                <details
-                  ref={optionsMenuRef}
-                  className="app-options-menu"
-                  open={optionsMenuOpen}
-                >
-                  <summary
-                    aria-label="Open application menu"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      setOptionsMenuOpen((open) => !open);
-                    }}
-                  >
-                    ☰
-                  </summary>
-                  <div className="app-options-menu-content">
-                    <AudioDeviceSelector
-                      {...audioDevices}
-                      onChange={async (deviceId) => {
-                        const confirmed = await audioDevices.choose(deviceId);
-                        if (confirmed) {
-                          playerPreferences.update({
-                            output_device_id: confirmed,
-                          });
-                        }
-                      }}
-                      onRetry={audioDevices.refresh}
-                    />
-                    <ThemeSelector
-                      theme={playerPreferences.preferences.theme}
-                      onChange={(theme) => {
-                        playerPreferences.update({ theme });
-                      }}
-                    />
-                    <label className="app-option-row" htmlFor="seek-step">
-                      <span>Seek step</span>
-                      <select
-                        id="seek-step"
-                        value={playerPreferences.preferences.seek_step_mode}
-                        onChange={(event) =>
-                          playerPreferences.update({
-                            seek_step_mode: event.currentTarget
-                              .value as SeekStepMode,
-                          })
-                        }
-                      >
-                        <option value="auto">Auto</option>
-                        {SEEK_STEP_PRESETS.map((seconds) => (
-                          <option key={seconds} value={`${seconds}s`}>
-                            {seconds} s
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <VisualizationSettingsControls
-                      enabled={visualizationSettings.settings.enabled}
-                      quality={visualizationSettings.settings.quality}
-                      reducedMotion={visualizationSettings.reducedMotion}
-                      onEnabledChange={(enabled) =>
-                        visualizationSettings.update({ enabled })
-                      }
-                      onQualityChange={(quality) =>
-                        visualizationSettings.update({ quality })
-                      }
-                    />
-                    <div className="app-option-row">
-                      <label htmlFor="show-hidden-folders">
-                        Show hidden folders
-                      </label>
-                      <input
-                        id="show-hidden-folders"
-                        type="checkbox"
-                        checked={
-                          playerPreferences.preferences.show_hidden_folders
-                        }
-                        onChange={(event) => {
-                          playerPreferences.update({
-                            show_hidden_folders: event.currentTarget.checked,
-                          });
-                        }}
-                      />
-                    </div>
-                    <div className="app-option-row">
-                      <label htmlFor="gapless-playback">Gapless playback</label>
-                      <input
-                        id="gapless-playback"
-                        type="checkbox"
-                        checked={playerPreferences.preferences.gapless_playback}
-                        onChange={(event) =>
-                          playerPreferences.update({
-                            gapless_playback: event.currentTarget.checked,
-                          })
-                        }
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      className="shortcut-settings-button"
-                      onClick={() => {
-                        setOptionsMenuOpen(false);
-                        setShortcutEditorOpen(true);
-                      }}
-                    >
-                      Keyboard shortcuts
-                    </button>
-                    <button
-                      type="button"
-                      className="shortcut-settings-button"
-                      onClick={() => {
-                        setClearCacheStatus(null);
-                        setClearCacheDialogOpen(true);
-                      }}
-                    >
-                      Clear waveform cache
-                    </button>
-                    {clearCacheStatus && (
-                      <span role="status">{clearCacheStatus}</span>
-                    )}
-                  </div>
-                </details>
               </div>
             )}
           </div>

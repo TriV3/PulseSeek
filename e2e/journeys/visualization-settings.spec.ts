@@ -13,7 +13,7 @@ test.describe("visualization settings", () => {
     await expect(
       page.getByRole("img", { name: "Linear frequency analyzer" }),
     ).toBeVisible();
-    await page.getByLabel("Open application menu").click();
+    await page.getByRole("button", { name: "Options" }).click();
     await page.getByLabel("Visualization quality").selectOption("high");
     await page
       .getByRole("checkbox", {
@@ -43,7 +43,7 @@ test.describe("visualization settings", () => {
     await page
       .getByLabel("Visualization", { exact: true })
       .selectOption("musical");
-    await page.getByLabel("Open application menu").click();
+    await page.getByRole("button", { name: "Options" }).click();
 
     await expect(
       page.getByRole("slider", { name: "Waveform seek" }),

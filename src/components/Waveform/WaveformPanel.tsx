@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useWaveform } from "../../hooks/useWaveform";
 import type { PlayableFileMetadata } from "../FolderTree/folderTreeTypes";
 import { LinearAnalyzerCanvas } from "../LinearAnalyzer/LinearAnalyzerCanvas";
@@ -47,6 +47,8 @@ export interface WaveformPanelProps {
   compact?: boolean;
   /** Toggles the compact player mode from the header control. */
   onToggleCompact?: () => void;
+  /** Application controls rendered beside compact toggle in both layouts. */
+  headerActions?: ReactNode;
   /** Clears the confirmed region and placed points. */
   onClearAB?: () => void | Promise<boolean>;
 }
@@ -122,6 +124,7 @@ export function WaveformPanel({
   onClearAB,
   compact = false,
   onToggleCompact,
+  headerActions,
 }: WaveformPanelProps) {
   const [resolution, setResolution] = useState<{
     entryPath: string | null;
@@ -149,28 +152,23 @@ export function WaveformPanel({
       aria-label="Audio visualization"
     >
       <header className="now-playing">
-        <div>
+        <div className="now-playing-track">
           <span className="now-playing-label">Play:</span>{" "}
           <strong>{entryName}</strong>
         </div>
-        {!compact && (
-          <div className="brand-mark" aria-label="PulseSeek">
-            <span className="brand-wave" aria-hidden="true">
-              ∿
-            </span>
-            pulseseek
-          </div>
-        )}
-        <button
-          type="button"
-          className="compact-toggle"
-          aria-pressed={compact}
-          aria-label="Toggle compact mode"
-          title="Toggle compact mode"
-          onClick={onToggleCompact}
-        >
-          ⇲
-        </button>
+        <div className="now-playing-actions">
+          {headerActions}
+          <button
+            type="button"
+            className="compact-toggle"
+            aria-pressed={compact}
+            aria-label="Toggle compact mode"
+            title="Toggle compact mode"
+            onClick={onToggleCompact}
+          >
+            ⇲
+          </button>
+        </div>
       </header>
       <div className="audio-summary">{formatAudioSummary(metadata)}</div>
       {!compact && (
