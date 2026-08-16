@@ -47,7 +47,8 @@
       }
 
       .startup-splash__title,
-      .startup-splash__credit {
+      .startup-splash__credit,
+      .startup-splash__version {
         margin: 0;
       }
 
@@ -63,6 +64,13 @@
         font-size: clamp(0.78rem, 2.5vw, 1rem);
         font-weight: 600;
         letter-spacing: 0.08em;
+      }
+
+      .startup-splash__version {
+        color: #4a3630;
+        font-size: clamp(0.62rem, 1.8vw, 0.78rem);
+        font-weight: 500;
+        letter-spacing: 0.05em;
       }
 
       .startup-splash--leaving {
@@ -89,6 +97,7 @@
         <img class="startup-splash__wave" src="/pulseseek-wave.png" alt="" />
         <p class="startup-splash__title">PulseSeek</p>
         <p class="startup-splash__credit">by Mr TriVe</p>
+        <p class="startup-splash__version">v{{APP_VERSION}}</p>
       </div>
     </div>
     <div id="root"></div>

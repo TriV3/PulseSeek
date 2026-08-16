@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 interface TauriConfig {
+  version?: string;
   build?: {
     beforeBuildCommand?: string;
     beforeDevCommand?: string;
@@ -32,6 +33,10 @@ describe("Tauri frontend lifecycle", () => {
       devUrl: "http://localhost:1420",
       frontendDist: "../dist",
     });
+  });
+
+  it("does not pin a bundle version so Tauri inherits the Cargo package version", () => {
+    expect(config.version).toBeUndefined();
   });
 
   it("declares the generated desktop application icons", () => {
