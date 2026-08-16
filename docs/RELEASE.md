@@ -39,11 +39,20 @@ After the `v1.0.0` tag exists on `main`, the `Release` workflow
 1. On every push to `main`, release-please inspects Conventional Commits since
    the latest tag.
 2. When the commit range contains a release, it opens or updates a release
-   pull request that bumps every workspace crate, `package.json`, and
-   `Cargo.lock`, and rewrites `CHANGELOG.md`.
+   pull request that bumps every workspace crate, `package.json`,
+   `src-tauri/tauri.conf.json`, and `Cargo.lock`, and rewrites `CHANGELOG.md`.
 3. Merging that release pull request into `main` creates the `vX.Y.Z` tag on
    the exact merge commit and creates the GitHub Release from the changelog.
-4. Release metadata is synchronized back into `develop` (Phase 6).
+4. The `Build release binaries` workflow (`build-release.yml`) reacts to the
+   published release, builds native binaries for macOS (Apple Silicon and
+   Intel), Windows (NSIS), and Linux (deb, rpm, AppImage), attaches them to
+   the release, and uploads a `SHA256SUMS.txt` checksum file.
+5. Release metadata is synchronized back into `develop` (Phase 6).
+
+Binaries are currently built **unsigned**: no code-signing or notarization is
+performed, and the release notes must state that clearly. Adding signing is a
+separate decision that requires Apple Developer and/or Windows code-signing
+credentials as GitHub secrets.
 
 The release pull request is subject to branch protection and the quality
 checks in `quality.yml`, which also run on pull requests targeting `main`.
