@@ -1,0 +1,28 @@
+.log-analyzer {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-panel);
+}
+
+.log-analyzer-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.log-analyzer > .waveform-interaction {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+}
+
+.log-analyzer-disabled {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 11px;
+}

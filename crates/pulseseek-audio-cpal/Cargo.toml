@@ -1,0 +1,10 @@
+[package]
+name = "pulseseek-audio-cpal"
+version = "1.0.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+pulseseek-domain = { path = "../pulseseek-domain" }
+pulseseek-playback = { path = "../pulseseek-playback" }
+cpal = "0.17"

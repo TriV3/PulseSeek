@@ -1,0 +1,513 @@
+/* ── Container ───────────────────────────────────────────────────────── */
+
+.file-list {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  font-size: 11px;
+  color: var(--text);
+  background: var(--bg-surface);
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+}
+
+/* ── Placeholder states ──────────────────────────────────────────────── */
+
+.file-list--empty,
+.file-list--loading,
+.file-list--error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+/* State content below the always-visible actions bar when a folder is
+   selected (loading, error, empty folder, empty search result). */
+.file-list-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.file-list-placeholder {
+  color: var(--text-muted);
+  font-size: 14px;
+  font-style: italic;
+}
+
+.file-list-placeholder--error {
+  color: var(--text-danger);
+}
+
+.file-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 3px 7px;
+  border-bottom: 1px solid var(--line-soft);
+  flex-shrink: 0;
+}
+
+.file-list-actions button {
+  padding: 3px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--bg-surface);
+  cursor: pointer;
+}
+
+.file-list-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.file-list-actions .file-list-search {
+  min-width: 140px;
+  padding: 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--bg-surface);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.file-list-actions .file-list-search::placeholder {
+  color: var(--text-muted);
+}
+
+.file-list-actions .file-list-search:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.file-list-action-menu,
+.file-list-filter-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.file-list-action-menu > summary,
+.file-list-filter-menu > summary {
+  padding: 3px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--bg-surface);
+  cursor: pointer;
+  list-style: none;
+}
+
+.file-list-action-menu > summary::-webkit-details-marker,
+.file-list-filter-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.file-list-action-menu > summary::after,
+.file-list-filter-menu > summary::after {
+  content: " ▾";
+  color: var(--text-muted);
+}
+
+.file-list-action-menu > summary:focus-visible,
+.file-list-filter-menu > summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.file-list-action-menu-content,
+.file-list-filter-menu-content {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 4px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 150px;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-overlay);
+}
+
+.file-list-action-menu-content button {
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.file-list-filter-menu-content {
+  min-width: 175px;
+}
+
+/* ── Format filter ───────────────────────────────────────────────────── */
+
+.file-list-format-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.file-list-format-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.file-list-format-option input[type="checkbox"] {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.file-list-format-filter legend {
+  width: 100%;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.file-list-format-filter button {
+  padding: 2px 6px;
+}
+
+.file-list-format-filter button:focus-visible,
+.file-list-format-option:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.file-list-trash-error,
+.file-list-external-error {
+  color: var(--text-danger);
+  font-size: 13px;
+}
+
+/* ── Header ──────────────────────────────────────────────────────────── */
+
+.file-list-header {
+  display: grid;
+  grid-template-columns:
+    minmax(220px, 1fr)
+    90px 90px 170px 90px 110px 90px 80px 80px 70px;
+  align-items: center;
+  padding: 3px 7px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(var(--bg-header), var(--bg-header-strong));
+  font-weight: 500;
+  font-size: 10px;
+  color: var(--text-strong);
+  flex-shrink: 0;
+  box-sizing: border-box;
+  min-width: 1030px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.file-list-header > *:not(:first-child) {
+  text-align: right;
+}
+
+.file-list-sort-button {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+}
+
+.file-list-sort-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* ── Virtual viewport ────────────────────────────────────────────────── */
+
+.file-list-horizontal-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 3px 7px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+}
+
+.file-list-horizontal-controls button {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--bg-surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.file-list-horizontal-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.file-list-horizontal-controls button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.file-list-viewport {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+
+.file-list-viewport:active {
+  cursor: default;
+}
+
+.file-list-inner {
+  position: relative;
+  min-width: 1030px;
+}
+
+/* ── Row ─────────────────────────────────────────────────────────────── */
+
+.file-list-row {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns:
+    minmax(220px, 1fr)
+    90px 90px 170px 90px 110px 90px 80px 80px 70px;
+  align-items: center;
+  padding: 0 7px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line-soft);
+  box-sizing: border-box;
+  user-select: none;
+}
+
+.file-list-row > span:not(:first-child) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.file-list-row:hover {
+  background: var(--bg-hover);
+}
+
+.file-list-row--folder .file-list-row-name {
+  font-weight: 600;
+}
+
+.file-list-row--folder > span:last-child {
+  color: var(--text-muted);
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 9px;
+}
+
+.file-list-row.selected {
+  background: var(--bg-selected);
+}
+
+.file-list-row:focus {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.file-list-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+/* ── Mark pastilles in the name column ─────────────────────────────── */
+
+.file-list-mark-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.file-list-mark-dot--keep {
+  background-color: var(--mark-keep);
+}
+
+.file-list-mark-dot--maybe {
+  background-color: var(--mark-maybe);
+}
+
+.file-list-mark-dot--reject {
+  background-color: var(--mark-reject);
+}
+
+.file-list-mark-dot--favorite {
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  color: var(--mark-favorite);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.file-list-playback-error {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 6px 12px;
+  color: var(--text-danger);
+  border-top: 1px solid var(--line-soft);
+  font-size: 13px;
+}
+
+/* ── Session marks ─────────────────────────────────────────────────── */
+
+.file-list-mark-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.file-list-mark-menu > summary {
+  padding: 3px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--bg-surface);
+  cursor: pointer;
+  list-style: none;
+}
+
+.file-list-mark-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.file-list-mark-menu > summary::after {
+  content: " ▾";
+  color: var(--text-muted);
+}
+
+.file-list-mark-menu > summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.file-list-mark-menu-content {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 4px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 220px;
+  padding: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-overlay);
+}
+
+.file-list-mark-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.file-list-mark-controls button {
+  padding: 2px 6px;
+}
+
+.file-list-mark-controls button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.file-list-mark-controls legend {
+  width: 100%;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.file-list-mark-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.file-list-mark-filter select {
+  padding: 2px 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--bg-surface);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.file-list-mark-filter select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.file-list-mark {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.file-list-mark--keep {
+  color: var(--mark-keep);
+  background: var(--bg-subtle);
+  border-color: var(--mark-keep);
+}
+
+.file-list-mark--maybe {
+  color: var(--mark-maybe);
+  background: var(--bg-subtle);
+  border-color: var(--mark-maybe);
+}
+
+.file-list-mark--reject {
+  color: var(--mark-reject);
+  background: var(--bg-subtle);
+  border-color: var(--mark-reject);
+}
+
+.file-list-mark--favorite {
+  color: var(--mark-favorite);
+  background: var(--bg-subtle);
+  border-color: var(--mark-favorite);
+}

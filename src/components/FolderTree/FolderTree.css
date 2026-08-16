@@ -1,0 +1,301 @@
+/* ── Container ───────────────────────────────────────────────────────── */
+
+.folder-tree {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--text);
+  height: 100%;
+  background: var(--bg-subtle);
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  overflow: auto;
+  user-select: none;
+}
+
+/* ── Toolbar ──────────────────────────────────────────────────────────── */
+
+.folder-tree-toolbar {
+  display: flex;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  gap: 4px;
+  min-height: 30px;
+  padding: 3px 5px;
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: 0;
+  background: var(--bg-chrome);
+}
+
+.open-folder-btn,
+.go-up-btn,
+.bookmark-folder-btn {
+  padding: 3px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--bg-surface);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.open-folder-btn {
+  color: var(--text-strong);
+}
+
+.go-up-btn {
+  color: var(--text-strong);
+}
+
+.bookmark-folder-btn {
+  color: var(--folder-bookmark);
+}
+
+.open-folder-btn:disabled,
+.go-up-btn:disabled,
+.bookmark-folder-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.open-folder-btn:hover:not(:disabled),
+.go-up-btn:hover:not(:disabled),
+.bookmark-folder-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.current-path {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+}
+
+/* ── Error banner ─────────────────────────────────────────────────────── */
+
+.folder-tree-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.folder-tree-banner--error {
+  background: var(--bg-danger-subtle);
+  border: 1px solid var(--line-danger);
+  color: var(--text-danger);
+}
+
+.banner-close-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  color: inherit;
+}
+
+/* ── Tree list ────────────────────────────────────────────────────────── */
+
+.folder-tree-root {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0;
+}
+
+.browser-section-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 24px;
+  padding: 2px 7px;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg-chrome);
+  color: var(--text-muted);
+  font: inherit;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.browser-section-header:hover {
+  background: var(--bg-hover);
+}
+.browser-section-header:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.folder-children {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 10px;
+}
+
+/* ── Folder node ──────────────────────────────────────────────────────── */
+
+.folder-node {
+  cursor: default;
+  border-radius: 0;
+  padding-left: 0;
+}
+
+.folder-node:hover {
+  background: var(--bg-hover);
+}
+
+.folder-node.selected {
+  background: var(--bg-selected);
+}
+
+.folder-node--audio-path > .folder-node-row {
+  color: var(--folder-active-path);
+  font-weight: 700;
+}
+
+.folder-node--bookmarked > .folder-node-row {
+  color: var(--folder-bookmark);
+  font-weight: 600;
+}
+
+.folder-node--bookmarked > .folder-node-row .folder-icon {
+  color: var(--folder-bookmark);
+}
+
+.folder-node-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 20px;
+  padding: 1px 4px;
+  border-bottom: 1px solid var(--line-soft);
+  cursor: pointer;
+}
+
+/* ── Folder toggle button ─────────────────────────────────────────────── */
+
+.folder-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.folder-arrow {
+  font-size: 10px;
+  transition: transform 0.15s ease;
+  display: inline-block;
+}
+
+.folder-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+.folder-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--spinner-track);
+  border-top-color: var(--spinner-head);
+  border-radius: 50%;
+  animation: folder-spin 0.6s linear infinite;
+}
+
+@keyframes folder-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Folder icon + name ───────────────────────────────────────────────── */
+
+.folder-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.folder-icon-fill {
+  fill: currentColor;
+  stroke: none;
+}
+
+.folder-icon--computer {
+  color: var(--browser-icon-computer);
+}
+
+.folder-icon--system {
+  color: var(--browser-icon-system);
+}
+
+.folder-icon--home {
+  color: var(--browser-icon-home);
+}
+
+.folder-icon--physical {
+  color: var(--browser-icon-physical);
+}
+
+.folder-icon--network {
+  color: var(--browser-icon-network);
+}
+
+.folder-icon--folder {
+  color: var(--browser-icon-folder);
+}
+
+.folder-icon--documents,
+.folder-icon--music,
+.folder-icon--pictures,
+.folder-icon--videos,
+.folder-icon--downloads {
+  color: var(--browser-icon-library);
+}
+
+.folder-name {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Error / empty state ──────────────────────────────────────────────── */
+
+.folder-error {
+  font-size: 12px;
+  color: var(--text-danger);
+  padding: 2px 0 2px 20px;
+}
+
+.folder-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 2px 0 2px 20px;
+}

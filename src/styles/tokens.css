@@ -1,0 +1,21 @@
+/*
+ * PulseSeek design foundation.
+ *
+ * Semantic tokens live in one file per theme under `themes/`:
+ *   themes/light.css  → :root, [data-theme="light"]
+ *   themes/dark.css   → [data-theme="dark"]
+ *   themes/midnight.css → [data-theme="midnight"]
+ *   themes/high-contrast.css → [data-theme="high-contrast"]
+ * Feature components must consume colors through tokens only.
+ */
+
+:root {
+  font-family:
+    Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+}

@@ -1,0 +1,97 @@
+/*
+ * PulseSeek High Contrast — an accessible theme with maximum contrast
+ * between text, controls, and their backgrounds. Applied when the active
+ * theme resolves to "high-contrast".
+ * Components must consume colors through tokens only; never a named palette.
+ */
+
+[data-theme="high-contrast"] {
+  /* Base document */
+  color: #ffffff;
+  background: #000000;
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg-canvas: #000000;
+  --bg-surface: #000000;
+  --bg-subtle: #0d0d0d;
+  --bg-panel: #000000;
+  --bg-chrome: #0d0d0d;
+  --bg-chrome-strong: #1a1a1a;
+  --bg-hover: #1a1a1a;
+  --bg-selected: #2b2b2b;
+  --bg-header: #000000;
+  --bg-header-strong: #000000;
+  --bg-button: #000000;
+  --bg-button-strong: #0d0d0d;
+  --bg-browser-tabs: #000000;
+
+  /* Text */
+  --text: #ffffff;
+  --text-strong: #ffffff;
+  --text-muted: #d9d9d9;
+  --text-subtle: #b0b0b0;
+  --text-brand: #ffff00;
+  --text-danger: #ff8080;
+  --text-on-accent: #000000;
+  --folder-active-path: #ffff00;
+  --folder-bookmark: #ff66ff;
+  --browser-icon-computer: #ffffff;
+  --browser-icon-system: #d9d9d9;
+  --browser-icon-home: #00ffff;
+  --browser-icon-physical: #ffb000;
+  --browser-icon-network: #00ffff;
+  --browser-icon-folder: #ffff00;
+  --browser-icon-library: #ff66ff;
+
+  /* Borders */
+  --line: #6a6a6a;
+  --line-strong: #ffffff;
+  --line-soft: #3a3a3a;
+
+  /* Accent */
+  --accent: #ffff00;
+  --accent-strong: #e6c800;
+  --accent-play: #ffff00;
+  --accent-play-soft: #1a1a00;
+  --accent-play-ink: #ffffff;
+  --accent-play-border: #ffff00;
+  --accent-range: #ffff00;
+
+  /* Danger */
+  --bg-danger: #b30000;
+  --bg-danger-strong: #ff3030;
+  --bg-danger-subtle: #2b0000;
+  --line-danger: #ff8080;
+  --line-danger-strong: #ff5050;
+
+  /* Session marks */
+  --mark-keep: #00ff00;
+  --mark-maybe: #ffa500;
+  --mark-reject: #ff3030;
+  --mark-favorite: #ffff00;
+
+  /* Waveform */
+  --wave: #00e5ff;
+  --wave-grid: #6a6a6a;
+  --wave-soft: #008ea3;
+  --wave-selection: #ffff00;
+  --wave-selection-border: #ffff00;
+  --wave-seek-current: #ffff00;
+  --wave-seek-hover: #ff00ff;
+  --wave-time-current: #ffff00;
+  --wave-time-hover: #ff00ff;
+  --analyzer-spectrum: #00ffff;
+  --analyzer-spectrum-soft: rgba(0, 255, 255, 0.22);
+  --analyzer-grid: #6a6a6a;
+  --analyzer-label: #ffffff;
+
+  /* Focus and overlay */
+  --focus-ring: #ffff00;
+  --overlay-backdrop: rgba(0, 0, 0, 0.7);
+  --shadow-overlay: 0 4px 16px rgba(0, 0, 0, 0.8);
+
+  /* Spinner */
+  --spinner-track: #6a6a6a;
+  --spinner-head: #ffffff;
+}

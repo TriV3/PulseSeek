@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PulseSeek</title>
+    <style>
+      html,
+      body,
+      #root {
+        min-height: 100%;
+      }
+
+      body {
+        margin: 0;
+      }
+
+      #startup-splash {
+        position: fixed;
+        z-index: 9999;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        box-sizing: border-box;
+        padding: 32px;
+        color: #f8efe2;
+        background: #ce975a;
+        font-family: ui-rounded, "Avenir Next", Avenir, "Segoe UI", sans-serif;
+        text-align: center;
+        opacity: 1;
+        transition: opacity 220ms ease-out;
+        /* Purely decorative; never intercept pointer input while visible. */
+        pointer-events: none;
+      }
+
+      .startup-splash__content {
+        display: grid;
+        justify-items: center;
+        gap: 8px;
+      }
+
+      .startup-splash__wave {
+        width: min(54vw, 340px);
+        height: auto;
+        margin-bottom: 12px;
+        animation: startup-splash-wave 1600ms ease-in-out infinite;
+      }
+
+      .startup-splash__title,
+      .startup-splash__credit,
+      .startup-splash__version {
+        margin: 0;
+      }
+
+      .startup-splash__title {
+        color: #163f34;
+        font-size: clamp(2.1rem, 7vw, 3.4rem);
+        font-weight: 700;
+        letter-spacing: -0.055em;
+      }
+
+      .startup-splash__credit {
+        color: #4a3630;
+        font-size: clamp(0.78rem, 2.5vw, 1rem);
+        font-weight: 600;
+        letter-spacing: 0.08em;
+      }
+
+      .startup-splash__version {
+        color: #4a3630;
+        font-size: clamp(0.62rem, 1.8vw, 0.78rem);
+        font-weight: 500;
+        letter-spacing: 0.05em;
+      }
+
+      .startup-splash--leaving {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      @keyframes startup-splash-wave {
+        50% {
+          transform: scale(1.025);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .startup-splash__wave {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="startup-splash" role="status" aria-live="polite">
+      <div class="startup-splash__content">
+        <img class="startup-splash__wave" src="/pulseseek-wave.png" alt="" />
+        <p class="startup-splash__title">PulseSeek</p>
+        <p class="startup-splash__credit">by Mr TriVe</p>
+        <p class="startup-splash__version">v{{APP_VERSION}}</p>
+      </div>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

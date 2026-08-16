@@ -1,0 +1,327 @@
+use std::error::Error;
+use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
+
+use pulseseek_domain::visualization::{
+    MusicalSpectrumFrame, SpectrumFrame, VisualizationFrameError, VisualizationMode,
+    VisualizationQuality, VisualizationSettings, MAX_VISUALIZATION_FRAME_SAMPLES,
+};
+use pulseseek_playback::{
+    visualization_channel, FftError, FftWorker, MusicalSpectrumAnalyzer, SpectrumReceiver,
+    VisualizationControl, VisualizationTap, DEFAULT_TUNING_REFERENCE_HZ,
+};
+
+use crate::playback_events::types::{
+    MusicalBandPayload, MusicalSpectrumFramePayload, SpectrumFramePayload,
+    MUSICAL_SPECTRUM_FORMAT_VERSION, SPECTRUM_FORMAT_VERSION,
+};
+use crate::playback_events::{
+    PlaybackEventEmitter, EVENT_MUSICAL_SPECTRUM_FRAME, EVENT_SPECTRUM_FRAME,
+};
+
+const INPUT_CAPACITY: usize = 4;
+const OUTPUT_CAPACITY: usize = 2;
+const REPORTER_POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+/// Owns the off-callback FFT and event reporter threads for one playback stream.
+pub(crate) struct VisualizationPipeline {
+    stop: Arc<AtomicBool>,
+    reporter: Option<JoinHandle<()>>,
+    fft_worker: Option<FftWorker>,
+    control: VisualizationControl,
+    sample_rate: u32,
+    fft_size: usize,
+}
+
+impl VisualizationPipeline {
+    pub(crate) fn start_with_settings(
+        sample_rate: u32,
+        channels: usize,
+        settings: VisualizationSettings,
+        events: Arc<dyn PlaybackEventEmitter>,
+    ) -> Result<(Self, VisualizationTap), VisualizationPipelineError> {
+        let fft_size = fft_size_for_channels(channels)
+            .ok_or(VisualizationPipelineError::UnsupportedChannels(channels))?;
+        let channel_count = u16::try_from(channels)
+            .map_err(|_| VisualizationPipelineError::UnsupportedChannels(channels))?;
+        let sample_count = fft_size
+            .checked_mul(channels)
+            .ok_or(VisualizationPipelineError::UnsupportedChannels(channels))?;
+        let (publisher, subscriber) = visualization_channel(INPUT_CAPACITY);
+        let hop_frames = spectrum_hop_frames(sample_rate, fft_size, settings.quality.target_fps());
+        let control = VisualizationControl::new(
+            settings.enabled && settings.mode != VisualizationMode::Waveform,
+            hop_frames,
+        );
+        let tap = VisualizationTap::new_controlled(
+            publisher,
+            sample_rate,
+            channel_count,
+            sample_count,
+            control.clone(),
+        )
+        .map_err(VisualizationPipelineError::InvalidTap)?;
+        let (fft_worker, spectra) =
+            FftWorker::start_controlled(subscriber, fft_size, OUTPUT_CAPACITY, control.clone())
+                .map_err(VisualizationPipelineError::Fft)?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let reporter_stop = Arc::clone(&stop);
+        let reporter = thread::Builder::new()
+            .name("pulseseek-spectrum-events".to_string())
+            .spawn(move || report_spectra(spectra, reporter_stop, events))
+            .map_err(|_| VisualizationPipelineError::ReporterStartFailed)?;
+        Ok((
+            Self {
+                stop,
+                reporter: Some(reporter),
+                fft_worker: Some(fft_worker),
+                control,
+                sample_rate,
+                fft_size,
+            },
+            tap,
+        ))
+    }
+
+    pub(crate) fn configure(&self, enabled: bool, quality: VisualizationQuality) {
+        self.control.set_hop_frames(spectrum_hop_frames(
+            self.sample_rate,
+            self.fft_size,
+            quality.target_fps(),
+        ));
+        self.control.set_enabled(enabled);
+    }
+
+    fn stop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(reporter) = self.reporter.take() {
+            let _ = reporter.join();
+        }
+        self.fft_worker = None;
+    }
+}
+
+impl Drop for VisualizationPipeline {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+fn fft_size_for_channels(channels: usize) -> Option<usize> {
+    if channels == 0 {
+        return None;
+    }
+    let available_frames = MAX_VISUALIZATION_FRAME_SAMPLES.checked_div(channels)?;
+    if available_frames < 2 {
+        return None;
+    }
+    Some(1_usize << available_frames.ilog2())
+}
+
+fn spectrum_hop_frames(sample_rate: u32, fft_size: usize, target_fps: u32) -> usize {
+    usize::try_from(sample_rate / target_fps.max(1)).unwrap_or(fft_size).clamp(1, fft_size)
+}
+
+fn report_spectra(
+    spectra: SpectrumReceiver,
+    stop: Arc<AtomicBool>,
+    events: Arc<dyn PlaybackEventEmitter>,
+) {
+    let musical_analyzer = MusicalSpectrumAnalyzer::new(DEFAULT_TUNING_REFERENCE_HZ)
+        .expect("the built-in tuning reference is valid");
+    while !stop.load(Ordering::Acquire) {
+        let mut frame = match spectra.recv_timeout(REPORTER_POLL_INTERVAL) {
+            Ok(frame) => frame,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
+        if let Some(latest) = spectra.try_receive_latest() {
+            frame = latest.frame;
+        }
+        if events.try_begin_spectrum_delivery() {
+            let payload = spectrum_payload(&frame);
+            let Ok(value) = serde_json::to_value(payload) else {
+                events.acknowledge_spectrum();
+                continue;
+            };
+            if events.emit(EVENT_SPECTRUM_FRAME, value).is_err() {
+                events.acknowledge_spectrum();
+            }
+        }
+        if events.try_begin_musical_spectrum_delivery() {
+            let Ok(musical_frame) = musical_analyzer.analyze(&frame) else {
+                events.acknowledge_musical_spectrum();
+                continue;
+            };
+            let payload = musical_spectrum_payload(&musical_frame);
+            let Ok(value) = serde_json::to_value(payload) else {
+                events.acknowledge_musical_spectrum();
+                continue;
+            };
+            if events.emit(EVENT_MUSICAL_SPECTRUM_FRAME, value).is_err() {
+                events.acknowledge_musical_spectrum();
+            }
+        }
+    }
+}
+
+fn musical_spectrum_payload(frame: &MusicalSpectrumFrame) -> MusicalSpectrumFramePayload {
+    MusicalSpectrumFramePayload {
+        format_version: MUSICAL_SPECTRUM_FORMAT_VERSION,
+        sequence: frame.sequence(),
+        position_frames: frame.position_frames(),
+        sample_rate: frame.sample_rate(),
+        tuning_reference_hz: frame.tuning_reference_hz(),
+        bands: frame
+            .bands()
+            .iter()
+            .map(|band| MusicalBandPayload {
+                note_number: band.note_number(),
+                lower_frequency_hz: band.lower_frequency_hz(),
+                center_frequency_hz: band.center_frequency_hz(),
+                upper_frequency_hz: band.upper_frequency_hz(),
+                magnitude: band.magnitude(),
+            })
+            .collect(),
+    }
+}
+
+fn spectrum_payload(frame: &SpectrumFrame) -> SpectrumFramePayload {
+    SpectrumFramePayload {
+        format_version: SPECTRUM_FORMAT_VERSION,
+        sequence: frame.sequence(),
+        position_frames: frame.position_frames(),
+        sample_rate: frame.sample_rate(),
+        fft_size: frame.fft_size(),
+        magnitudes: frame.magnitudes().to_vec(),
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum VisualizationPipelineError {
+    UnsupportedChannels(usize),
+    InvalidTap(VisualizationFrameError),
+    Fft(FftError),
+    ReporterStartFailed,
+}
+
+impl fmt::Display for VisualizationPipelineError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedChannels(channels) => {
+                write!(formatter, "unsupported visualization channel count: {channels}")
+            },
+            Self::InvalidTap(error) => write!(formatter, "invalid visualization tap: {error}"),
+            Self::Fft(error) => write!(formatter, "FFT worker unavailable: {error}"),
+            Self::ReporterStartFailed => formatter.write_str("spectrum reporter could not start"),
+        }
+    }
+}
+
+impl Error for VisualizationPipelineError {}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use pulseseek_domain::visualization::SpectrumFrame;
+
+    use crate::playback_events::FakeEventEmitter;
+
+    use super::*;
+
+    #[test]
+    fn spectrum_payload_preserves_frame_metadata() {
+        let frame = SpectrumFrame::new(9, 4_096, 48_000, 8, vec![0.0, 0.1, 0.2, 0.3, 0.4])
+            .expect("valid spectrum");
+
+        let payload = spectrum_payload(&frame);
+
+        assert_eq!(payload.format_version, 1);
+        assert_eq!(payload.sequence, 9);
+        assert_eq!(payload.position_frames, 4_096);
+        assert_eq!(payload.sample_rate, 48_000);
+        assert_eq!(payload.fft_size, 8);
+        assert_eq!(payload.magnitudes, frame.magnitudes());
+    }
+
+    #[test]
+    fn musical_payload_preserves_analysis_metadata_and_bands() {
+        let frame = SpectrumFrame::new(9, 4_096, 48_000, 8, vec![0.0, 0.1, 0.8, 0.2, 0.0])
+            .expect("valid spectrum");
+        let musical = MusicalSpectrumAnalyzer::new(DEFAULT_TUNING_REFERENCE_HZ)
+            .unwrap()
+            .analyze(&frame)
+            .unwrap();
+
+        let payload = musical_spectrum_payload(&musical);
+
+        assert_eq!(payload.format_version, 1);
+        assert_eq!(payload.sequence, 9);
+        assert_eq!(payload.position_frames, 4_096);
+        assert_eq!(payload.sample_rate, 48_000);
+        assert_eq!(payload.tuning_reference_hz, 440.0);
+        assert_eq!(payload.bands.len(), musical.bands().len());
+        assert_eq!(payload.bands[0].note_number, musical.bands()[0].note_number());
+    }
+
+    #[test]
+    fn pipeline_starts_and_stops_for_stereo_output() {
+        let events = Arc::new(FakeEventEmitter::new());
+
+        let (pipeline, _tap) = VisualizationPipeline::start_with_settings(
+            48_000,
+            2,
+            VisualizationSettings::default(),
+            events,
+        )
+        .expect("stereo visualization pipeline");
+
+        drop(pipeline);
+    }
+
+    #[test]
+    fn waveform_default_keeps_fft_input_inactive_before_frontend_settings_load() {
+        let events = Arc::new(FakeEventEmitter::new());
+        let (pipeline, _tap) = VisualizationPipeline::start_with_settings(
+            48_000,
+            2,
+            VisualizationSettings::default(),
+            events,
+        )
+        .expect("stereo visualization pipeline");
+
+        assert!(!pipeline.control.is_enabled());
+    }
+
+    #[test]
+    fn pipeline_rejects_channel_layout_larger_than_fixed_frame_storage() {
+        let events = Arc::new(FakeEventEmitter::new());
+
+        let result = VisualizationPipeline::start_with_settings(
+            48_000,
+            8_193,
+            VisualizationSettings::default(),
+            events,
+        );
+
+        assert!(matches!(result, Err(VisualizationPipelineError::UnsupportedChannels(8_193))));
+    }
+
+    #[test]
+    fn stereo_pipeline_uses_enough_bins_for_low_frequency_detail() {
+        assert_eq!(fft_size_for_channels(2), Some(4_096));
+    }
+
+    #[test]
+    fn spectrum_hop_targets_thirty_updates_per_second() {
+        assert_eq!(spectrum_hop_frames(48_000, 4_096, 30), 1_600);
+        assert_eq!(spectrum_hop_frames(44_100, 4_096, 30), 1_470);
+        assert_eq!(spectrum_hop_frames(48_000, 4_096, 15), 3_200);
+        assert_eq!(spectrum_hop_frames(48_000, 4_096, 60), 800);
+    }
+}

@@ -1,0 +1,95 @@
+/*
+ * PulseSeek Dark — applied when the active theme resolves to "dark".
+ * Components must consume colors through tokens only; never a named palette.
+ */
+
+[data-theme="dark"] {
+  /* Base document */
+  color: #c6d0da;
+  background: #161a1f;
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg-canvas: #161a1f;
+  --bg-surface: #232930;
+  --bg-subtle: #1d2228;
+  --bg-panel: #1a1f24;
+  --bg-chrome: #20262d;
+  --bg-chrome-strong: #2a313a;
+  --bg-hover: #2e363f;
+  --bg-selected: #43552a;
+  --bg-header: #1d2228;
+  --bg-header-strong: #171c21;
+  --bg-button: #2a313a;
+  --bg-button-strong: #1d2228;
+  --bg-browser-tabs: #1a2026;
+
+  /* Text */
+  --text: #c6d0da;
+  --text-strong: #e8eef4;
+  --text-muted: #8b97a5;
+  --text-subtle: #6f7c8b;
+  --text-brand: #a3b9cc;
+  --text-danger: #ff8f8f;
+  --text-on-accent: #20261a;
+  --folder-active-path: #c8df63;
+  --folder-bookmark: #e0c0ff;
+  --browser-icon-computer: #a3b9cc;
+  --browser-icon-system: #b8c4cf;
+  --browser-icon-home: #78b9ef;
+  --browser-icon-physical: #f0ad55;
+  --browser-icon-network: #62cbe8;
+  --browser-icon-folder: #e6b85c;
+  --browser-icon-library: #c59bff;
+
+  /* Borders */
+  --line: #3a434d;
+  --line-strong: #4a5560;
+  --line-soft: #2a3138;
+
+  /* Accent */
+  --accent: #bada4b;
+  --accent-strong: #91b52e;
+  --accent-play: #c8df63;
+  --accent-play-soft: #2e3a17;
+  --accent-play-ink: #e8f4c8;
+  --accent-play-border: #6c7a2e;
+  --accent-range: #8aa3b8;
+
+  /* Danger */
+  --bg-danger: #c0392b;
+  --bg-danger-strong: #a00;
+  --bg-danger-subtle: #3a2020;
+  --line-danger: #7a4a4a;
+  --line-danger-strong: #b03a2e;
+
+  /* Session marks */
+  --mark-keep: #7ddc55;
+  --mark-maybe: #ff9f43;
+  --mark-reject: #ff6b6b;
+  --mark-favorite: #f5c518;
+
+  /* Waveform */
+  --wave: #8e8fd8;
+  --wave-grid: #3a434d;
+  --wave-soft: #575a9c;
+  --wave-selection: #f5ec58;
+  --wave-selection-border: #9aa32d;
+  --wave-seek-current: #ff9f43;
+  --wave-seek-hover: #7ddc55;
+  --wave-time-current: #ffd0a3;
+  --wave-time-hover: #b9f4a5;
+  --analyzer-spectrum: #bada4b;
+  --analyzer-spectrum-soft: rgba(186, 218, 75, 0.18);
+  --analyzer-grid: #3a434d;
+  --analyzer-label: #8b97a5;
+
+  /* Focus and overlay */
+  --focus-ring: #6ab0ff;
+  --overlay-backdrop: rgba(0, 0, 0, 0.55);
+  --shadow-overlay: 0 4px 16px rgba(0, 0, 0, 0.5);
+
+  /* Spinner */
+  --spinner-track: #3a434d;
+  --spinner-head: #c6d0da;
+}

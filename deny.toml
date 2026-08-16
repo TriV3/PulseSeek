@@ -1,0 +1,69 @@
+[graph]
+all-features = false
+no-default-features = false
+
+[output]
+feature-depth = 1
+
+[advisories]
+ignore = [
+    # Unmaintained GTK3 bindings — transitive from Tauri 2 (accepted stack)
+    "RUSTSEC-2024-0413",
+    "RUSTSEC-2024-0416",
+    "RUSTSEC-2024-0412",
+    "RUSTSEC-2024-0418",
+    "RUSTSEC-2024-0411",
+    "RUSTSEC-2024-0417",
+    "RUSTSEC-2024-0414",
+    "RUSTSEC-2024-0415",
+    "RUSTSEC-2024-0420",
+    "RUSTSEC-2024-0419",
+    "RUSTSEC-2024-0370",
+    "RUSTSEC-2025-0081",
+    "RUSTSEC-2025-0075",
+    "RUSTSEC-2025-0080",
+    "RUSTSEC-2025-0100",
+    "RUSTSEC-2025-0098",
+]
+
+[licenses]
+allow = [
+    "MPL-2.0",
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unlicense",
+    "CC0-1.0",
+    "Zlib",
+    "0BSD",
+    "Apache-2.0 WITH LLVM-exception",
+]
+confidence-threshold = 0.8
+exceptions = []
+
+[licenses.private]
+ignore = false
+registries = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+allow = []
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[sources.allow-org]
+github = []
+gitlab = []
+bitbucket = []

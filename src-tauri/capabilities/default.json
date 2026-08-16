@@ -1,0 +1,11 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for PulseSeek",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-size",
+    "core:window:allow-set-min-size",
+    "dialog:default"
+  ]
+}

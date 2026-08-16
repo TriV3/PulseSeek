@@ -1,0 +1,93 @@
+.player-transport {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text-strong);
+  font-size: 11px;
+}
+
+.player-transport-buttons,
+.player-transport-position,
+.player-transport-volume {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.player-transport-buttons button,
+.player-transport-volume button {
+  min-width: 29px;
+  height: 27px;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: linear-gradient(var(--bg-button), var(--bg-button-strong));
+  color: var(--text-strong);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.player-transport-buttons button:hover:not(:disabled),
+.player-transport-volume button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--bg-surface);
+}
+
+.player-transport-buttons button:nth-child(2) {
+  border-color: var(--accent-play-border);
+  background: linear-gradient(var(--accent-play-soft), var(--accent-play));
+  color: var(--accent-play-ink);
+}
+
+.player-transport button:disabled {
+  opacity: 0.46;
+  cursor: not-allowed;
+}
+
+.player-transport-position {
+  min-width: 76px;
+  flex: 1;
+}
+
+.player-transport-volume label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.player-transport input[type="range"] {
+  height: 4px;
+  accent-color: var(--accent-range);
+}
+
+.player-transport-position output {
+  min-width: 76px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.player-transport-volume {
+  width: 128px;
+}
+
+.player-transport-volume input {
+  min-width: 45px;
+  flex: 1;
+}
+
+.player-transport-error {
+  position: absolute;
+  left: 8px;
+  bottom: 72px;
+  z-index: 20;
+  margin: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--line-danger);
+  background: var(--bg-danger-subtle);
+  color: var(--text-danger);
+}

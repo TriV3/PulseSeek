@@ -1,0 +1,121 @@
+name: Build release binaries
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and attach binaries for (e.g. v1.0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple Silicon
+            platform: macos-latest
+            args: --target aarch64-apple-darwin
+          - name: macOS Intel
+            platform: macos-latest
+            args: --target x86_64-apple-darwin
+          - name: Linux x64
+            platform: ubuntu-22.04
+            args: ""
+          - name: Windows x64
+            platform: windows-latest
+            args: --bundles nsis
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes \
+            libayatana-appindicator3-dev \
+            libasound2-dev \
+            librsvg2-dev \
+            libwebkit2gtk-4.1-dev \
+            patchelf
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 11.17.0
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+          cache: pnpm
+      - name: Install Rust toolchain
+        run: rustup show active-toolchain
+      - name: Install macOS Rust targets
+        if: matrix.platform == 'macos-latest'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: "./src-tauri -> target"
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build and attach binaries
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # The release already exists (created by release-please); attach
+          # assets to it instead of creating or rewriting it.
+          tagName: ${{ inputs.tag || github.event.release.tag_name }}
+          releaseDraft: false
+          # No updater is configured yet; avoid latest.json/signature noise.
+          uploadUpdaterJson: false
+          uploadUpdaterSignatures: false
+          args: ${{ matrix.args }}
+
+  checksums:
+    name: Generate checksums
+    needs: build
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Determine release tag
+        id: tag
+        run: echo "tag=${{ github.event.release.tag_name || inputs.tag }}" >> "$GITHUB_OUTPUT"
+      - name: Download release assets
+        run: |
+          mkdir -p assets
+          cd assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern '*.dmg' \
+            --pattern '*.deb' \
+            --pattern '*.rpm' \
+            --pattern '*.AppImage' \
+            --pattern '*.exe' \
+            --clobber
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+      - name: Generate SHA256SUMS.txt
+        run: |
+          cd assets
+          ls -la
+          if [ -z "$(ls -A)" ]; then
+            echo "No release assets downloaded" >&2
+            exit 1
+          fi
+          shasum -a 256 * > SHA256SUMS.txt
+      - name: Upload SHA256SUMS.txt
+        run: gh release upload "$TAG" assets/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --clobber
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}

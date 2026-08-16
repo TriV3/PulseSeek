@@ -1,0 +1,96 @@
+/*
+ * PulseSeek Light — the default theme and the `:root` baseline.
+ * Components must consume colors through tokens only; never a named palette.
+ */
+
+:root,
+[data-theme="light"] {
+  /* Base document */
+  color: #27333f;
+  background: #e9edf1;
+  color-scheme: light;
+
+  /* Surfaces */
+  --bg-canvas: #e9edf1;
+  --bg-surface: #fff;
+  --bg-subtle: #fbfcfd;
+  --bg-panel: #f0f3f6;
+  --bg-chrome: #f6f8fa;
+  --bg-chrome-strong: #e5eaf0;
+  --bg-hover: #edf2f5;
+  --bg-selected: #d4e88b;
+  --bg-header: #fbfcfd;
+  --bg-header-strong: #e7ecf0;
+  --bg-button: #fff;
+  --bg-button-strong: #e8edf1;
+  --bg-browser-tabs: #f2f5f7;
+
+  /* Text */
+  --text: #27333f;
+  --text-strong: #405263;
+  --text-muted: #6f7d8c;
+  --text-subtle: #8c9aa7;
+  --text-brand: #50677a;
+  --text-danger: #a03030;
+  --text-on-accent: #fff;
+  --folder-active-path: #005a9c;
+  --folder-bookmark: #7140a5;
+  --browser-icon-computer: #50677a;
+  --browser-icon-system: #5d6f7f;
+  --browser-icon-home: #2f6f9f;
+  --browser-icon-physical: #a85b00;
+  --browser-icon-network: #00758a;
+  --browser-icon-folder: #a96500;
+  --browser-icon-library: #7b4db3;
+
+  /* Borders */
+  --line: #b9c3ce;
+  --line-strong: #8fa2b3;
+  --line-soft: #d7dde3;
+
+  /* Accent */
+  --accent: #bada4b;
+  --accent-strong: #91b52e;
+  --accent-play: #c8df63;
+  --accent-play-soft: #e9f4a7;
+  --accent-play-ink: #47592b;
+  --accent-play-border: #aabe61;
+  --accent-range: #7c93a6;
+
+  /* Danger */
+  --bg-danger: #c00;
+  --bg-danger-strong: #a00;
+  --bg-danger-subtle: #fce4e4;
+  --line-danger: #e8b0b0;
+  --line-danger-strong: #a00;
+
+  /* Session marks */
+  --mark-keep: #2e7d32;
+  --mark-maybe: #d35400;
+  --mark-reject: #c0392b;
+  --mark-favorite: #d4a017;
+
+  /* Waveform */
+  --wave: #5b86ab;
+  --wave-grid: #cbd3db;
+  --wave-soft: #9fb8cf;
+  --wave-selection: #f5ec58;
+  --wave-selection-border: #9aa32d;
+  --wave-seek-current: #d35400;
+  --wave-seek-hover: #8b3fa8;
+  --wave-time-current: #8f3900;
+  --wave-time-hover: #6d2f85;
+  --analyzer-spectrum: #2f6f9f;
+  --analyzer-spectrum-soft: rgba(47, 111, 159, 0.24);
+  --analyzer-grid: #d7dde3;
+  --analyzer-label: #6f7d8c;
+
+  /* Focus and overlay */
+  --focus-ring: #4a90d9;
+  --overlay-backdrop: rgba(0, 0, 0, 0.3);
+  --shadow-overlay: 0 4px 16px rgba(0, 0, 0, 0.2);
+
+  /* Spinner */
+  --spinner-track: #ccc;
+  --spinner-head: #555;
+}

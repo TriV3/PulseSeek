@@ -1,0 +1,14 @@
+[package]
+name = "pulseseek-cache"
+version = "1.0.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+rusqlite = { version = "0.40", features = ["bundled"] }
+pulseseek-domain = { path = "../pulseseek-domain" }
+
+[dev-dependencies]
+rusqlite = { version = "0.40", features = ["bundled"] }
+pulseseek-domain = { path = "../pulseseek-domain" }
+tempfile = "3"

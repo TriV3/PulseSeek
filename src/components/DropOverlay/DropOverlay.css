@@ -1,0 +1,28 @@
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: var(--overlay-backdrop, rgba(0, 0, 0, 0.55));
+  pointer-events: none;
+}
+
+.drop-overlay-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  border: 2px dashed var(--accent-play-border, var(--accent, currentColor));
+  border-radius: 0.75rem;
+  background: var(--bg-canvas, var(--bg-surface, #161a1f));
+  color: var(--text-on-accent, #fff);
+  font-size: 1.1rem;
+  font-weight: 600;
+  box-shadow: var(--shadow-overlay, 0 4px 16px rgba(0, 0, 0, 0.5));
+}
+
+.drop-overlay-icon {
+  font-size: 1.4rem;
+  line-height: 1;
+}
