@@ -24,9 +24,12 @@ approve every version number manually.
 
 ### Single source of truth: the Rust package manifest
 
-`src-tauri/Cargo.toml` keeps the application version. Tauri 2 falls back to
-the Cargo package version for the bundle when `tauri.conf.json` has no
-`version` field, so the `version` field is removed from `tauri.conf.json`.
+`src-tauri/Cargo.toml` keeps the application version. The bundle version in
+`src-tauri/tauri.conf.json` mirrors it and is written by release-please (an
+`extra-files` JSON updater), because the official `tauri-action` reads the
+bundle version from `tauri.conf.json` to name and attach release assets. A
+test enforces that the two values never diverge.
+
 The renderer reads the same value at build time:
 
 - `src/versionSource.ts` parses `src-tauri/Cargo.toml` and injects the
@@ -34,8 +37,6 @@ The renderer reads the same value at build time:
   splash (static HTML rendered before React mounts) shows the version.
 - Vite's `define` exposes `__PULSESEEK_VERSION__`, consumed by
   `src/version.ts`, so the Options menu footer shows the version.
-
-A test enforces that `tauri.conf.json` never pins a bundle version again.
 
 ### Automatic versioning and changelog: release-please
 
@@ -74,6 +75,16 @@ messages, Conventional Commits are enforced with `@commitlint/cli` and
 - The configured `type-enum` matches the types mapped in
   `release-please-config.json`, so every accepted message maps to a changelog
   section or to "no release" for maintenance work.
+
+### Release binaries
+
+The `Build release binaries` workflow (`build-release.yml`) triggers on
+`release: published` and builds native binaries with the official
+`tauri-apps/tauri-action` on a four-target matrix: macOS Apple Silicon,
+macOS Intel, Windows (NSIS), and Linux (deb, rpm, AppImage). Assets are
+attached to the existing release created by release-please, and a final job
+uploads a combined `SHA256SUMS.txt`. Binaries are unsigned until signing
+secrets and certificate import steps are added deliberately.
 
 ## Consequences
 

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readAppVersion } from "./versionSource";
 
 interface TauriConfig {
   version?: string;
@@ -35,8 +36,8 @@ describe("Tauri frontend lifecycle", () => {
     });
   });
 
-  it("does not pin a bundle version so Tauri inherits the Cargo package version", () => {
-    expect(config.version).toBeUndefined();
+  it("keeps the bundle version synchronized with the Cargo package version", () => {
+    expect(config.version).toBe(readAppVersion());
   });
 
   it("declares the generated desktop application icons", () => {
