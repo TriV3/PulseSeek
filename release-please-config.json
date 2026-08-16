@@ -3,8 +3,9 @@
   "release-type": "rust",
   "bootstrap-sha": "bb503f17a69d6770daefc98397ced5e58da562b4",
   "packages": {
-    ".": {
-      "release-type": "rust",
+    "src-tauri": {
+      "component": "pulseseek-app",
+      "changelog-path": "CHANGELOG.md",
       "extra-files": [
         {
           "type": "json",
@@ -17,11 +18,49 @@
           "jsonpath": "$.version"
         }
       ]
+    },
+    "crates/pulseseek-audio-cpal": {
+      "component": "pulseseek-audio-cpal",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "crates/pulseseek-browser-fs": {
+      "component": "pulseseek-browser-fs",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "crates/pulseseek-cache": {
+      "component": "pulseseek-cache",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "crates/pulseseek-decoder-symphonia": {
+      "component": "pulseseek-decoder-symphonia",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "crates/pulseseek-domain": {
+      "component": "pulseseek-domain",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "crates/pulseseek-playback": {
+      "component": "pulseseek-playback",
+      "changelog-path": "CHANGELOG.md"
     }
   },
   "plugins": [
     {
-      "type": "cargo-workspace"
+      "type": "cargo-workspace",
+      "merge": false
+    },
+    {
+      "type": "linked-versions",
+      "groupName": "pulseseek",
+      "components": [
+        "pulseseek-app",
+        "pulseseek-audio-cpal",
+        "pulseseek-browser-fs",
+        "pulseseek-cache",
+        "pulseseek-decoder-symphonia",
+        "pulseseek-domain",
+        "pulseseek-playback"
+      ]
     }
   ],
   "changelog-sections": [
