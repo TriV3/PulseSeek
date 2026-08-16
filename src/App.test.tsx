@@ -89,20 +89,31 @@ describe("application shell", () => {
   });
 
   it("closes the application menu when clicking outside it", () => {
-    const { container } = render(<App />);
-    const menu = container.querySelector(".app-options-menu")!;
+    render(<App />);
+    const menuButton = screen.getByRole("button", { name: "Options" });
 
-    fireEvent.click(screen.getByLabelText("Open application menu"));
-    expect(menu).toHaveAttribute("open");
+    fireEvent.click(menuButton);
+    expect(menuButton).toHaveAttribute("aria-expanded", "true");
 
     fireEvent.pointerDown(document.body);
-    expect(menu).not.toHaveAttribute("open");
+    expect(menuButton).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("closes Options with Escape and restores trigger focus", () => {
+    render(<App />);
+    const menuButton = screen.getByRole("button", { name: "Options" });
+
+    fireEvent.click(menuButton);
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(menuButton).toHaveAttribute("aria-expanded", "false");
+    expect(menuButton).toHaveFocus();
   });
 
   it("confirms before clearing waveform cache", () => {
     render(<App />);
 
-    fireEvent.click(screen.getByLabelText("Open application menu"));
+    fireEvent.click(screen.getByRole("button", { name: "Options" }));
     fireEvent.click(
       screen.getByRole("button", { name: "Clear waveform cache" }),
     );
@@ -361,7 +372,7 @@ describe("compact mode", () => {
     });
   }
 
-  it("hides the sidebar, the transport options, and shrinks the window", async () => {
+  it("keeps Options and playback mode available while shrinking the layout", async () => {
     mockBackend();
     render(<App />);
 
@@ -369,6 +380,10 @@ describe("compact mode", () => {
       expect(
         screen.getByRole("button", { name: "Toggle compact mode" }),
       ).toHaveAttribute("aria-pressed", "false"),
+    );
+    const options = screen.getByRole("button", { name: "Options" });
+    expect(options.closest(".now-playing-actions")).toContainElement(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
     );
 
     fireEvent.click(
@@ -387,6 +402,24 @@ describe("compact mode", () => {
       screen.queryByRole("separator", { name: "Resize browser" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Visualization")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Options" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Options" }));
+    expect(
+      screen.getByRole("combobox", { name: "Playback mode" }),
+    ).toBeVisible();
+    fireEvent.change(screen.getByRole("combobox", { name: "Playback mode" }), {
+      target: { value: "sequential" },
+    });
+    expect(
+      vi
+        .mocked(invoke)
+        .mock.calls.some(
+          ([command, args]) =>
+            command === "invoke_command" &&
+            (args as { envelope?: { command?: string } }).envelope?.command ===
+              "set_playback_mode",
+        ),
+    ).toBe(true);
     expect(
       screen.getByRole("button", { name: "Toggle compact mode" }),
     ).toHaveAttribute("aria-pressed", "true");
@@ -941,8 +974,8 @@ describe("shortcut integration", () => {
 
     expect(
       screen.queryByRole("button", { name: "Keyboard shortcuts" }),
-    ).not.toBeVisible();
-    fireEvent.click(screen.getByLabelText("Open application menu"));
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Options" }));
     fireEvent.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
     expect(
       screen.getByRole("dialog", { name: "Keyboard shortcuts" }),
@@ -970,14 +1003,14 @@ describe("shortcut integration", () => {
     mockAppBackend();
     render(<App />);
 
-    const menuButton = screen.getByLabelText("Open application menu");
+    const menuButton = screen.getByRole("button", { name: "Options" });
     expect(menuButton).toBeInTheDocument();
-    expect(screen.queryByLabelText("Theme")).not.toBeVisible();
+    expect(screen.queryByLabelText("Theme")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("checkbox", { name: "Real-time visualizations" }),
-    ).not.toBeVisible();
-    expect(menuButton.closest("details")).toBe(
-      document.querySelector(".transport-options")?.lastElementChild,
+    ).not.toBeInTheDocument();
+    expect(menuButton.closest(".now-playing-actions")).toContainElement(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
     );
 
     fireEvent.click(menuButton);
@@ -1205,7 +1238,7 @@ describe("recent folders wiring", () => {
     render(<App />);
     await screen.findByText("Music", { exact: true });
     fireEvent.click(screen.getByText("Music", { exact: true }));
-    fireEvent.click(screen.getByLabelText("Open application menu"));
+    fireEvent.click(screen.getByRole("button", { name: "Options" }));
 
     const option = screen.getByRole("checkbox", {
       name: "Show hidden folders",

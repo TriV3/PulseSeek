@@ -5,6 +5,34 @@ const FILES = [
   { id: "/music/b.wav", name: "b.wav", kind: "playable" },
 ] as const;
 
+test("compact player keeps Options and playback mode available", async ({
+  page,
+  getCommandCalls,
+}) => {
+  await page.goto("/");
+  const options = page.getByRole("button", { name: "Options" });
+  const compactToggle = page.getByRole("button", {
+    name: "Toggle compact mode",
+  });
+
+  await expect(options).toBeVisible();
+  await compactToggle.click();
+  await expect(compactToggle).toHaveAttribute("aria-pressed", "true");
+  await expect(options).toBeVisible();
+
+  await options.click();
+  await page.getByLabel("Playback mode").selectOption({ label: "Sequential" });
+  await expect
+    .poll(async () =>
+      (await getCommandCalls()).some(
+        (call) =>
+          call.command === "set_playback_mode" &&
+          (call.payload as { mode?: string }).mode === "sequential",
+      ),
+    )
+    .toBe(true);
+});
+
 test("sequential completion starts next visible playable file", async ({
   page,
   mockCommand,
@@ -36,6 +64,7 @@ test("sequential completion starts next visible playable file", async ({
   );
 
   await mockCommand("set_playback_mode", { mode: "sequential" });
+  await page.getByRole("button", { name: "Options" }).click();
   await page.getByLabel("Playback mode").selectOption({ label: "Sequential" });
   await emitEvent("playback:completed", {});
 
@@ -75,6 +104,7 @@ test("gapless boundary switches waveform without starting a second player", asyn
   await mockCommand("prepare_next", {});
   await page.getByRole("row", { name: /a\.wav/ }).click();
   await mockCommand("set_playback_mode", { mode: "sequential" });
+  await page.getByRole("button", { name: "Options" }).click();
   await page.getByLabel("Playback mode").selectOption({ label: "Sequential" });
 
   await expect
@@ -141,6 +171,7 @@ test("random completion starts another visible playable file", async ({
   await mockCommand("play", {});
   await page.getByRole("row", { name: /a\.wav/ }).click();
   await mockCommand("set_playback_mode", { mode: "random" });
+  await page.getByRole("button", { name: "Options" }).click();
   await page.getByLabel("Playback mode").selectOption({ label: "Random" });
   await emitEvent("playback:completed", {});
 

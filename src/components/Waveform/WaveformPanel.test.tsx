@@ -120,7 +120,7 @@ describe("WaveformPanel", () => {
     ]);
   });
 
-  it("renders the compact toggle in the header and hides the brand in compact mode", () => {
+  it("renders the compact toggle and keeps the track title leading in both layouts", () => {
     const onToggle = vi.fn();
     const { rerender } = render(
       <WaveformPanel
@@ -135,6 +135,8 @@ describe("WaveformPanel", () => {
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(toggle);
     expect(onToggle).toHaveBeenCalled();
+    expect(screen.getByText("A.wav")).toBeInTheDocument();
+    expect(screen.queryByLabelText("PulseSeek")).toBeNull();
 
     rerender(
       <WaveformPanel
@@ -149,7 +151,42 @@ describe("WaveformPanel", () => {
     expect(
       screen.getByRole("button", { name: "Toggle compact mode" }),
     ).toHaveAttribute("aria-pressed", "true");
-    expect(screen.queryByLabelText("PulseSeek")).not.toBeInTheDocument();
+    expect(screen.getByText("A.wav")).toBeInTheDocument();
+    expect(screen.queryByLabelText("PulseSeek")).toBeNull();
+  });
+
+  it("keeps header actions beside the compact toggle in both layouts", () => {
+    const { rerender } = render(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+        headerActions={<button type="button">Options</button>}
+      />,
+    );
+
+    const actions = screen.getByRole("button", {
+      name: "Options",
+    }).parentElement;
+    expect(actions).toHaveClass("now-playing-actions");
+    expect(actions).toContainElement(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    );
+
+    rerender(
+      <WaveformPanel
+        entryPath="/music/a.wav"
+        entryName="A.wav"
+        durationMs={2000}
+        compact
+        headerActions={<button type="button">Options</button>}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Options" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Toggle compact mode" }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it("shows only the waveform by default", () => {

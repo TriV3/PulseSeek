@@ -30,7 +30,7 @@ test.describe("theme screenshots", () => {
     await expect(page.locator("#startup-splash")).not.toBeAttached();
 
     // Persisted preference defaults to system; pick Midnight Blue explicitly.
-    await page.getByLabel("Open application menu").click();
+    await page.getByRole("button", { name: "Options" }).click();
     await page.getByLabel("Theme").selectOption("midnight");
 
     // The active theme must be applied to the document without a restart.

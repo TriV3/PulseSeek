@@ -60,6 +60,7 @@ test.describe("P0 audition workflow", () => {
     // ── 5. Switch playback mode to Loop ──────────────────────────────
     await mockCommand("set_playback_mode", { mode: "loop-current" });
 
+    await page.getByRole("button", { name: "Options" }).click();
     await page.getByLabel("Playback mode").selectOption("loop-current");
 
     // Confirm the select reflects the new mode

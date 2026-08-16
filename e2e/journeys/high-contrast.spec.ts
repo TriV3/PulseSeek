@@ -31,13 +31,13 @@ test.describe("High Contrast accessibility", () => {
     await expect(page.getByRole("row", { name: /track1\.wav/ })).toBeVisible();
 
     // ── 2. Switch to High Contrast ──────────────────────────────────
-    await page.getByLabel("Open application menu").click();
+    await page.getByRole("button", { name: "Options" }).click();
     await page.getByLabel("Theme").selectOption("high-contrast");
     await expect(page.locator("html")).toHaveAttribute(
       "data-theme",
       "high-contrast",
     );
-    await page.getByLabel("Open application menu").click();
+    await page.getByRole("button", { name: "Options" }).click();
 
     // ── 3. Deterministic token check ────────────────────────────────
     const resolved = await page.evaluate(() => {
