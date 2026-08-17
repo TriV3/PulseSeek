@@ -2729,7 +2729,7 @@ dependencies = [
 
 [[package]]
 name = "pulseseek"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "notify-debouncer-full",
  "objc2",
@@ -2754,7 +2754,7 @@ dependencies = [
 
 [[package]]
 name = "pulseseek-audio-cpal"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "cpal",
  "pulseseek-domain",
@@ -2763,7 +2763,7 @@ dependencies = [
 
 [[package]]
 name = "pulseseek-browser-fs"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "open",
  "pulseseek-decoder-symphonia",
@@ -2774,7 +2774,7 @@ dependencies = [
 
 [[package]]
 name = "pulseseek-cache"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "pulseseek-domain",
  "rusqlite",
@@ -2783,7 +2783,7 @@ dependencies = [
 
 [[package]]
 name = "pulseseek-decoder-symphonia"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "pulseseek-domain",
  "symphonia",
@@ -2792,11 +2792,11 @@ dependencies = [
 
 [[package]]
 name = "pulseseek-domain"
-version = "1.0.0"
+version = "1.0.2"
 
 [[package]]
 name = "pulseseek-playback"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "pulseseek-decoder-symphonia",
  "pulseseek-domain",
@@ -2808,7 +2808,7 @@ dependencies = [
 
 [[package]]
 name = "pulseseek-workspace"
-version = "1.0.2"
+version = "1.0.4"
 
 [[package]]
 name = "quick-xml"

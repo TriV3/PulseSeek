@@ -8,6 +8,8 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # workflow_dispatch through the GITHUB_TOKEN requires the actions scope.
+  actions: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -22,9 +24,14 @@ jobs:
         uses: googleapis/release-please-action@v4
         id: release
         with:
-          command: manifest
           token: ${{ secrets.GITHUB_TOKEN }}
-          default-branch: main
+          target-branch: main
+      - name: Check out repository for dispatch ref resolution
+        # `gh workflow run --ref <tag>` resolves the ref through git; the
+        # runner has no checkout by default.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - name: Trigger binary builds
         # GitHub suppresses events caused by the built-in GITHUB_TOKEN
         # (anti-recursion guard), so a release created by release-please never
@@ -39,3 +46,15 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --ref "$TAG" \
             -f tag="$TAG"
+      - name: Append installation footer to release
+        # The GitHub Release body contains only the changelog notes;
+        # release-please's pull-request-footer is PR-only. Append the static
+        # platform installation table so the release page explains the assets.
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="$(gh release list --limit 1 --json tagName --jq '.[0].tagName')"
+          BODY="$(gh release view "$TAG" --json body --jq '.body')"
+          { printf '%s\n' "$BODY"; cat docs/release-footer.md; } > /tmp/release-body.md
+          gh release edit "$TAG" --notes-file /tmp/release-body.md
