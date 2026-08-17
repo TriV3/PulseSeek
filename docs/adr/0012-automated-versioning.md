@@ -80,8 +80,9 @@ messages, Conventional Commits are enforced with `@commitlint/cli` and
 
 The `Build release binaries` workflow (`build-release.yml`) triggers on
 `release: published` and builds native binaries with the official
-`tauri-apps/tauri-action` on a four-target matrix: macOS Apple Silicon,
-macOS Intel, Windows (NSIS), and Linux (deb, rpm, AppImage). Assets are
+`tauri-apps/tauri-action` on a five-target matrix: macOS Apple Silicon,
+macOS Intel, Windows x64 (NSIS), Windows ARM64 (NSIS), and Linux (deb, rpm,
+AppImage). Assets are
 attached to the existing release created by release-please, and a final job
 uploads a combined `SHA256SUMS.txt`. macOS binaries are ad-hoc signed via
 `bundle.macOS.signingIdentity`; full code-signing with notarization requires

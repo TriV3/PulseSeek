@@ -44,9 +44,10 @@ After the `v1.0.0` tag exists on `main`, the `Release` workflow
 3. Merging that release pull request into `main` creates the `vX.Y.Z` tag on
    the exact merge commit and creates the GitHub Release from the changelog.
 4. The `Build release binaries` workflow (`build-release.yml`) reacts to the
-   published release, builds native binaries for macOS (Apple Silicon and
-   Intel), Windows (NSIS), and Linux (deb, rpm, AppImage), attaches them to
-   the release, and uploads a `SHA256SUMS.txt` checksum file.
+    published release, builds native binaries for macOS (Apple Silicon and
+    Intel), Windows (x64 and ARM64, NSIS), and Linux (deb, rpm, AppImage),
+    attaches them to the release, and uploads a `SHA256SUMS.txt` checksum
+    file.
 5. Release metadata is synchronized back into `develop` (Phase 6).
 
 macOS binaries are **ad-hoc signed** (see
@@ -312,8 +313,9 @@ prioritizes:
 
 1. macOS on Apple Silicon.
 2. Universal macOS or a separate Intel artifact.
-3. Windows.
-4. Linux.
+3. Windows x64.
+4. Windows ARM64.
+5. Linux.
 
 For every artifact:
 
