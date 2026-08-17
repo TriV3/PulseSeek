@@ -1,3 +1,17 @@
+[package]
+name = "pulseseek-workspace"
+version = "1.0.2"
+edition = "2021"
+publish = false
+description = "Workspace root package tracking the PulseSeek application version."
+license = "MPL-2.0"
+
+# The root package is a version anchor only: release-please reads the
+# application version here, then the cargo-workspace plugin propagates the
+# bump through every workspace member. It contains no code.
+[lib]
+path = "crates/pulseseek-workspace/lib.rs"
+
 [workspace]
 resolver = "2"
 members = ["crates/pulseseek-audio-cpal", "crates/pulseseek-browser-fs", "crates/pulseseek-cache", "crates/pulseseek-decoder-symphonia", "crates/pulseseek-domain", "crates/pulseseek-playback", "src-tauri"]

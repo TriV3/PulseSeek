@@ -5,6 +5,26 @@ All notable changes to PulseSeek are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2](https://github.com/TriV3/PulseSeek/compare/v1.0.1...v1.0.2) (2026-08-17)
+
+
+### Fixed
+
+* **ci:** trigger release builds on API-created releases ([957c868](https://github.com/TriV3/PulseSeek/commit/957c86847ce238b9a0e4393e750f2709dbf469fb))
+
+## [1.0.1](https://github.com/TriV3/PulseSeek/compare/v1.0.0...v1.0.1) (2026-08-17)
+
+
+### Fixed
+
+* **bundle:** enable bundling in tauri config ([fd91a64](https://github.com/TriV3/PulseSeek/commit/fd91a6414bf8a5650385f8d605990b01a3e4e666))
+* **ci:** make release-please work with the cargo workspace ([1983dc8](https://github.com/TriV3/PulseSeek/commit/1983dc8ae0c5543cb84e985a9460631c26407106))
+
+
+### Changed
+
+* **ci:** pin release-please tags to plain vX.Y.Z ([62e429a](https://github.com/TriV3/PulseSeek/commit/62e429a112092fa50f5940f74b0b705895bba836))
+
 ## [1.0.0] - 2026-08-16
 
 ### Added
