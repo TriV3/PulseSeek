@@ -5,6 +5,13 @@ All notable changes to PulseSeek are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2](https://github.com/TriV3/PulseSeek/compare/v1.0.1...v1.0.2) (2026-08-17)
+
+
+### Fixed
+
+* **ci:** trigger release builds on API-created releases ([957c868](https://github.com/TriV3/PulseSeek/commit/957c86847ce238b9a0e4393e750f2709dbf469fb))
+
 ## [1.0.1](https://github.com/TriV3/PulseSeek/compare/v1.0.0...v1.0.1) (2026-08-17)
 
 
