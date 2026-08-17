@@ -5,6 +5,19 @@ All notable changes to PulseSeek are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3](https://github.com/TriV3/PulseSeek/compare/v1.0.2...v1.0.3) (2026-08-17)
+
+
+### Fixed
+
+* **ci:** dispatch binary builds after release-please publishes ([c0282fc](https://github.com/TriV3/PulseSeek/commit/c0282fc070eebf27ac2c284937d2306e532a8d10))
+
+
+### Changed
+
+* **playback:** make seek polling deterministic under load ([90b62b4](https://github.com/TriV3/PulseSeek/commit/90b62b48f1884373e64b5ba414dad90bbd8ab23c))
+* **release:** add platform installation table to release notes ([7d1d165](https://github.com/TriV3/PulseSeek/commit/7d1d165c1f6c658ff3b5b0da6dcf6a6c75ba6b45))
+
 ## [1.0.2](https://github.com/TriV3/PulseSeek/compare/v1.0.1...v1.0.2) (2026-08-17)
 
 
