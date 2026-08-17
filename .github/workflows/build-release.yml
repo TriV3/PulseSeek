@@ -40,6 +40,9 @@ jobs:
           - name: Windows x64
             platform: windows-latest
             args: --bundles nsis
+          - name: Windows ARM64
+            platform: windows-latest
+            args: --target aarch64-pc-windows-msvc --bundles nsis
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,6 +70,9 @@ jobs:
       - name: Install macOS Rust targets
         if: matrix.platform == 'macos-latest'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Install Windows Rust target
+        if: matrix.platform == 'windows-latest'
+        run: rustup target add aarch64-pc-windows-msvc
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
