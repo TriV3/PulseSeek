@@ -49,9 +49,11 @@ After the `v1.0.0` tag exists on `main`, the `Release` workflow
    the release, and uploads a `SHA256SUMS.txt` checksum file.
 5. Release metadata is synchronized back into `develop` (Phase 6).
 
-Binaries are currently built **unsigned**: no code-signing or notarization is
-performed, and the release notes must state that clearly. Adding signing is a
-separate decision that requires Apple Developer and/or Windows code-signing
+macOS binaries are **ad-hoc signed** (see
+[`bundle.macOS.signingIdentity`](../../src-tauri/tauri.conf.json)) but **not
+notarized**: code-signing makes them launchable on Apple Silicon, yet Gatekeeper
+still warns the first time (right-click → Open). Adding Developer ID signing
+with notarization is a separate decision that requires Apple Developer
 credentials as GitHub secrets.
 
 The release pull request is subject to branch protection and the quality

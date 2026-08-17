@@ -13,4 +13,7 @@ Download the file for your platform and verify its checksum against `SHA256SUMS.
 | Linux (Fedora/RHEL) | `PulseSeek_<version>-1.x86_64.rpm` |
 | Linux (AppImage) | `PulseSeek_<version>_amd64.AppImage` |
 
-Binaries are **unsigned**. macOS users may need to right-click and choose Open the first time.
+macOS binaries are **ad-hoc signed but not notarized**. The first time you open
+`PulseSeek.app`, macOS may warn that it cannot verify the developer; choose
+**right-click → Open → Open** to launch. After the first launch, the app opens
+normally.

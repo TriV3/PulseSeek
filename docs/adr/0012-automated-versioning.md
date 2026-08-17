@@ -83,8 +83,10 @@ The `Build release binaries` workflow (`build-release.yml`) triggers on
 `tauri-apps/tauri-action` on a four-target matrix: macOS Apple Silicon,
 macOS Intel, Windows (NSIS), and Linux (deb, rpm, AppImage). Assets are
 attached to the existing release created by release-please, and a final job
-uploads a combined `SHA256SUMS.txt`. Binaries are unsigned until signing
-secrets and certificate import steps are added deliberately.
+uploads a combined `SHA256SUMS.txt`. macOS binaries are ad-hoc signed via
+`bundle.macOS.signingIdentity`; full code-signing with notarization requires
+Apple Developer credentials and certificate import steps to be added
+deliberately.
 
 ## Consequences
 
