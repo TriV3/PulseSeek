@@ -97,6 +97,11 @@ jobs:
       - name: Determine release tag
         id: tag
         run: echo "tag=${{ github.event.release.tag_name || inputs.tag }}" >> "$GITHUB_OUTPUT"
+      - name: Check out tag
+        # Reads CHANGELOG.md and docs/release-footer.md for the release body.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
       - name: Download release assets
         run: |
           mkdir -p assets
@@ -121,5 +126,23 @@ jobs:
           shasum -a 256 * > SHA256SUMS.txt
       - name: Upload SHA256SUMS.txt
         run: gh release upload "$TAG" assets/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --clobber
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+      - name: Compose and publish release body
+        # tauri-action wipes the release body (updateRelease with an empty
+        # body) while attaching binaries, so compose the body here, after all
+        # uploads: version title + changelog section + platform table.
+        run: |
+          VERSION="${TAG#v}"
+          sed -n "/^## \\[${VERSION}\\]/,/^## \\[/p" CHANGELOG.md | sed '1d;$d' | sed '/^$/d' > /tmp/section.md
+          if [ -s /tmp/section.md ]; then
+            printf '## PulseSeek %s\n\n' "$TAG" > /tmp/release-body.md
+            cat /tmp/section.md >> /tmp/release-body.md
+          else
+            printf '## PulseSeek %s\n' "$TAG" > /tmp/release-body.md
+          fi
+          printf '\n' >> /tmp/release-body.md
+          cat docs/release-footer.md >> /tmp/release-body.md
+          gh release edit "$TAG" --notes-file /tmp/release-body.md
         env:
           TAG: ${{ steps.tag.outputs.tag }}
