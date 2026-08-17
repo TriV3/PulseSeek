@@ -4,6 +4,19 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Polls `condition` until it holds or a generous deadline elapses.
+///
+/// The playback worker runs on its own thread. Under a loaded CI runner a
+/// fixed spin count can exhaust before the worker produces samples, so
+/// timing-sensitive waits poll with a small sleep against a wall-clock
+/// deadline instead of yielding a bounded number of times.
+fn poll_until(mut condition: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !condition() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
 /// A fake decoder that produces a ramp of known values.
 struct RampDecoder {
     data: Vec<f32>,
@@ -631,20 +644,15 @@ fn stop_terminates_decoder_worker() {
 #[test]
 fn seek_while_playing_discards_stale_frames() {
     let (worker, mut consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(1_000)), 16);
-    while consumer.available() < 16 {
-        std::thread::yield_now();
-    }
+    poll_until(|| consumer.available() >= 16);
 
     worker.seek(seek_target(50)).unwrap();
 
     let mut output = [0.0f32; 4];
-    for _ in 0..10_000 {
+    poll_until(|| {
         output.fill(0.0);
-        if consumer.consume(&mut output) == 4 && output == [50.0, 51.0, 52.0, 53.0] {
-            break;
-        }
-        std::thread::yield_now();
-    }
+        consumer.consume(&mut output) == 4 && output == [50.0, 51.0, 52.0, 53.0]
+    });
     assert_eq!(output, [50.0, 51.0, 52.0, 53.0]);
     worker.join().unwrap();
 }
@@ -652,9 +660,7 @@ fn seek_while_playing_discards_stale_frames() {
 #[test]
 fn channel_output_smooths_the_discontinuity_after_seek() {
     let (worker, mut consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(1_000)), 32);
-    while consumer.available() < 32 {
-        std::thread::yield_now();
-    }
+    poll_until(|| consumer.available() >= 32);
 
     let mut before = [0.0f32; 4];
     assert_eq!(consumer.consume_channels(&mut before, 1, 1), 4);
@@ -677,12 +683,7 @@ fn channel_output_smooths_the_discontinuity_after_seek() {
     let worker = seek_thread.join().unwrap();
 
     let mut after = [0.0f32; 4];
-    for _ in 0..10_000 {
-        if consumer.consume_channels(&mut after, 1, 1) == 4 {
-            break;
-        }
-        std::thread::yield_now();
-    }
+    poll_until(|| consumer.consume_channels(&mut after, 1, 1) == 4);
 
     assert!(after[0] > 0.0, "ramp should move away from silence");
     assert!(after[0] < 1.0, "first post-seek sample must fade in from zero");
@@ -790,16 +791,13 @@ fn seek_while_paused_preserves_pause_and_resumes_at_target() {
     control.resume();
     let mut output = [0.0f32; 4];
     let mut collected = Vec::new();
-    for _ in 0..10_000 {
+    poll_until(|| {
         let count = consumer.consume(&mut output);
         if count == 4 {
             collected.extend_from_slice(&output);
         }
-        if collected.windows(4).any(|window| window == [75.0, 76.0, 77.0, 78.0]) {
-            break;
-        }
-        std::thread::yield_now();
-    }
+        collected.windows(4).any(|window| window == [75.0, 76.0, 77.0, 78.0])
+    });
     assert!(
         collected.windows(4).any(|window| window == [75.0, 76.0, 77.0, 78.0]),
         "seek target must become audible after resume"
@@ -813,9 +811,7 @@ fn repeated_seek_ends_at_latest_target() {
     let (worker, mut consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(1_000)), 16);
     let control = consumer.control();
     control.pause();
-    while consumer.available() < 16 {
-        std::thread::yield_now();
-    }
+    poll_until(|| consumer.available() >= 16);
 
     worker.seek(seek_target(20)).unwrap();
     worker.seek(seek_target(90)).unwrap();
@@ -823,16 +819,13 @@ fn repeated_seek_ends_at_latest_target() {
 
     let mut output = [0.0f32; 2];
     let mut collected = Vec::new();
-    for _ in 0..10_000 {
+    poll_until(|| {
         output.fill(0.0);
         if consumer.consume(&mut output) == 2 {
             collected.extend_from_slice(&output);
         }
-        if collected.windows(2).any(|window| window == [90.0, 91.0]) {
-            break;
-        }
-        std::thread::yield_now();
-    }
+        collected.windows(2).any(|window| window == [90.0, 91.0])
+    });
     assert!(
         collected.windows(2).any(|window| window == [90.0, 91.0]),
         "latest seek target must become audible"
@@ -846,9 +839,7 @@ fn unsupported_seek_returns_decoder_error() {
         Box::new(RejectingSeekDecoder { inner: RampDecoder::new(1_000) }),
         16,
     );
-    while consumer.available() < 16 {
-        std::thread::yield_now();
-    }
+    poll_until(|| consumer.available() >= 16);
 
     assert!(worker.seek(seek_target(20)).is_err());
     control_stop_and_join(worker, consumer);
@@ -857,18 +848,11 @@ fn unsupported_seek_returns_decoder_error() {
 #[test]
 fn seek_after_decoder_eof_reopens_playback_position() {
     let (worker, mut consumer) = PlaybackWorker::start(Box::new(RampDecoder::new(4)), 16);
-    while !worker.is_finished() {
-        std::thread::yield_now();
-    }
+    poll_until(|| worker.is_finished());
 
     worker.seek(seek_target(2)).unwrap();
     let mut output = [0.0f32; 2];
-    for _ in 0..10_000 {
-        if consumer.consume(&mut output) == 2 {
-            break;
-        }
-        std::thread::yield_now();
-    }
+    poll_until(|| consumer.consume(&mut output) == 2);
     assert_eq!(output, [2.0, 3.0]);
     control_stop_and_join(worker, consumer);
 }
@@ -1434,15 +1418,16 @@ fn clear_loop_region_stops_wrapping_and_follows_mode() {
     let _ = consumer.consume(&mut first);
     control.resume();
     let mut saw_region_start = false;
-    for _ in 0..10_000 {
+    poll_until(|| {
         if consumer.consume(&mut first) == 8
             && first.windows(4).any(|window| window == [2.0, 3.0, 4.0, 5.0])
         {
             saw_region_start = true;
-            break;
+            true
+        } else {
+            false
         }
-        std::thread::yield_now();
-    }
+    });
     assert!(saw_region_start, "region loops before the clear");
 
     worker.clear_loop_region().unwrap();
