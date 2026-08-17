@@ -2,7 +2,10 @@ name: Build release binaries
 
 on:
   release:
-    types: [published]
+    # release-please creates releases through the API with draft=false, which
+    # GitHub surfaces as `created`; interactive creation fires `published`.
+    # Listen to both and skip drafts.
+    types: [published, created]
   workflow_dispatch:
     inputs:
       tag:
@@ -19,6 +22,7 @@ concurrency:
 jobs:
   build:
     name: Build ${{ matrix.name }}
+    if: ${{ !github.event.release.draft }}
     runs-on: ${{ matrix.platform }}
     strategy:
       fail-fast: false
