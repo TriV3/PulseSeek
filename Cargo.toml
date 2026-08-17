@@ -1,6 +1,6 @@
 [package]
 name = "pulseseek-workspace"
-version = "1.0.3"
+version = "1.0.4"
 edition = "2021"
 publish = false
 description = "Workspace root package tracking the PulseSeek application version."

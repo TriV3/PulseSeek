@@ -1,6 +1,6 @@
 {
   "productName": "PulseSeek",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "identifier": "com.trive.pulseseek",
   "build": {
     "beforeBuildCommand": "pnpm build",
