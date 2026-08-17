@@ -25,7 +25,7 @@
       "type": "cargo-workspace"
     }
   ],
-  "pull-request-footer": "---\n\n## Installation\n\nDownload the file for your platform and verify its checksum against `SHA256SUMS.txt`:\n\n| Platform | File |\n| --- | --- |\n| macOS (Apple Silicon) | `PulseSeek_<version>_aarch64.dmg` |\n| macOS (Intel) | `PulseSeek_<version>_x64.dmg` |\n| Windows | `PulseSeek_<version>_x64-setup.exe` |\n| Linux (Debian/Ubuntu) | `PulseSeek_<version>_amd64.deb` |\n| Linux (Fedora/RHEL) | `PulseSeek_<version>-1.x86_64.rpm` |\n| Linux (AppImage) | `PulseSeek_<version>_amd64.AppImage` |\n\nBinaries are **unsigned**. macOS users may need to right-click and choose Open the first time.",
+  "pull-request-footer": "---\n\n## Installation\n\nDownload the file for your platform and verify its checksum against `SHA256SUMS.txt`:\n\n| Platform | File |\n| --- | --- |\n| macOS (Apple Silicon) | `PulseSeek_<version>_aarch64.dmg` |\n| macOS (Intel) | `PulseSeek_<version>_x64.dmg` |\n| Windows | `PulseSeek_<version>_x64-setup.exe` |\n| Windows (ARM64) | `PulseSeek_<version>_arm64-setup.exe` |\n| Linux (Debian/Ubuntu) | `PulseSeek_<version>_amd64.deb` |\n| Linux (Fedora/RHEL) | `PulseSeek_<version>-1.x86_64.rpm` |\n| Linux (AppImage) | `PulseSeek_<version>_amd64.AppImage` |\n\nmacOS binaries are **ad-hoc signed but not notarized**. The first time you open `PulseSeek.app`, macOS may warn that it cannot verify the developer; choose **right-click → Open → Open** to launch.",
   "changelog-sections": [
     { "type": "feat", "section": "Added" },
     { "type": "fix", "section": "Fixed" },
