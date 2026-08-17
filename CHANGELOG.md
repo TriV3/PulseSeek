@@ -21,9 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 * **release:** align release-notes footer with signing and ARM64 status ([0481138](https://github.com/TriV3/PulseSeek/commit/0481138cf85945cd1aba12d89aabae864b7d17c7))
-* **release:** sync v1.0.6 metadata into develop ([f73b943](https://github.com/TriV3/PulseSeek/commit/f73b94342f5cf7e3057980d32d9c68662219a733))
-* **release:** sync v1.0.6 metadata into develop ([4594c56](https://github.com/TriV3/PulseSeek/commit/4594c563d83152fa62052d226ce947231ff6595d))
-* **release:** v1.1.0 ([a8090d8](https://github.com/TriV3/PulseSeek/commit/a8090d837405dc5f1a5ca5adbc1071b2a4890b0d))
 
 ## [1.0.6](https://github.com/TriV3/PulseSeek/compare/v1.0.5...v1.0.6) (2026-08-17)
 
