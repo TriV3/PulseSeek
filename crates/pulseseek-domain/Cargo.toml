@@ -1,5 +1,5 @@
 [package]
 name = "pulseseek-domain"
-version = "1.0.5"
+version = "1.0.6"
 edition = "2021"
 license = "MPL-2.0"
