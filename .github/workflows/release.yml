@@ -8,6 +8,8 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # workflow_dispatch through the GITHUB_TOKEN requires the actions scope.
+  actions: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -22,9 +24,8 @@ jobs:
         uses: googleapis/release-please-action@v4
         id: release
         with:
-          command: manifest
           token: ${{ secrets.GITHUB_TOKEN }}
-          default-branch: main
+          target-branch: main
       - name: Check out repository for dispatch ref resolution
         # `gh workflow run --ref <tag>` resolves the ref through git; the
         # runner has no checkout by default.
