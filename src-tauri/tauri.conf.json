@@ -1,6 +1,6 @@
 {
   "productName": "PulseSeek",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "identifier": "com.trive.pulseseek",
   "build": {
     "beforeBuildCommand": "pnpm build",
@@ -19,37 +19,52 @@
     ],
     "fileAssociations": [
       {
-        "ext": ["wav", "wave"],
+        "ext": [
+          "wav",
+          "wave"
+        ],
         "name": "Waveform Audio File",
         "role": "Viewer",
         "mimeType": "audio/x-wav"
       },
       {
-        "ext": ["mp3"],
+        "ext": [
+          "mp3"
+        ],
         "name": "MPEG Audio File",
         "role": "Viewer",
         "mimeType": "audio/mpeg"
       },
       {
-        "ext": ["flac"],
+        "ext": [
+          "flac"
+        ],
         "name": "FLAC Audio File",
         "role": "Viewer",
         "mimeType": "audio/flac"
       },
       {
-        "ext": ["aif", "aiff"],
+        "ext": [
+          "aif",
+          "aiff"
+        ],
         "name": "AIFF Audio File",
         "role": "Viewer",
         "mimeType": "audio/aiff"
       },
       {
-        "ext": ["ogg", "oga"],
+        "ext": [
+          "ogg",
+          "oga"
+        ],
         "name": "Ogg Vorbis Audio File",
         "role": "Viewer",
         "mimeType": "audio/ogg"
       },
       {
-        "ext": ["m4a"],
+        "ext": [
+          "m4a"
+        ],
         "name": "MPEG-4 Audio File",
         "role": "Viewer",
         "mimeType": "audio/mp4"
