@@ -1,6 +1,7 @@
 mod resampling;
 
 mod analysis_capture;
+mod analysis_lanes;
 mod control;
 mod engine;
 mod error;
@@ -11,6 +12,7 @@ mod visualization;
 mod worker;
 
 pub use analysis_capture::*;
+pub use analysis_lanes::*;
 pub use control::*;
 pub use engine::*;
 pub use error::*;
