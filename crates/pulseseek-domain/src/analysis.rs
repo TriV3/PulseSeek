@@ -2,7 +2,7 @@ use std::{fmt, str::FromStr};
 
 pub const ANALYSIS_SCHEMA_VERSION: u16 = 1;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct SourceId(String);
 
 impl SourceId {
@@ -27,7 +27,7 @@ pub enum SourceKind {
     External,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum MeasurementPoint {
     Source,
     Monitor,

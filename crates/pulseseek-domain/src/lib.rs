@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod analysis_subscriptions;
 pub mod audio_output;
 pub mod browser;
 pub mod decoder;
