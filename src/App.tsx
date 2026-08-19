@@ -66,6 +66,7 @@ import {
 import { ConfirmDialog } from "./components/ConfirmDialog/ConfirmDialog";
 import "./components/ConfirmDialog/ConfirmDialog.css";
 import { APP_VERSION } from "./version";
+import { MeterWorkspace } from "./components/MeterWorkspace/MeterWorkspace";
 import "./styles/tokens.css";
 import "./styles/themes/light.css";
 import "./styles/themes/dark.css";
@@ -1444,10 +1445,7 @@ function App() {
             aria-labelledby="lower-workspace-tab-meters"
             hidden={lowerWorkspace !== "meters"}
           >
-            <div className="meters-empty-state">
-              <h2>Meters</h2>
-              <p>Meter tiles will appear here in a future update.</p>
-            </div>
+            <MeterWorkspace />
           </section>
         </section>
       </div>

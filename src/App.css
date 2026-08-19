@@ -685,6 +685,91 @@ input {
   background: var(--bg-subtle);
 }
 
+.meter-workspace-content {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding: 16px;
+}
+
+.meter-workspace-header,
+.meter-tile header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.meter-workspace-header h2,
+.meter-workspace-header p,
+.meter-module-catalogue h3,
+.meter-tile h3,
+.meter-tile p {
+  margin: 0;
+}
+
+.meter-workspace-header p,
+.meter-tile p {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.meter-experimental-toggle {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.meter-module-catalogue,
+.meter-tile {
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-surface);
+}
+
+.meter-module-list,
+.meter-tile-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.meter-module-list button,
+.meter-tile button {
+  padding: 5px 9px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-subtle);
+  color: var(--text-strong);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.meter-module-list button:focus-visible,
+.meter-tile button:focus-visible,
+.meter-tile select:focus-visible,
+.meter-experimental-toggle input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.meter-tile-list {
+  align-items: flex-start;
+}
+
+.meter-tile {
+  min-width: 220px;
+  flex: 1 1 220px;
+}
+
+.meter-tile header span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .meters-empty-state {
   max-width: 420px;
   padding: 24px;
