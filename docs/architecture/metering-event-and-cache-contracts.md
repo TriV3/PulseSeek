@@ -7,114 +7,21 @@
 
 ## Event families
 
-Events are versioned, narrow, and independently subscribed. There is no
-all-meters event and raw complex FFT bins never cross the Tauri boundary.
+Events use schema version 1, are narrow, and are independently subscribed. Wire names are `metering.session`, `metering.levels`, `metering.spectrum`, `metering.bands`, `metering.spectrogram`, `metering.waveform`, `metering.loudness`, `metering.true_peak`, `metering.stereo`, and `metering.diagnostics`. No all-meters event exists and raw complex FFT bins/audio samples never cross Tauri.
 
-| Family | Purpose | Default delivery |
-|---|---|---:|
-| session | source, format, continuity, validity | on change |
-| levels | peak, RMS, balance, M/S | 15–60 FPS |
-| spectrum | compact bins and display metadata | 15–60 FPS |
-| bands | configured band values | 15–60 FPS |
-| spectrogram | packed time rows | latest-only |
-| colored waveform | covered temporal cells | latest-only |
-| loudness | LUFS, LRA, duration, validity | continuous + display |
-| true peak | sample peak and dBTP | continuous + display |
-| stereo | correlation, width, goniometer data | 15–60 FPS |
-| diagnostics | costs, queues, drops, degradation | 1–5 FPS |
+Each event has schema version, session/source identifiers, measurement point, sequence, source-sample timestamp, and validity. Sequence increases and timestamps do not decrease within session/family/subscription. Session changes reset ordering. Unknown schema versions are rejected without stopping playback.
 
-Each payload has schema_version, algorithm_version, session_id, sequence,
-timestamp_samples, sample_rate, channels, validity, and source_point where
-applicable. A receiver can reject an unknown version without stopping playback.
+| Family | Delivery |
+|---|---:|
+| session | on change |
+| levels, spectrum, bands, stereo | 15–60 FPS |
+| spectrogram, waveform | latest-only |
+| loudness, true peak | continuous + display |
+| diagnostics | 1–5 FPS |
 
-## Payload shapes
+Subscriptions have bounded independent mailboxes. Latest-only overflow replaces stale data and reports a drop. Continuous overflow never blocks producer, records a gap, and marks only that family invalid with queue-saturated reason. Unsubscribe is idempotent; dropping final receiver clears its mailbox.
 
-```text
-SessionEvent {
-  schema_version
-  session_id
-  source_id
-  point
-  sample_rate
-  channels
-  state: Started | Paused | Resumed | LoopWrap | Reset | Stopped | Incomplete
-  reason
-}
-
-SpectrumFrame {
-  schema_version
-  algorithm_version
-  session_id
-  sequence
-  timestamp_samples
-  fft_size
-  window
-  channel_view
-  frequency_min
-  frequency_max
-  floor_db
-  values_db: compact float array
-  validity
-}
-
-BandEnergyFrame {
-  schema_version
-  session_id
-  sequence
-  timestamp_samples
-  profile_id
-  method
-  channel_mode
-  bands: [{ id, low_hz, high_hz, value, unit, validity }]
-}
-
-LoudnessFrame {
-  schema_version
-  algorithm_version
-  session_id
-  timestamp_samples
-  momentary_lufs
-  short_term_lufs
-  integrated_lufs
-  lra_lu
-  duration_seconds
-  gating_state
-  validity
-}
-
-DiagnosticsFrame {
-  schema_version
-  session_id
-  cpu_ms_p95
-  cpu_ms_p99
-  queue_depths
-  visual_drops
-  continuous_gaps
-  active_products
-  shared_products
-  effective_quality
-  reason
-}
-```
-
-The exact Rust structs and Tauri serializers must preserve these semantics. A
-renderer may interpolate presentation values, but it must not invent measurement
-samples or hide invalidity.
-
-## Subscription protocol
-
-The UI requests a product family with a normalized ProductRequest. The Rust
-application service returns a subscription_id and the current validity state.
-Unsubscribe is idempotent. Dropping the last receiver clears the worker's
-connection flag so an idle worker exits even if no new audio block arrives.
-
-Every subscription has:
-
-- requested source point and channel mode;
-- product kind and algorithm version;
-- FFT/window/hop where relevant;
-- requested cadence and priority;
-- mailbox capacity and latest-only/continuous policy.
+Experimental events additionally expose formula, baseline, window, algorithm version, and validity.
 
 ## Cache index
 
@@ -148,34 +55,4 @@ analysis_cache_segment(
 )
 ```
 
-The implementation may use the existing technical cache database, but must not
-create manager records or cross-manager foreign keys. A migration records schema
-version and can be rolled forward or invalidated safely.
-
-## Blob format
-
-Blobs are chunked by temporal coverage. The default chunk target is four
-seconds, with a product-specific maximum byte size. A blob header contains:
-
-- magic and format version;
-- product kind and algorithm version;
-- config hash and source fingerprint;
-- sample rate, channels, start sample, duration;
-- payload encoding and checksum.
-
-Payloads use little-endian packed values with explicit quantization metadata.
-Spectrum and band data may use float32; spectrogram display rows may use uint8
-plus min/max dB metadata. A temporary file is fsynced when supported and
-atomically renamed before SQLite coverage is committed. Recovery removes or
-quarantines orphaned temporary blobs.
-
-## Invalidation and retention
-
-A path, size, modification time, stronger fingerprint, algorithm version, or
-configuration change invalidates only incompatible coverage. Unknown coverage is
-not silence. Cache writes are coalesced and never occur in the audio callback.
-
-The user can clear one source, one product, one profile, or all technical cache.
-Quota policy is visible. Oldest low-priority visual coverage is evicted before
-continuous loudness/true-peak summaries. An offline analyzer may extend coverage
-only when its algorithm/configuration matches or creates a new version.
+Cache writes remain outside audio callback, use temporary files and atomic rename, and never create manager records.

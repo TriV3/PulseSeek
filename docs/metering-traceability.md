@@ -173,6 +173,6 @@ behavior. `not applicable` means no manual check is required for that row.
 | NFR-MT-005 | PR-092, downstream owner | cross-cutting metering boundary | cross-cutting validation | release evidence | functional §7.6; validation §8 | traceability-only at PR-092 |
 | NFR-MT-006 | PR-092, downstream owner | cross-cutting metering boundary | cross-cutting validation | release evidence | functional §7.6; validation §8 | traceability-only at PR-092 |
 | NFR-MT-007 | PR-092, downstream owner | cross-cutting metering boundary | cross-cutting validation | release evidence | functional §7.6; validation §8 | traceability-only at PR-092 |
-| NFR-MT-008 | PR-092, downstream owner | cross-cutting metering boundary | cross-cutting validation | release evidence | functional §7.6; validation §8 | traceability-only at PR-092 |
+| NFR-MT-008 | PR-102 | versioned metering event contracts | analysis_events contract tests | no UI evidence; contract-only | architecture §7; validation §1/§5 | product payloads downstream |
 | NFR-MT-009 | PR-092, downstream owner | cross-cutting metering boundary | cross-cutting validation | release evidence | functional §7.6; validation §8 | traceability-only at PR-092 |
 | NFR-MT-010 | PR-092, downstream owner | cross-cutting metering boundary | cross-cutting validation | release evidence | functional §7.6; validation §8 | traceability-only at PR-092 |

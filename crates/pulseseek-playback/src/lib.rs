@@ -1,6 +1,7 @@
 mod resampling;
 
 mod analysis_capture;
+mod analysis_event_runtime;
 mod analysis_lanes;
 mod control;
 mod engine;
@@ -13,6 +14,9 @@ mod visualization;
 mod worker;
 
 pub use analysis_capture::*;
+pub use analysis_event_runtime::{
+    AnalysisEventRuntime, EventEnvelope, EventReceiver, MeteringPublishResult,
+};
 pub use analysis_lanes::*;
 pub use control::*;
 pub use engine::*;
