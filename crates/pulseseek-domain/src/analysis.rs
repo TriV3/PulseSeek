@@ -9,6 +9,11 @@ impl SourceId {
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
+
+    pub fn successor_by(&self, generation: u64) -> Self {
+        let suffix = "-next".repeat(usize::try_from(generation).unwrap_or(usize::MAX));
+        Self(format!("{}{suffix}", self.0))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -17,6 +22,15 @@ pub struct SessionId(String);
 impl SessionId {
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
+    }
+
+    pub fn successor(&self) -> Self {
+        self.successor_by(1)
+    }
+
+    pub fn successor_by(&self, generation: u64) -> Self {
+        let suffix = "-next".repeat(usize::try_from(generation).unwrap_or(usize::MAX));
+        Self(format!("{}{suffix}", self.0))
     }
 }
 
@@ -283,7 +297,7 @@ impl SourceSession {
         measurement_point: MeasurementPoint,
         first_sample: u64,
     ) {
-        self.id = SessionId::new(format!("{}-next", self.id.0));
+        self.id = self.id.successor();
         self.request.format = format;
         self.request.source_id = source_id;
         self.request.measurement_point = measurement_point;

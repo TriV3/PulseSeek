@@ -9,6 +9,7 @@ use pulseseek_domain::playback::position::Position;
 use ringbuf::traits::{Observer, Producer, Split};
 use ringbuf::{HeapProd, HeapRb};
 
+use crate::analysis_capture::AnalysisCaptureProducer;
 use crate::control::{
     PlaybackConsumer, PlaybackControl, MAX_CALLBACK_CHANNELS, SEEK_RAMP_FRAMES, TERMINAL_ACTIVE,
 };
@@ -25,6 +26,7 @@ pub(crate) struct PreparedTrack {
     pub(crate) eof: bool,
     pub(crate) boundary_appended: bool,
     pub(crate) track_change_sequence: Option<u64>,
+    pub(crate) source_samples: Vec<f32>,
 }
 
 /// for a real-time audio callback to consume.
@@ -56,6 +58,9 @@ pub struct PlaybackEngine {
     pub(crate) loop_cache_offset: usize,
     /// Total frames written to the ring buffer so far.
     pub frames_written: u64,
+    pub(crate) source_analysis_tap: Option<AnalysisCaptureProducer>,
+    pub(crate) source_frames_captured: u64,
+    pub(crate) analysis_seek_generation: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -142,6 +147,9 @@ impl PlaybackEngine {
                 loop_cache_overflowed: false,
                 loop_cache_offset: 0,
                 frames_written: 0,
+                source_analysis_tap: None,
+                source_frames_captured: 0,
+                analysis_seek_generation: 0,
             },
             PlaybackConsumer {
                 consumer,
@@ -154,8 +162,19 @@ impl PlaybackEngine {
                 seek_fade_out_origin: [0.0; MAX_CALLBACK_CHANNELS],
                 buffer_cleared_for_seek: false,
                 visualization_tap: None,
+                monitor_analysis_tap: None,
+                analysis_seek_generation: 0,
+                analysis_track_change_sequence: 0,
             },
         )
+    }
+
+    pub fn set_source_analysis_tap(&mut self, tap: AnalysisCaptureProducer) {
+        self.source_analysis_tap = Some(tap);
+    }
+
+    pub fn clear_source_analysis_tap(&mut self) {
+        self.source_analysis_tap = None;
     }
 
     /// Returns the length of the active loop region in interleaved samples.
@@ -229,6 +248,17 @@ impl PlaybackEngine {
     /// region boundary was reached.
     /// On EOF the ring buffer may still hold unread frames.
     pub fn process_chunk(&mut self) -> Result<bool, PlaybackError> {
+        let seek_generation =
+            self.control.seek_generation.load(std::sync::atomic::Ordering::Acquire);
+        if seek_generation != self.analysis_seek_generation {
+            if let Some(tap) = &mut self.source_analysis_tap {
+                let first_sample =
+                    self.decoder_position_ms.saturating_mul(u64::from(tap.sample_rate())) / 1_000;
+                tap.start_new_session_at(first_sample);
+                self.source_frames_captured = first_sample;
+            }
+            self.analysis_seek_generation = seek_generation;
+        }
         if self.eof || self.region_boundary_reached {
             return Ok(false);
         }
@@ -251,7 +281,7 @@ impl PlaybackEngine {
         }
 
         if let Some(resampler) = &mut self.resampler {
-            match resampler.next_chunk(&mut *self.decoder)? {
+            match resampler.next_chunk(&mut *self.decoder, self.source_analysis_tap.as_mut())? {
                 Some(samples) => {
                     self.decoder_position_ms = resampler.source_position_ms();
                     self.pending.extend(samples);
@@ -293,6 +323,11 @@ impl PlaybackEngine {
             self.decoder_position_ms +=
                 (frames as u64).saturating_mul(1_000) / u64::from(self.sample_rate);
         }
+        if let Some(tap) = &mut self.source_analysis_tap {
+            tap.try_capture_bounded(self.source_frames_captured, &buf[..frames], false);
+        }
+        self.source_frames_captured =
+            self.source_frames_captured.saturating_add((frames / self.channels) as u64);
 
         // Push available frames into the ring buffer (non-blocking),
         // stopping at the region boundary when one is active.
@@ -320,6 +355,7 @@ impl PlaybackEngine {
             eof: false,
             boundary_appended: false,
             track_change_sequence: None,
+            source_samples: Vec::new(),
         });
     }
 
@@ -348,6 +384,14 @@ impl PlaybackEngine {
         self.eof = false;
         self.pending = prepared.pending;
         self.decoder_position_ms = 0;
+        self.source_frames_captured = 0;
+        if let Some(tap) = &mut self.source_analysis_tap {
+            let _ = tap.start_new_source(
+                self.resampler.as_ref().map_or(self.sample_rate, SampleRateConverter::source_rate),
+            );
+            tap.try_capture_bounded(0, &prepared.source_samples, false);
+            self.source_frames_captured = (prepared.source_samples.len() / self.channels) as u64;
+        }
         true
     }
 
@@ -361,9 +405,12 @@ impl PlaybackEngine {
         }
         while prepared.pending.len() < PRIME_SAMPLES && !prepared.eof {
             if let Some(resampler) = &mut prepared.resampler {
-                match resampler.next_chunk(&mut *prepared.decoder)? {
+                match resampler.next_chunk(&mut *prepared.decoder, None)? {
                     Some(samples) if samples.is_empty() => prepared.eof = true,
-                    Some(samples) => prepared.pending.extend(samples),
+                    Some(samples) => {
+                        prepared.source_samples.extend_from_slice(resampler.last_input());
+                        prepared.pending.extend(samples);
+                    },
                     None => prepared.eof = true,
                 }
             } else {
@@ -372,6 +419,7 @@ impl PlaybackEngine {
                 if read == 0 {
                     prepared.eof = true;
                 } else {
+                    prepared.source_samples.extend_from_slice(&samples[..read]);
                     prepared.pending.extend(samples.into_iter().take(read));
                 }
             }
@@ -622,8 +670,11 @@ impl PlaybackEngine {
                 self.region_boundary_reached = false;
                 self.decoder_position_ms = position.as_millis();
                 if let Some(resampler) = &mut self.resampler {
-                    resampler.reset();
+                    resampler.reset_at(position.as_millis());
                 }
+                self.source_frames_captured = self.source_analysis_tap.as_ref().map_or(0, |tap| {
+                    position.as_millis().saturating_mul(u64::from(tap.sample_rate())) / 1_000
+                });
                 self.pending_position_reset = Some(self.region_start_frames());
                 Ok(())
             },

@@ -9,6 +9,7 @@ use pulseseek_domain::playback::loop_region::LoopRegion;
 use pulseseek_domain::playback::mode::PlaybackMode;
 use pulseseek_domain::playback::position::{Position, SeekTarget};
 
+use crate::analysis_capture::AnalysisCaptureProducer;
 use crate::control::PlaybackConsumer;
 use crate::engine::PlaybackEngine;
 use crate::error::*;
@@ -71,7 +72,7 @@ fn execute_worker_command(engine: &mut PlaybackEngine, command: WorkerCommand) -
                     engine.loop_cache_offset = 0;
                     engine.decoder_position_ms = position.as_millis();
                     if let Some(resampler) = &mut engine.resampler {
-                        resampler.reset();
+                        resampler.reset_at(position.as_millis());
                     }
                     // A seek inside the active A–B region keeps the loop and
                     // rebases its progress; a seek outside it disables the
@@ -149,6 +150,34 @@ impl PlaybackWorker {
             target_rate,
             PlaybackMode::OneShot,
         )
+    }
+
+    pub fn start_resampled_with_analysis(
+        decoder: Box<dyn Decoder>,
+        buffer_frames: usize,
+        channels: usize,
+        source_rate: u32,
+        target_rate: u32,
+        source_tap: AnalysisCaptureProducer,
+        monitor_tap: AnalysisCaptureProducer,
+    ) -> Result<(Self, PlaybackConsumer), DecodeError> {
+        SampleRateConverter::validate(channels, source_rate, target_rate)?;
+        let resampler = if source_rate == target_rate {
+            None
+        } else {
+            Some(SampleRateConverter::new(channels, source_rate, target_rate)?)
+        };
+        let (mut engine, mut consumer) = PlaybackEngine::new_with_resampler_mode(
+            decoder,
+            buffer_frames,
+            resampler,
+            PlaybackMode::OneShot,
+            target_rate,
+            channels,
+        );
+        engine.set_source_analysis_tap(source_tap);
+        consumer.set_monitor_analysis_tap(monitor_tap);
+        Ok(Self::start_engine(engine, consumer))
     }
 
     /// Starts decoder work with resampling and the selected end-of-file mode.

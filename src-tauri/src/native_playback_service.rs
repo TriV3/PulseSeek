@@ -4,6 +4,7 @@ use std::thread::JoinHandle;
 use std::time::Duration as ThreadDuration;
 
 use pulseseek_audio_cpal::CpalAudioOutput;
+use pulseseek_domain::analysis::{AudioFormat, MeasurementPoint, SessionId, SourceId, SourceKind};
 use pulseseek_domain::audio_output::{AudioOutput, DeviceId, StreamState};
 use pulseseek_domain::decoder::StreamMetadata;
 use pulseseek_domain::error::{ApplicationError, DiagnosticCode, DiagnosticContext, ErrorCategory};
@@ -11,7 +12,10 @@ use pulseseek_domain::playback::loop_region::LoopRegion;
 use pulseseek_domain::playback::mode::PlaybackMode;
 use pulseseek_domain::playback::position::{Duration, Position};
 use pulseseek_domain::visualization::{VisualizationMode, VisualizationSettings};
-use pulseseek_playback::{PlaybackControl, PlaybackWorker, TrackChange};
+use pulseseek_playback::{
+    analysis_capture_channel, AnalysisCaptureConfig, AnalysisCaptureConsumer, PlaybackControl,
+    PlaybackWorker, TrackChange,
+};
 
 use crate::playback_events::{NoopEventEmitter, PlaybackEventEmitter, EVENT_COMPLETED};
 use crate::playback_service::PlaybackService;
@@ -29,6 +33,8 @@ pub struct NativePlaybackService {
     position_reporter: Option<PositionReporter>,
     visualization: Option<VisualizationPipeline>,
     visualization_settings: VisualizationSettings,
+    analysis_drain: Option<AnalysisDrain>,
+    next_analysis_session: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -36,6 +42,42 @@ struct ActiveTrack {
     path: String,
     duration_ms: Option<u64>,
     channels: usize,
+}
+
+struct AnalysisDrain {
+    stop: Arc<AtomicBool>,
+    join: Option<JoinHandle<()>>,
+}
+
+impl AnalysisDrain {
+    fn start(mut source: AnalysisCaptureConsumer, mut monitor: AnalysisCaptureConsumer) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let drain_stop = Arc::clone(&stop);
+        let join = std::thread::spawn(move || {
+            while !drain_stop.load(Ordering::Acquire) {
+                let received = source.try_receive().is_some() | monitor.try_receive().is_some();
+                if !received {
+                    std::thread::sleep(ThreadDuration::from_millis(1));
+                }
+            }
+            source.shutdown();
+            monitor.shutdown();
+        });
+        Self { stop, join: Some(join) }
+    }
+
+    fn stop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
+impl Drop for AnalysisDrain {
+    fn drop(&mut self) {
+        self.stop();
+    }
 }
 
 struct PositionReporter {
@@ -151,6 +193,8 @@ impl NativePlaybackService {
             position_reporter: None,
             visualization: None,
             visualization_settings: VisualizationSettings::default(),
+            analysis_drain: None,
+            next_analysis_session: 0,
         }
     }
 
@@ -182,6 +226,7 @@ impl PlaybackService for NativePlaybackService {
             reporter.stop();
         }
         self.visualization = None;
+        self.analysis_drain = None;
         let mut decoder = pulseseek_decoder_symphonia::registry::DecoderRegistry::open(path)
             .map_err(|e| {
                 ApplicationError::new(
@@ -229,16 +274,67 @@ impl PlaybackService for NativePlaybackService {
             .map_err(|e| Self::unavailable(&format!("failed to read output sample rate: {e}")))?;
         drop(output);
 
-        let (worker, mut consumer) = PlaybackWorker::start_resampled(
-            decoder,
-            self.buffer_frames,
-            channels,
-            sample_rate,
-            output_sample_rate,
-        )
-        .map_err(|e| {
-            Self::unavailable(&format!("failed to configure sample-rate conversion: {e}"))
-        })?;
+        let (worker, mut consumer, analysis_drain) = if channels <= 2 {
+            self.next_analysis_session = self.next_analysis_session.wrapping_add(1);
+            let source_id = SourceId::new(path);
+            let session_id = SessionId::new(format!("player-{}", self.next_analysis_session));
+            let layout = if channels == 1 {
+                pulseseek_domain::analysis::ChannelLayout::Mono
+            } else {
+                pulseseek_domain::analysis::ChannelLayout::Stereo
+            };
+            let source_format = AudioFormat::new(sample_rate, layout).map_err(|error| {
+                Self::unavailable(&format!("unsupported analysis source: {error}"))
+            })?;
+            let monitor_format = AudioFormat::new(output_sample_rate, layout).map_err(|error| {
+                Self::unavailable(&format!("unsupported analysis monitor: {error}"))
+            })?;
+            let (source_tap, source_consumer) = analysis_capture_channel(
+                8,
+                AnalysisCaptureConfig::new(
+                    source_id.clone(),
+                    session_id.clone(),
+                    SourceKind::Playback,
+                    MeasurementPoint::Source,
+                    source_format,
+                ),
+            );
+            let (monitor_tap, monitor_consumer) = analysis_capture_channel(
+                8,
+                AnalysisCaptureConfig::new(
+                    source_id,
+                    session_id,
+                    SourceKind::Playback,
+                    MeasurementPoint::Monitor,
+                    monitor_format,
+                ),
+            );
+            let (worker, consumer) = PlaybackWorker::start_resampled_with_analysis(
+                decoder,
+                self.buffer_frames,
+                channels,
+                sample_rate,
+                output_sample_rate,
+                source_tap,
+                monitor_tap,
+            )
+            .map_err(|e| {
+                Self::unavailable(&format!("failed to configure sample-rate conversion: {e}"))
+            })?;
+            (worker, consumer, Some(AnalysisDrain::start(source_consumer, monitor_consumer)))
+        } else {
+            let (worker, consumer) = PlaybackWorker::start_resampled(
+                decoder,
+                self.buffer_frames,
+                channels,
+                sample_rate,
+                output_sample_rate,
+            )
+            .map_err(|e| {
+                Self::unavailable(&format!("failed to configure sample-rate conversion: {e}"))
+            })?;
+            (worker, consumer, None)
+        };
 
         if let Err(mode_result) = worker.set_mode(self.mode) {
             drop(worker);
@@ -283,6 +379,7 @@ impl PlaybackService for NativePlaybackService {
             Some(ActiveTrack { path: path.to_string(), duration_ms, channels });
         self.output_sample_rate = Some(output_sample_rate);
         self.visualization = visualization;
+        self.analysis_drain = analysis_drain;
 
         self.position_reporter = Some(PositionReporter::start(
             control,

@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use ringbuf::traits::{Consumer, Observer};
 use ringbuf::HeapCons;
 
+use crate::analysis_capture::{AnalysisCaptureProducer, MAX_ANALYSIS_CAPTURE_SAMPLES};
 use crate::apply_volume;
 use crate::engine::BufferedSample;
 use crate::visualization::VisualizationTap;
@@ -21,6 +22,9 @@ pub struct PlaybackConsumer {
     pub(crate) seek_fade_out_origin: [f32; MAX_CALLBACK_CHANNELS],
     pub(crate) buffer_cleared_for_seek: bool,
     pub(crate) visualization_tap: Option<VisualizationTap>,
+    pub(crate) monitor_analysis_tap: Option<AnalysisCaptureProducer>,
+    pub(crate) analysis_seek_generation: u64,
+    pub(crate) analysis_track_change_sequence: u64,
 }
 
 pub(crate) const MAX_CALLBACK_CHANNELS: usize = 32;
@@ -270,7 +274,21 @@ impl PlaybackConsumer {
             return 0;
         }
 
+        let track_change_sequence =
+            self.control.reached_track_change_sequence.load(Ordering::Acquire);
+        if track_change_sequence != self.analysis_track_change_sequence {
+            if let Some(tap) = &mut self.monitor_analysis_tap {
+                tap.rotate_source();
+            }
+            self.analysis_track_change_sequence = track_change_sequence;
+        }
         let seek_generation = self.control.seek_generation.load(Ordering::Acquire);
+        if seek_generation != self.analysis_seek_generation {
+            if let Some(tap) = &mut self.monitor_analysis_tap {
+                tap.start_new_session_at(self.control.position_frames());
+            }
+            self.analysis_seek_generation = seek_generation;
+        }
         let mut replaced_buffer = false;
         if seek_generation != self.observed_seek_generation {
             replaced_buffer = true;
@@ -289,6 +307,9 @@ impl PlaybackConsumer {
         }
 
         let mut written = 0;
+        let mut monitor_first_sample = self.control.position_frames();
+        let mut monitor_samples = [0.0f32; MAX_ANALYSIS_CAPTURE_SAMPLES];
+        let mut monitor_sample_count = 0;
         // Track whether we have exhausted the ring buffer. Once exhausted,
         // fill remaining frames with silence instead of breaking, so the
         // entire cpal output buffer is properly zeroed and avoids a pop or
@@ -314,6 +335,7 @@ impl PlaybackConsumer {
                 continue;
             }
 
+            let frame_position = self.control.position_frames();
             let mut source_samples = [0.0f32; 32];
             let mut source_sum = 0.0f32;
             let mut complete = true;
@@ -334,6 +356,39 @@ impl PlaybackConsumer {
                 continue;
             }
 
+            let track_change_sequence =
+                self.control.reached_track_change_sequence.load(Ordering::Acquire);
+            if track_change_sequence != self.analysis_track_change_sequence {
+                if monitor_sample_count > 0 {
+                    if let Some(tap) = &mut self.monitor_analysis_tap {
+                        let _ = tap.try_capture(
+                            monitor_first_sample,
+                            &monitor_samples[..monitor_sample_count],
+                            false,
+                        );
+                    }
+                    monitor_sample_count = 0;
+                    monitor_first_sample = 0;
+                }
+                if let Some(tap) = &mut self.monitor_analysis_tap {
+                    tap.rotate_source();
+                }
+                self.analysis_track_change_sequence = track_change_sequence;
+            }
+
+            let reset_position = self.control.position_frames();
+            if reset_position != frame_position && monitor_sample_count > 0 {
+                if let Some(tap) = &mut self.monitor_analysis_tap {
+                    let _ = tap.try_capture(
+                        monitor_first_sample,
+                        &monitor_samples[..monitor_sample_count],
+                        true,
+                    );
+                }
+                monitor_first_sample = reset_position;
+                monitor_sample_count = 0;
+            }
+
             if source_channels == 1 {
                 frame.fill(source_samples[0]);
             } else if output_channels == 1 {
@@ -347,6 +402,21 @@ impl PlaybackConsumer {
                     };
                 }
             }
+
+            if monitor_sample_count + source_channels > monitor_samples.len() {
+                if let Some(tap) = &mut self.monitor_analysis_tap {
+                    let _ = tap.try_capture(
+                        monitor_first_sample,
+                        &monitor_samples[..monitor_sample_count],
+                        false,
+                    );
+                }
+                monitor_first_sample = self.control.position_frames();
+                monitor_sample_count = 0;
+            }
+            monitor_samples[monitor_sample_count..monitor_sample_count + source_channels]
+                .copy_from_slice(&source_samples[..source_channels]);
+            monitor_sample_count += source_channels;
 
             if self.seek_ramp_frame < SEEK_RAMP_FRAMES {
                 let progress = seek_ramp_progress(self.seek_ramp_frame);
@@ -368,6 +438,15 @@ impl PlaybackConsumer {
             written += frame.len();
             self.control.position_frames.fetch_add(1, Ordering::Relaxed);
             self.control.output_active.store(true, Ordering::Release);
+        }
+        if monitor_sample_count > 0 {
+            if let Some(tap) = &mut self.monitor_analysis_tap {
+                let _ = tap.try_capture(
+                    monitor_first_sample,
+                    &monitor_samples[..monitor_sample_count],
+                    false,
+                );
+            }
         }
         written
     }
@@ -468,6 +547,14 @@ impl PlaybackConsumer {
             }
         }
         written
+    }
+
+    pub fn set_monitor_analysis_tap(&mut self, tap: AnalysisCaptureProducer) {
+        self.monitor_analysis_tap = Some(tap);
+    }
+
+    pub fn clear_monitor_analysis_tap(&mut self) {
+        self.monitor_analysis_tap = None;
     }
 
     /// Installs a preconfigured visualization tap before this consumer enters

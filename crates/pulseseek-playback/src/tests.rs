@@ -1,4 +1,6 @@
+use crate::resampling::SampleRateConverter;
 use crate::*;
+use pulseseek_domain::analysis::{AudioFormat, MeasurementPoint, SessionId, SourceId, SourceKind};
 use pulseseek_domain::decoder::{DecodeError, Decoder};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -17,6 +19,22 @@ fn poll_until(mut condition: impl FnMut() -> bool) {
     }
 }
 
+fn analysis_config(
+    point: MeasurementPoint,
+    sample_rate: u32,
+    channels: u16,
+) -> AnalysisCaptureConfig {
+    AnalysisCaptureConfig::try_new(
+        SourceId::new("track-a"),
+        SessionId::new("session-a"),
+        SourceKind::Playback,
+        point,
+        sample_rate,
+        channels,
+    )
+    .unwrap()
+}
+
 /// A fake decoder that produces a ramp of known values.
 struct RampDecoder {
     data: Vec<f32>,
@@ -33,6 +51,44 @@ impl StereoRampDecoder {
     fn new(frames: usize) -> Self {
         let data = (0..frames).flat_map(|frame| [frame as f32, frame as f32]).collect();
         Self { data, position: 0 }
+    }
+}
+
+struct StereoIdentityDecoder {
+    data: Vec<f32>,
+    position: usize,
+}
+
+impl StereoIdentityDecoder {
+    fn new(frames: usize) -> Self {
+        let data =
+            (0..frames).flat_map(|frame| [frame as f32 / 100.0, -(frame as f32) / 100.0]).collect();
+        Self { data, position: 0 }
+    }
+}
+
+impl Decoder for StereoIdentityDecoder {
+    fn probe(&self) -> pulseseek_domain::decoder::ProbeResult {
+        pulseseek_domain::decoder::ProbeResult::Supported
+    }
+
+    fn metadata(&mut self) -> Result<pulseseek_domain::decoder::StreamMetadata, DecodeError> {
+        unimplemented!("not used in tests")
+    }
+
+    fn read(&mut self, buf: &mut [f32]) -> Result<usize, DecodeError> {
+        let to_copy = buf.len().min(self.data.len() - self.position);
+        buf[..to_copy].copy_from_slice(&self.data[self.position..self.position + to_copy]);
+        self.position += to_copy;
+        Ok(to_copy)
+    }
+
+    fn seek(
+        &mut self,
+        target: pulseseek_domain::playback::position::SeekTarget,
+    ) -> Result<pulseseek_domain::playback::position::Position, DecodeError> {
+        self.position = (target.position().as_millis() as usize * 2).min(self.data.len());
+        Ok(target.position())
     }
 }
 
@@ -99,6 +155,98 @@ impl Decoder for RampDecoder {
         self.position = (target.position().as_millis() as usize).min(self.data.len());
         Ok(target.position())
     }
+}
+
+#[test]
+fn source_and_monitor_taps_preserve_scope_channels_and_volume_invariance() {
+    let (source_tap, mut source_blocks) =
+        analysis_capture_channel(8, analysis_config(MeasurementPoint::Source, 1_000, 2));
+    let (monitor_tap, mut monitor_blocks) =
+        analysis_capture_channel(8, analysis_config(MeasurementPoint::Monitor, 2_000, 2));
+    let (mut engine, mut consumer) = PlaybackEngine::new_with_resampler_mode(
+        Box::new(StereoIdentityDecoder::new(256)),
+        1_024,
+        Some(SampleRateConverter::new(2, 1_000, 2_000).unwrap()),
+        pulseseek_domain::playback::mode::PlaybackMode::OneShot,
+        2_000,
+        2,
+    );
+    engine.set_source_analysis_tap(source_tap);
+    consumer.set_monitor_analysis_tap(monitor_tap);
+
+    assert!(engine.process_chunk().unwrap());
+    let source = source_blocks.try_receive().unwrap();
+    assert_eq!(source.measurement_point(), MeasurementPoint::Source);
+    assert_eq!(source.format(), AudioFormat::stereo(1_000).unwrap());
+    assert_eq!(&source.interleaved_samples()[..4], &[0.0, -0.0, 0.01, -0.01]);
+
+    let mut output = vec![0.0; 512];
+    let written = consumer.consume_channels_with_volume(&mut output, 2, 2, 0.25);
+    let monitor = monitor_blocks.try_receive().unwrap();
+    assert_eq!(monitor.measurement_point(), MeasurementPoint::Monitor);
+    assert_eq!(monitor.format(), AudioFormat::stereo(2_000).unwrap());
+    assert_eq!(monitor.frame_count(), (written / 2) as u64);
+    assert!(monitor
+        .interleaved_samples()
+        .chunks_exact(2)
+        .any(|frame| frame[0] > 0.0 && frame[1] < 0.0));
+    assert!(monitor
+        .interleaved_samples()
+        .iter()
+        .zip(output.iter())
+        .all(|(measured, rendered)| apply_volume(*measured, 0.25) == *rendered));
+}
+
+#[test]
+fn resampled_seek_keeps_source_first_sample_at_seek_position() {
+    let (source_tap, mut source_blocks) =
+        analysis_capture_channel(8, analysis_config(MeasurementPoint::Source, 1_000, 2));
+    let (mut engine, _consumer) = PlaybackEngine::new_with_resampler_mode(
+        Box::new(StereoIdentityDecoder::new(2_000)),
+        1_024,
+        Some(SampleRateConverter::new(2, 1_000, 2_000).unwrap()),
+        pulseseek_domain::playback::mode::PlaybackMode::OneShot,
+        2_000,
+        2,
+    );
+    engine.set_source_analysis_tap(source_tap);
+    engine.decoder_position_ms = 500;
+    engine.resampler.as_mut().unwrap().reset_at(500);
+    engine.control.complete_user_seek();
+
+    assert!(engine.process_chunk().unwrap());
+    let block = source_blocks.try_receive().unwrap();
+    assert_eq!(block.first_sample(), 500);
+    assert_eq!(block.session_id(), &SessionId::new("session-a-next"));
+    assert_eq!(block.sequence(), 0);
+}
+
+#[test]
+fn saturated_and_shutdown_taps_never_change_playback() {
+    fn render(with_taps: bool) -> Vec<f32> {
+        let (mut engine, mut consumer) = PlaybackEngine::new(Box::new(RampDecoder::new(16)), 16);
+        let mut source_consumer = None;
+        let mut monitor_consumer = None;
+        if with_taps {
+            let (source, source_rx) =
+                analysis_capture_channel(1, analysis_config(MeasurementPoint::Source, 1_000, 1));
+            let (monitor, monitor_rx) =
+                analysis_capture_channel(1, analysis_config(MeasurementPoint::Monitor, 1_000, 1));
+            source_rx.shutdown();
+            monitor_rx.shutdown();
+            engine.set_source_analysis_tap(source);
+            consumer.set_monitor_analysis_tap(monitor);
+            source_consumer = Some(source_rx);
+            monitor_consumer = Some(monitor_rx);
+        }
+        engine.process_chunk().unwrap();
+        let mut output = vec![0.0; 16];
+        consumer.consume_channels_with_volume(&mut output, 1, 1, 0.5);
+        drop((source_consumer, monitor_consumer));
+        output
+    }
+
+    assert_eq!(render(false), render(true));
 }
 
 struct InvalidFrameDecoder;
@@ -286,6 +434,103 @@ fn prepared_track_appends_without_silence_at_boundary() {
     let mut output = [0.0f32; 8];
     assert_eq!(consumer.consume(&mut output), 8);
     assert_eq!(output, [0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0]);
+}
+
+#[test]
+fn prepared_track_rotates_source_and_monitor_analysis_sessions() {
+    let (source_tap, mut source_blocks) =
+        analysis_capture_channel(8, analysis_config(MeasurementPoint::Source, 1_000, 1));
+    let (monitor_tap, mut monitor_blocks) =
+        analysis_capture_channel(8, analysis_config(MeasurementPoint::Monitor, 1_000, 1));
+    let (mut engine, mut consumer) = PlaybackEngine::new(Box::new(RampDecoder::new(2)), 2);
+    engine.set_source_analysis_tap(source_tap);
+    consumer.set_monitor_analysis_tap(monitor_tap);
+    engine.prepare_next(
+        Box::new(RampDecoder::new(4)),
+        None,
+        1_000,
+        "next.wav".to_string(),
+        Some(4),
+    );
+    engine.prime_prepared().unwrap();
+    assert!(engine.process_chunk().unwrap());
+    let mut current = [0.0; 2];
+    consumer.consume_channels(&mut current, 1, 1);
+    assert_eq!(source_blocks.try_receive().unwrap().session_id(), &SessionId::new("session-a"));
+    assert_eq!(monitor_blocks.try_receive().unwrap().session_id(), &SessionId::new("session-a"));
+
+    assert!(!engine.process_chunk().unwrap());
+    assert!(engine.append_prepared());
+    assert!(engine.take_prepared());
+    assert!(engine.process_chunk().unwrap());
+    let source = source_blocks.try_receive().unwrap();
+    assert_eq!(source.source_id(), &SourceId::new("track-a-next"));
+    assert_eq!(source.session_id(), &SessionId::new("session-a-next"));
+    assert_eq!(source.sequence(), 0);
+    let mut next = [0.0; 2];
+    consumer.consume_channels(&mut next, 1, 1);
+    let monitor = monitor_blocks.try_receive().unwrap();
+    assert_eq!(monitor.source_id(), &SourceId::new("track-a-next"));
+    assert_eq!(monitor.session_id(), &SessionId::new("session-a-next"));
+    assert_eq!(monitor.sequence(), 0);
+}
+
+#[test]
+fn monitor_splits_callback_at_prepared_track_boundary() {
+    let (monitor_tap, mut monitor_blocks) =
+        analysis_capture_channel(8, analysis_config(MeasurementPoint::Monitor, 1_000, 1));
+    let (mut engine, mut consumer) = PlaybackEngine::new(Box::new(RampDecoder::new(2)), 4);
+    consumer.set_monitor_analysis_tap(monitor_tap);
+    engine.prepare_next(
+        Box::new(RampDecoder::new(2)),
+        None,
+        1_000,
+        "next.wav".to_string(),
+        Some(2),
+    );
+    engine.prime_prepared().unwrap();
+    assert!(engine.process_chunk().unwrap());
+    assert!(!engine.process_chunk().unwrap());
+    assert!(engine.append_prepared());
+
+    let mut output = [0.0; 4];
+    assert_eq!(consumer.consume_channels(&mut output, 1, 1), 4);
+    let current = monitor_blocks.try_receive().unwrap();
+    let next = monitor_blocks.try_receive().unwrap();
+    assert_eq!(current.session_id(), &SessionId::new("session-a"));
+    assert_eq!(current.interleaved_samples(), &[0.0, 1.0]);
+    assert_eq!(next.session_id(), &SessionId::new("session-a-next"));
+    assert_eq!(next.interleaved_samples(), &[0.0, 1.0]);
+}
+
+#[test]
+fn monitor_splits_large_callback_into_bounded_contiguous_blocks() {
+    let (monitor_tap, mut monitor_blocks) =
+        analysis_capture_channel(8, analysis_config(MeasurementPoint::Monitor, 48_000, 2));
+    let frames = MAX_ANALYSIS_CAPTURE_SAMPLES / 2 + 100;
+    let (mut engine, mut consumer) =
+        PlaybackEngine::new(Box::new(StereoIdentityDecoder::new(frames)), frames * 2);
+    consumer.set_monitor_analysis_tap(monitor_tap);
+    assert!(engine.process_chunk().unwrap());
+
+    let mut output = vec![0.0; frames * 2];
+    assert_eq!(consumer.consume_channels(&mut output, 2, 2), output.len());
+    let first = monitor_blocks.try_receive().unwrap();
+    let second = monitor_blocks.try_receive().unwrap();
+    assert_eq!(first.frame_count(), (MAX_ANALYSIS_CAPTURE_SAMPLES / 2) as u64);
+    assert_eq!(first.first_sample(), 0);
+    assert_eq!(second.frame_count(), 100);
+    assert_eq!(second.first_sample(), first.frame_count());
+    assert_eq!(second.sequence(), first.sequence() + 1);
+    assert_eq!(
+        first
+            .interleaved_samples()
+            .iter()
+            .chain(second.interleaved_samples())
+            .copied()
+            .collect::<Vec<_>>(),
+        output
+    );
 }
 
 #[test]

@@ -1,6 +1,8 @@
 use std::collections::VecDeque;
 
 use pulseseek_domain::decoder::{DecodeError, Decoder};
+
+use crate::AnalysisCaptureProducer;
 use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Async, FixedAsync, Indexing, PolynomialDegree, Resampler};
 
@@ -15,6 +17,7 @@ pub(crate) struct SampleRateConverter {
     pending: VecDeque<f32>,
     source_frames: u64,
     output_samples: u64,
+    last_input: Vec<f32>,
 }
 
 impl SampleRateConverter {
@@ -59,12 +62,14 @@ impl SampleRateConverter {
             pending: VecDeque::new(),
             source_frames: 0,
             output_samples: 0,
+            last_input: Vec::new(),
         })
     }
 
     pub(crate) fn next_chunk(
         &mut self,
         decoder: &mut dyn Decoder,
+        source_tap: Option<&mut AnalysisCaptureProducer>,
     ) -> Result<Option<Vec<f32>>, DecodeError> {
         if !self.pending.is_empty() {
             return Ok(Some(self.drain_pending()));
@@ -87,6 +92,12 @@ impl SampleRateConverter {
         }
 
         let input_frames = filled / self.channels;
+        self.last_input.clear();
+        self.last_input.extend_from_slice(&self.input[..filled]);
+        if let Some(tap) = source_tap {
+            let first_sample = self.source_frames;
+            tap.try_capture_bounded(first_sample, &self.input[..filled], false);
+        }
         self.source_frames += input_frames as u64;
         let input =
             InterleavedSlice::new(&self.input, self.channels, self.input.len() / self.channels)
@@ -116,6 +127,14 @@ impl SampleRateConverter {
         self.pending.drain(..).collect()
     }
 
+    pub(crate) fn last_input(&self) -> &[f32] {
+        &self.last_input
+    }
+
+    pub(crate) fn source_rate(&self) -> u32 {
+        self.source_rate
+    }
+
     /// Decoder (source) position in milliseconds.
     pub(crate) fn source_position_ms(&self) -> u64 {
         if self.source_rate == 0 || self.channels == 0 {
@@ -125,12 +144,21 @@ impl SampleRateConverter {
     }
 
     pub(crate) fn reset(&mut self) {
+        self.reset_at(0);
+    }
+
+    pub(crate) fn reset_at(&mut self, source_position_ms: u64) {
         self.resampler.reset();
         self.input.fill(0.0);
         self.output.fill(0.0);
         self.pending.clear();
-        self.source_frames = 0;
-        self.output_samples = 0;
+        self.last_input.clear();
+        self.source_frames = source_position_ms.saturating_mul(u64::from(self.source_rate)) / 1_000;
+        self.output_samples = self
+            .source_frames
+            .saturating_mul(u64::from(self.target_rate))
+            .saturating_mul(self.channels as u64)
+            / u64::from(self.source_rate);
     }
 }
 

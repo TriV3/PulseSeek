@@ -153,3 +153,41 @@ fn unsupported_layout_is_rejected_before_channel_creation() {
     )
     .is_err());
 }
+
+#[test]
+fn session_rotation_resets_sequence_and_changes_session_identity() {
+    let (mut producer, mut consumer) =
+        analysis_capture_channel(2, config(AudioFormat::mono(48_000).unwrap()));
+
+    assert_eq!(producer.try_capture(0, &[0.1], false), CaptureResult::Captured);
+    producer.start_new_session();
+    assert_eq!(producer.try_capture(24_000, &[0.2], false), CaptureResult::Captured);
+
+    let first = consumer.try_receive().unwrap();
+    let second = consumer.try_receive().unwrap();
+    assert_eq!(first.session_id(), &SessionId::new("session-1"));
+    assert_eq!(first.sequence(), 0);
+    assert_eq!(second.source_id(), &SourceId::new("player"));
+    assert_eq!(second.session_id(), &SessionId::new("session-1-next"));
+    assert_eq!(second.sequence(), 0);
+    assert_eq!(second.first_sample(), 24_000);
+}
+
+#[test]
+fn source_change_after_seek_never_reuses_session_identity() {
+    let (mut producer, mut consumer) =
+        analysis_capture_channel(3, config(AudioFormat::mono(48_000).unwrap()));
+
+    producer.start_new_session();
+    assert_eq!(producer.try_capture(1_000, &[0.1], true), CaptureResult::Captured);
+    producer.start_new_source(44_100).unwrap();
+    assert_eq!(producer.try_capture(0, &[0.2], false), CaptureResult::Captured);
+
+    let after_seek = consumer.try_receive().unwrap();
+    let new_source = consumer.try_receive().unwrap();
+    assert_eq!(after_seek.source_id(), &SourceId::new("player"));
+    assert_eq!(after_seek.session_id(), &SessionId::new("session-1-next"));
+    assert_eq!(new_source.source_id(), &SourceId::new("player-next"));
+    assert_eq!(new_source.session_id(), &SessionId::new("session-1-next-next"));
+    assert_eq!(new_source.format(), AudioFormat::mono(44_100).unwrap());
+}
