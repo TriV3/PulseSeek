@@ -27,7 +27,7 @@ The source adapter emits a versioned AnalysisBlock:
 AnalysisBlock {
   session_id
   source_id
-  point: Source | Monitor | External(app-id)
+  point: Source | Monitor | ExternalApplication(app-id) | SystemMix | InputLoopback | DAWBridge
   sample_rate
   channels: Mono | Stereo
   first_sample
@@ -62,12 +62,13 @@ flowchart LR
   W --> DB["SQLite index + versioned blobs"]
 ```
 
-The capture ring is bounded. Saturation increments a counter and drops the
-incoming visual block. If a continuous product would lose samples, the
-affected result becomes Measurement incomplete; the engine never silently
-continues with a false integrated value.
+The capture ring is bounded. Saturation increments a counter. Visual-only
+consumers may drop stale visual frames, but shared capture loss affecting a
+continuous product marks the affected result Measurement incomplete; the engine
+never silently continues with a false integrated value.
 
-The visual lane may drop old frames and keep the newest one. Render cadence is
+Visual-only loss may drop old frames and keep the newest one; this does not
+invalidate continuous products. Render cadence is
 independent from DSP cadence. React owns tile structure and controls; Canvas 2D
 owns high-frequency drawing. A future WebGL renderer implements the same
 renderer contract and requires an ADR plus benchmark evidence.

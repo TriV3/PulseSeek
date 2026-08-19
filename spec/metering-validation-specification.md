@@ -48,8 +48,10 @@ Required fixtures:
 Every fixture records generator version, sample rate, channels, duration, level,
 expected result, tolerance, and license/provenance.
 
-Each required fixture runs at 44.1, 48, and 96 kHz. Stereo fixtures also run
-mono where the transform is meaningful.
+Each required fixture runs at 44.1, 48, 88.2, 96, and 192 kHz. Stereo fixtures
+also run mono where the transform is meaningful. Performance or resource-heavy
+fixtures may use a reduced duration at 192 kHz, but must retain expected-value
+coverage.
 
 ## 3. DSP tolerances
 
@@ -74,6 +76,9 @@ Any altered tolerance requires a versioned decision and new fixture evidence.
 ## 4. Module acceptance
 
 ### 4.1 Workspace and tiles
+
+Canonical default tiles are Spectrum, Band Energy, Colored Waveform,
+Spectrogram, Loudness, True Peak, Stereo, and Diagnostics.
 
 - Browser/Meters switch preserves Browser state and playback.
 - Eight default tiles can be added and removed.

@@ -1,7 +1,9 @@
 # Metering calibration and performance validation
 
 **Status:** normative test plan  
-**Reference implementation:** metering-dsp-v1
+**Reference implementation:** metering-dsp-v1  
+**Decision:** `docs/adr/0013-metering-architecture-and-contracts.md`  
+**Traceability:** `docs/metering-traceability.md`
 
 ## Deterministic fixtures
 

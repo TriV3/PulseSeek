@@ -1,7 +1,9 @@
 # Metering DSP algorithms
 
 **Status:** normative technical design  
-**Algorithm version:** metering-dsp-v1
+**Algorithm version:** metering-dsp-v1  
+**Decision:** `docs/adr/0013-metering-architecture-and-contracts.md`  
+**Traceability:** `docs/metering-traceability.md`
 
 ## FFT and amplitude normalization
 

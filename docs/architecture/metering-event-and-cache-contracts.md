@@ -1,7 +1,9 @@
 # Metering event and cache contracts
 
 **Status:** normative technical design  
-**Schema family:** metering-events-v1 and metering-cache-v1
+**Schema family:** metering-events-v1 and metering-cache-v1  
+**Decision:** `docs/adr/0013-metering-architecture-and-contracts.md`  
+**Traceability:** `docs/metering-traceability.md`
 
 ## Event families
 

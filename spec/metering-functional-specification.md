@@ -1,7 +1,7 @@
 # PulseSeek Metering — Functional Specification
 
-**Status:** normative and exhaustive product specification  
-**Version:** 1.0-draft  
+**Status:** normative and frozen product specification  
+**Version:** metering-functional-v1  
 **Scope:** live audio metering, visual analysis, configurable Meters workspace
 
 This document is the authority for user-visible behavior. The DSP equations,
