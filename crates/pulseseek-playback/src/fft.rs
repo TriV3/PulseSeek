@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use pulseseek_domain::analysis_subscriptions::WindowFunction;
 use pulseseek_domain::visualization::{
     SpectrumFrame, SpectrumFrameError, VisualizationFrame, MAX_VISUALIZATION_FRAME_SAMPLES,
 };
@@ -13,72 +14,220 @@ use realfft::{RealFftPlanner, RealToComplex};
 
 use crate::{VisualizationControl, VisualizationSubscriber};
 
-/// Stateful real-to-complex analyzer whose buffers are reused between frames.
-pub struct FftAnalyzer {
+pub const SUPPORTED_FFT_SIZES: [usize; 4] = [2_048, 4_096, 8_192, 16_384];
+pub const SUPPORTED_WINDOWS: [WindowFunction; 5] = [
+    WindowFunction::Hann,
+    WindowFunction::Hamming,
+    WindowFunction::BlackmanHarris,
+    WindowFunction::FlatTop,
+    WindowFunction::Rectangular,
+];
+pub const FLAT_TOP_COEFFICIENTS: [f32; 5] =
+    [0.215_578_95, 0.416_631_58, 0.277_263_16, 0.083_578_944, 0.006_947_368];
+
+pub struct FftKernel {
     fft_size: usize,
     transform: Arc<dyn RealToComplex<f32>>,
     window: Vec<f32>,
-    window_sum: f32,
+    coherent_gain: f32,
+    power_normalization: f32,
     input: Vec<f32>,
     output: Vec<realfft::num_complex::Complex32>,
     scratch: Vec<realfft::num_complex::Complex32>,
+    amplitudes: Vec<f32>,
+    powers: Vec<f32>,
+    psd: Vec<f32>,
+}
+
+pub struct FftAnalysis<'a> {
+    fft_size: usize,
+    sample_rate: u32,
+    amplitudes: &'a [f32],
+    powers: &'a [f32],
+    psd: &'a [f32],
+}
+
+impl FftAnalysis<'_> {
+    pub fn amplitudes(&self) -> &[f32] {
+        self.amplitudes
+    }
+
+    pub fn powers(&self) -> &[f32] {
+        self.powers
+    }
+
+    pub fn psd(&self) -> &[f32] {
+        self.psd
+    }
+
+    pub fn bin_width_hz(&self) -> f32 {
+        self.sample_rate as f32 / self.fft_size as f32
+    }
+
+    pub fn bin_frequency_hz(&self, index: usize) -> f32 {
+        index as f32 * self.bin_width_hz()
+    }
+}
+
+impl FftKernel {
+    pub fn new(fft_size: usize, window_function: WindowFunction) -> Result<Self, FftError> {
+        if !SUPPORTED_FFT_SIZES.contains(&fft_size) {
+            return Err(FftError::UnsupportedKernelSize { requested: fft_size });
+        }
+        Ok(Self::plan(fft_size, window_function))
+    }
+
+    fn plan(fft_size: usize, window_function: WindowFunction) -> Self {
+        let mut planner = RealFftPlanner::<f32>::new();
+        let transform = planner.plan_fft_forward(fft_size);
+        let window = make_window(fft_size, window_function);
+        let coherent_gain = window.iter().sum::<f32>() / fft_size as f32;
+        let power_normalization = window.iter().map(|value| value * value).sum();
+        let input = transform.make_input_vec();
+        let output = transform.make_output_vec();
+        let scratch = transform.make_scratch_vec();
+        let bin_count = fft_size / 2 + 1;
+        Self {
+            fft_size,
+            transform,
+            window,
+            coherent_gain,
+            power_normalization,
+            input,
+            output,
+            scratch,
+            amplitudes: vec![0.0; bin_count],
+            powers: vec![0.0; bin_count],
+            psd: vec![0.0; bin_count],
+        }
+    }
+
+    pub fn coherent_gain(&self) -> f32 {
+        self.coherent_gain
+    }
+
+    pub fn power_normalization(&self) -> f32 {
+        self.power_normalization
+    }
+
+    pub fn equivalent_noise_bandwidth_hz(&self, sample_rate: u32) -> Result<f32, FftError> {
+        if sample_rate == 0 {
+            return Err(FftError::InvalidSampleRate);
+        }
+        Ok(sample_rate as f32 * self.power_normalization
+            / (self.fft_size as f32 * self.coherent_gain).powi(2))
+    }
+
+    pub fn analyze(
+        &mut self,
+        samples: &[f32],
+        sample_rate: u32,
+    ) -> Result<FftAnalysis<'_>, FftError> {
+        if samples.len() != self.fft_size {
+            return Err(FftError::FrameSizeMismatch {
+                expected: self.fft_size,
+                actual: samples.len(),
+            });
+        }
+        if sample_rate == 0 {
+            return Err(FftError::InvalidSampleRate);
+        }
+        if samples.iter().any(|sample| !sample.is_finite()) {
+            return Err(FftError::NonFiniteInput);
+        }
+        for ((input, sample), window) in self.input.iter_mut().zip(samples).zip(self.window.iter())
+        {
+            *input = sample * window;
+        }
+        self.transform
+            .process_with_scratch(&mut self.input, &mut self.output, &mut self.scratch)
+            .map_err(|_| FftError::TransformFailed)?;
+        let nyquist = self.fft_size / 2;
+        for (index, value) in self.output.iter().enumerate() {
+            let one_sided = if index == 0 || index == nyquist { 1.0 } else { 2.0 };
+            let norm_squared = value.norm_sqr();
+            self.amplitudes[index] =
+                value.norm() * one_sided / (self.fft_size as f32 * self.coherent_gain);
+            self.powers[index] =
+                norm_squared * one_sided / (self.fft_size as f32 * self.power_normalization);
+            self.psd[index] =
+                norm_squared * one_sided / (sample_rate as f32 * self.power_normalization);
+        }
+        Ok(FftAnalysis {
+            fft_size: self.fft_size,
+            sample_rate,
+            amplitudes: &self.amplitudes,
+            powers: &self.powers,
+            psd: &self.psd,
+        })
+    }
+}
+
+fn make_window(fft_size: usize, function: WindowFunction) -> Vec<f32> {
+    let denominator = (fft_size - 1) as f32;
+    (0..fft_size)
+        .map(|index| {
+            let phase = std::f32::consts::TAU * index as f32 / denominator;
+            match function {
+                WindowFunction::Rectangular => 1.0,
+                WindowFunction::Hann => 0.5 - 0.5 * phase.cos(),
+                WindowFunction::Hamming => 0.54 - 0.46 * phase.cos(),
+                WindowFunction::BlackmanHarris => {
+                    0.42323 - 0.49755 * phase.cos() + 0.07922 * (2.0 * phase).cos()
+                        - 0.00168 * (3.0 * phase).cos()
+                },
+                WindowFunction::FlatTop => {
+                    FLAT_TOP_COEFFICIENTS[0] - FLAT_TOP_COEFFICIENTS[1] * phase.cos()
+                        + FLAT_TOP_COEFFICIENTS[2] * (2.0 * phase).cos()
+                        - FLAT_TOP_COEFFICIENTS[3] * (3.0 * phase).cos()
+                        + FLAT_TOP_COEFFICIENTS[4] * (4.0 * phase).cos()
+                },
+            }
+        })
+        .collect()
+}
+
+/// Stateful real-to-complex analyzer whose buffers are reused between frames.
+pub struct FftAnalyzer {
+    kernel: FftKernel,
+    mono: Vec<f32>,
 }
 
 impl FftAnalyzer {
     pub fn new(fft_size: usize) -> Result<Self, FftError> {
         validate_fft_size(fft_size)?;
-        let mut planner = RealFftPlanner::<f32>::new();
-        let transform = planner.plan_fft_forward(fft_size);
-        let window: Vec<f32> = (0..fft_size)
-            .map(|index| {
-                0.5 * (1.0 - (std::f32::consts::TAU * index as f32 / fft_size as f32).cos())
-            })
-            .collect();
-        let window_sum = window.iter().sum();
-        let input = transform.make_input_vec();
-        let output = transform.make_output_vec();
-        let scratch = transform.make_scratch_vec();
-        Ok(Self { fft_size, transform, window, window_sum, input, output, scratch })
+        Ok(Self {
+            kernel: FftKernel::plan(fft_size, WindowFunction::Hann),
+            mono: vec![0.0; fft_size],
+        })
     }
 
     pub fn fft_size(&self) -> usize {
-        self.fft_size
+        self.kernel.fft_size
     }
 
     pub fn analyze(&mut self, frame: &VisualizationFrame) -> Result<SpectrumFrame, FftError> {
         let channels = usize::from(frame.channels());
         let frame_count = frame.samples().len() / channels;
-        if frame_count != self.fft_size {
+        if frame_count != self.fft_size() {
             return Err(FftError::FrameSizeMismatch {
-                expected: self.fft_size,
+                expected: self.fft_size(),
                 actual: frame_count,
             });
         }
 
-        for (sample_index, interleaved) in frame.samples().chunks_exact(channels).enumerate() {
-            let mono = interleaved.iter().copied().sum::<f32>() / channels as f32;
-            self.input[sample_index] = mono * self.window[sample_index];
+        for (mono, interleaved) in self.mono.iter_mut().zip(frame.samples().chunks_exact(channels))
+        {
+            *mono = interleaved.iter().copied().sum::<f32>() / channels as f32;
         }
-        self.transform
-            .process_with_scratch(&mut self.input, &mut self.output, &mut self.scratch)
-            .map_err(|_| FftError::TransformFailed)?;
-
-        let nyquist_index = self.fft_size / 2;
-        let magnitudes = self
-            .output
-            .iter()
-            .enumerate()
-            .map(|(index, value)| {
-                let one_sided_scale = if index == 0 || index == nyquist_index { 1.0 } else { 2.0 };
-                value.norm() * one_sided_scale / self.window_sum
-            })
-            .collect();
+        let fft_size = self.kernel.fft_size;
+        let analysis = self.kernel.analyze(&self.mono, frame.sample_rate())?;
         SpectrumFrame::new(
             frame.sequence(),
             frame.position_frames(),
             frame.sample_rate(),
-            self.fft_size,
-            magnitudes,
+            fft_size,
+            analysis.amplitudes().to_vec(),
         )
         .map_err(FftError::InvalidSpectrum)
     }
@@ -306,7 +455,10 @@ impl Drop for SpectrumReceiver {
 #[derive(Clone, Debug, PartialEq)]
 pub enum FftError {
     InvalidFftSize { requested: usize },
+    UnsupportedKernelSize { requested: usize },
     FrameSizeMismatch { expected: usize, actual: usize },
+    InvalidSampleRate,
+    NonFiniteInput,
     InvalidOutputCapacity,
     TransformFailed,
     InvalidSpectrum(SpectrumFrameError),
@@ -322,9 +474,14 @@ impl fmt::Display for FftError {
                 formatter,
                 "FFT size {requested} must be a power of two between 2 and {MAX_VISUALIZATION_FRAME_SAMPLES}"
             ),
+            Self::UnsupportedKernelSize { requested } => {
+                write!(formatter, "FFT kernel size {requested} is unsupported")
+            },
             Self::FrameSizeMismatch { expected, actual } => {
                 write!(formatter, "FFT expected {expected} frames but received {actual}")
             },
+            Self::InvalidSampleRate => formatter.write_str("FFT sample rate must be positive"),
+            Self::NonFiniteInput => formatter.write_str("FFT input must contain finite samples"),
             Self::InvalidOutputCapacity => formatter.write_str("FFT output capacity must be positive"),
             Self::TransformFailed => formatter.write_str("FFT transform failed"),
             Self::InvalidSpectrum(error) => write!(formatter, "invalid FFT spectrum: {error}"),
@@ -343,6 +500,43 @@ mod tests {
 
     fn spectrum(sequence: u64) -> SpectrumFrame {
         SpectrumFrame::new(sequence, sequence * 256, 48_000, 8, vec![0.0; 5]).unwrap()
+    }
+
+    #[test]
+    fn kernel_reuses_plan_and_buffers() {
+        let size = 2_048;
+        let mut kernel = FftKernel::new(size, WindowFunction::Hann).unwrap();
+        let plan = Arc::as_ptr(&kernel.transform) as *const () as usize;
+        let buffers = [
+            kernel.input.as_ptr() as usize,
+            kernel.output.as_ptr() as usize,
+            kernel.scratch.as_ptr() as usize,
+            kernel.amplitudes.as_ptr() as usize,
+            kernel.powers.as_ptr() as usize,
+            kernel.psd.as_ptr() as usize,
+        ];
+        let first: Vec<f32> = (0..size)
+            .map(|index| (std::f32::consts::TAU * 20.0 * index as f32 / size as f32).sin())
+            .collect();
+        let second: Vec<f32> = (0..size)
+            .map(|index| (std::f32::consts::TAU * 30.0 * index as f32 / size as f32).sin())
+            .collect();
+
+        kernel.analyze(&first, 48_000).unwrap();
+        kernel.analyze(&second, 48_000).unwrap();
+
+        assert_eq!(Arc::as_ptr(&kernel.transform) as *const () as usize, plan);
+        assert_eq!(
+            [
+                kernel.input.as_ptr() as usize,
+                kernel.output.as_ptr() as usize,
+                kernel.scratch.as_ptr() as usize,
+                kernel.amplitudes.as_ptr() as usize,
+                kernel.powers.as_ptr() as usize,
+                kernel.psd.as_ptr() as usize,
+            ],
+            buffers
+        );
     }
 
     #[test]

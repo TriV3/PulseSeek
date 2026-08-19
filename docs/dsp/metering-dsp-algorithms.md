@@ -29,8 +29,18 @@ configurable floor, default -160 dBFS. NaN and infinite values invalidate the
 frame instead of entering a renderer.
 
 Default windows are Hann, Hamming, Blackman-Harris, Flat Top, and advanced
-Rectangular. Window choice is part of the product key. Tilt is applied only at
-presentation time.
+Rectangular. Blackman-Harris uses coefficients `0.42323`, `0.49755`, `0.07922`,
+and `0.00168`. Flat Top uses the published five-term coefficients
+`0.21557895`, `0.41663158`, `0.27726316`, `0.083578944`, and `0.006947368`.
+Window choice is part of the product key. Tilt is applied only at presentation
+time.
+
+Calibration covers every size/window combination with bin-centered tones. The
+measured coherent gains converge to 1.0 Rectangular, 0.5 Hann, 0.54 Hamming,
+0.42323 Blackman-Harris, and 0.21557895 Flat Top. Corresponding mean-square
+window powers converge to 1.0, 0.375, 0.3974, 0.30604, and 0.17522. Amplitude
+acceptance is ±0.1 dB. Invalid sample rates, frame lengths, or non-finite input
+produce typed FFT errors instead of numeric output.
 
 ## Channel transforms
 

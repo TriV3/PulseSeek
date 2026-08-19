@@ -16,7 +16,8 @@ pub enum ChannelMode {
 pub enum WindowFunction {
     Hann,
     Hamming,
-    Blackman,
+    BlackmanHarris,
+    FlatTop,
     Rectangular,
 }
 
