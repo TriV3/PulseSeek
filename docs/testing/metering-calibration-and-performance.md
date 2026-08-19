@@ -22,8 +22,36 @@ a decoder-path test is required:
 - inter-sample true-peak signal;
 - calibrated EBU/ITU sequences where redistribution is permitted.
 
-Every fixture records sample rate, channels, duration, level, generator version,
-and expected tolerance.
+Every fixture records sample rate, channels, duration, level, signal parameters,
+generator and checksum versions, expected result, tolerance, and license/provenance.
+
+PR-099 provides F-001 through F-011 as deterministic in-memory fixtures at
+44.1, 48, 88.2, 96, and 192 kHz. Mono and stereo variants exist only where the
+transform is meaningful. F-012 awaits redistributable calibrated reference
+material; F-013 through F-016 belong to their consuming DSP work.
+
+`pulseseek-calibration-v1` quantizes generated samples to signed 24-bit precision
+before storing them as `f32`. Sine signals use phase derived from frame index;
+pink noise uses fixed-seed xorshift64 and 16-row Voss-McCartney generation,
+then normalizes its peak to the recorded dBFS level. The inter-sample fixture uses `x[n] = 0.99 sin(2π(n/4 + 1/8))`. Integer samples
+therefore alternate at `±0.99/√2 ≈ ±0.700036`, while ideal reconstruction reaches
+`±0.99` halfway between adjacent samples. Expected true peak is
+`20 log10(0.99) ≈ -0.0873 dBTP` with ±0.1 dBTP tolerance. True-peak tests
+measure frames 32 through 224, leaving 32 guard frames at each boundary for
+oversampler settling. This tests later oversampled true-peak implementations but
+is not an official conformance vector.
+
+Fixture identity uses `crc32-ieee-canonical-v1`: CRC-32/ISO-HDLC over
+length-prefixed metadata and interleaved IEEE-754 sample bits in little-endian
+order. CRC detects accidental drift, not malicious collision. Tests pin a golden
+checksum and verify metadata and sample sensitivity. Deterministic 24-bit PCM
+WAV bytes are generated only when decoder or persistence tests need them; no
+binary fixtures are stored by this harness.
+
+Run `cargo test -p pulseseek-playback --test calibration_harness` to reproduce
+and validate the catalogue, generators, metadata, checksums, sample-rate/layout
+matrix, and WAV encoding. Intentional generator changes require a generator
+version bump and reviewed golden checksum updates.
 
 ## DSP assertions
 
