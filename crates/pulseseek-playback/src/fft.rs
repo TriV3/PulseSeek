@@ -45,6 +45,7 @@ pub struct FftAnalysis<'a> {
     amplitudes: &'a [f32],
     powers: &'a [f32],
     psd: &'a [f32],
+    complex_bins: &'a [realfft::num_complex::Complex32],
 }
 
 impl FftAnalysis<'_> {
@@ -58,6 +59,10 @@ impl FftAnalysis<'_> {
 
     pub fn psd(&self) -> &[f32] {
         self.psd
+    }
+
+    pub(crate) fn complex_bins(&self) -> &[realfft::num_complex::Complex32] {
+        self.complex_bins
     }
 
     pub fn bin_width_hz(&self) -> f32 {
@@ -159,6 +164,7 @@ impl FftKernel {
             amplitudes: &self.amplitudes,
             powers: &self.powers,
             psd: &self.psd,
+            complex_bins: &self.output,
         })
     }
 }
@@ -460,6 +466,12 @@ pub enum FftError {
     InvalidSampleRate,
     NonFiniteInput,
     InvalidOutputCapacity,
+    InterleavedFrameSizeMismatch { expected: usize, actual: usize },
+    UnknownSubscription,
+    AnalysisUnavailable,
+    ConflictingFrameIdentity { frame_id: u64 },
+    StaleFrame { latest: u64, received: u64 },
+    IdExhausted,
     TransformFailed,
     InvalidSpectrum(SpectrumFrameError),
     WorkerStartFailed,
@@ -483,6 +495,18 @@ impl fmt::Display for FftError {
             Self::InvalidSampleRate => formatter.write_str("FFT sample rate must be positive"),
             Self::NonFiniteInput => formatter.write_str("FFT input must contain finite samples"),
             Self::InvalidOutputCapacity => formatter.write_str("FFT output capacity must be positive"),
+            Self::InterleavedFrameSizeMismatch { expected, actual } => {
+                write!(formatter, "FFT bank expected {expected} interleaved samples but received {actual}")
+            },
+            Self::UnknownSubscription => formatter.write_str("FFT bank subscription is unknown"),
+            Self::AnalysisUnavailable => formatter.write_str("FFT bank analysis is unavailable"),
+            Self::ConflictingFrameIdentity { frame_id } => {
+                write!(formatter, "FFT bank frame {frame_id} conflicts with cached input")
+            },
+            Self::StaleFrame { latest, received } => {
+                write!(formatter, "FFT bank frame {received} is older than cached frame {latest}")
+            },
+            Self::IdExhausted => formatter.write_str("FFT bank identifier space is exhausted"),
             Self::TransformFailed => formatter.write_str("FFT transform failed"),
             Self::InvalidSpectrum(error) => write!(formatter, "invalid FFT spectrum: {error}"),
             Self::WorkerStartFailed => formatter.write_str("FFT worker could not start"),

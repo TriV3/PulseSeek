@@ -97,6 +97,22 @@ fn rejects_invalid_subscription_requests_without_creating_products() {
 }
 
 #[test]
+fn spectrum_channel_modes_include_shared_fft_products() {
+    let modes = [
+        ChannelMode::Left,
+        ChannelMode::Right,
+        ChannelMode::EnergySum,
+        ChannelMode::Mono,
+        ChannelMode::Mid,
+        ChannelMode::Side,
+        ChannelMode::LeftRightOverlay,
+        ChannelMode::LeftRightBalance,
+    ];
+
+    assert_eq!(modes.len(), 8);
+}
+
+#[test]
 fn final_and_repeated_unsubscribe_stop_unused_product() {
     let mut graph = ProductGraph::new();
     let first = graph.subscribe(request(key(ProductKind::Spectrum, 7))).unwrap();

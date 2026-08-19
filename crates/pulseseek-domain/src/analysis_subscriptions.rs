@@ -10,6 +10,9 @@ pub enum ChannelMode {
     Right,
     Mid,
     Side,
+    EnergySum,
+    LeftRightOverlay,
+    LeftRightBalance,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

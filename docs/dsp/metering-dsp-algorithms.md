@@ -53,8 +53,29 @@ Mono = (L + R) / 2
 ```
 
 The Spectrum supports L, R, energy sum, mono, Mid, Side, L/R overlay, and L/R
-difference/balance. Raw complex bins remain in Rust. The UI receives compact
-magnitudes, powers, phases only where a product needs phase, and validity flags.
+difference/balance. Energy sum is calculated per spectral bin as
+`sqrt((L² + R²) / 2)` and is never treated as a waveform mix. Overlay and
+balance products reuse L/R results rather than creating another transform.
+
+Each shared FFT bank is bound to one immutable source-stream identity and keys
+its branches by FFT size and window. Compatible subscribers reuse one branch
+and its two channel plans; incompatible sizes or windows create
+the smallest separate branch. All four supported sizes may run concurrently.
+Plans, transform buffers, channel buffers, and result buffers persist between
+frames and are released immediately after the last subscriber leaves. Each
+branch records processed frame identity and input fingerprint, so compatible
+subscribers read one cached result rather than repeating channel transforms for
+the same frame. Conflicting identities and out-of-order frames are rejected.
+Overlay exposes shared L/R arrays; difference is `L - R`; balance is
+`(L - R) / (L + R)` and is unavailable for near-zero denominators. Unknown
+subscriptions, unavailable results, wrong interleaved frame lengths, zero sample
+rates, and non-finite samples return typed errors without replacing the last
+valid result. Published analysis includes stream ID, frame ID, sample rate, and
+frequency-bin mapping.
+
+Raw complex bins remain private to Rust and only feed phase-sensitive downstream
+transforms. Existing logarithmic, linear, and musical analyzers retain their
+single-channel compatibility path.
 
 ## Smoothing, averages, and holds
 
