@@ -222,6 +222,212 @@ impl AnalysisConfig {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionRequest {
+    source_id: SourceId,
+    source_kind: SourceKind,
+    measurement_point: MeasurementPoint,
+    format: AudioFormat,
+}
+
+impl SessionRequest {
+    pub fn new(
+        source_id: SourceId,
+        source_kind: SourceKind,
+        measurement_point: MeasurementPoint,
+        format: AudioFormat,
+    ) -> Self {
+        Self { source_id, source_kind, measurement_point, format }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionState {
+    Idle,
+    Running,
+    Paused,
+    Incomplete,
+    Stopped,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SessionEvent {
+    Start(SessionRequest),
+    AudioBlock(AnalysisBlock),
+    Pause,
+    Resume,
+    LoopWrap,
+    Seek { first_sample: u64 },
+    FormatChange(AudioFormat),
+    SourceChange { source_id: SourceId, measurement_point: MeasurementPoint },
+    Gap { first_sample: u64, frame_count: u64 },
+    Stop,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceSession {
+    id: SessionId,
+    request: SessionRequest,
+    state: SessionState,
+    next_sample: u64,
+    next_sequence: u64,
+    loop_wrapped: bool,
+    last_gap: Option<(u64, u64)>,
+}
+
+impl SourceSession {
+    fn start_new_session(
+        &mut self,
+        format: AudioFormat,
+        source_id: SourceId,
+        measurement_point: MeasurementPoint,
+        first_sample: u64,
+    ) {
+        self.id = SessionId::new(format!("{}-next", self.id.0));
+        self.request.format = format;
+        self.request.source_id = source_id;
+        self.request.measurement_point = measurement_point;
+        self.state = SessionState::Running;
+        self.next_sample = first_sample;
+        self.next_sequence = 0;
+        self.loop_wrapped = false;
+        self.last_gap = None;
+    }
+
+    pub fn id(&self) -> &SessionId {
+        &self.id
+    }
+    pub fn state(&self) -> SessionState {
+        self.state
+    }
+    pub fn next_sample(&self) -> u64 {
+        self.next_sample
+    }
+    pub fn next_sequence(&self) -> u64 {
+        self.next_sequence
+    }
+    pub fn loop_wrapped(&self) -> bool {
+        self.loop_wrapped
+    }
+    pub fn last_gap(&self) -> Option<(u64, u64)> {
+        self.last_gap
+    }
+    pub fn apply(&mut self, event: SessionEvent) -> Result<SessionState, AnalysisError> {
+        match event {
+            SessionEvent::Start(_) => return Err(AnalysisError::DuplicateStart),
+            SessionEvent::Pause if self.state == SessionState::Running => {
+                self.state = SessionState::Paused
+            },
+            SessionEvent::Resume if self.state == SessionState::Paused => {
+                self.state = SessionState::Running
+            },
+            SessionEvent::LoopWrap
+                if matches!(self.state, SessionState::Running | SessionState::Incomplete) =>
+            {
+                self.loop_wrapped = true;
+            },
+            SessionEvent::Stop if self.state != SessionState::Stopped => {
+                self.state = SessionState::Stopped
+            },
+            SessionEvent::Gap { first_sample, frame_count }
+                if matches!(self.state, SessionState::Running | SessionState::Incomplete) =>
+            {
+                self.next_sample = first_sample
+                    .checked_add(frame_count)
+                    .ok_or(AnalysisError::InvalidFrameCount)?;
+                self.next_sequence =
+                    self.next_sequence.checked_add(1).ok_or(AnalysisError::InvalidFrameCount)?;
+                self.last_gap = Some((first_sample, frame_count));
+                self.state = SessionState::Incomplete;
+            },
+            SessionEvent::AudioBlock(block)
+                if matches!(self.state, SessionState::Running | SessionState::Incomplete) =>
+            {
+                if block.source_id() != &self.request.source_id
+                    || block.session_id() != &self.id
+                    || block.source_kind() != self.request.source_kind
+                    || block.measurement_point() != self.request.measurement_point
+                    || block.format() != self.request.format
+                {
+                    return Err(AnalysisError::InvalidEvent);
+                }
+                if (self.state == SessionState::Running && block.first_sample() != self.next_sample)
+                    || (self.state == SessionState::Incomplete && !block.discontinuity())
+                    || block.sequence() != self.next_sequence
+                {
+                    return Err(AnalysisError::CounterDiscontinuity);
+                }
+                self.next_sample = self
+                    .next_sample
+                    .checked_add(block.frame_count())
+                    .ok_or(AnalysisError::InvalidFrameCount)?;
+                self.next_sequence =
+                    self.next_sequence.checked_add(1).ok_or(AnalysisError::InvalidFrameCount)?;
+            },
+            SessionEvent::Seek { first_sample } if self.state != SessionState::Stopped => {
+                self.start_new_session(
+                    self.request.format,
+                    self.request.source_id.clone(),
+                    self.request.measurement_point,
+                    first_sample,
+                );
+            },
+            SessionEvent::FormatChange(format) if self.state != SessionState::Stopped => {
+                self.start_new_session(
+                    format,
+                    self.request.source_id.clone(),
+                    self.request.measurement_point,
+                    0,
+                );
+            },
+            SessionEvent::SourceChange { source_id, measurement_point }
+                if self.state != SessionState::Stopped =>
+            {
+                self.start_new_session(self.request.format, source_id, measurement_point, 0);
+            },
+            _ => return Err(AnalysisError::InvalidEvent),
+        }
+        Ok(self.state)
+    }
+}
+
+pub trait AudioAnalysisSource {
+    fn start(&mut self, request: SessionRequest) -> Result<SourceSession, AnalysisError>;
+    fn start_event(
+        &mut self,
+        request: SessionRequest,
+    ) -> Result<(SourceSession, SessionEvent), AnalysisError> {
+        let session = self.start(request.clone())?;
+        Ok((session, SessionEvent::Start(request)))
+    }
+}
+
+#[derive(Default)]
+pub struct InMemoryAnalysisSource {
+    next_id: u64,
+}
+
+impl InMemoryAnalysisSource {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl AudioAnalysisSource for InMemoryAnalysisSource {
+    fn start(&mut self, request: SessionRequest) -> Result<SourceSession, AnalysisError> {
+        self.next_id = self.next_id.checked_add(1).ok_or(AnalysisError::InvalidFrameCount)?;
+        Ok(SourceSession {
+            id: SessionId::new(format!("analysis-{}", self.next_id)),
+            request,
+            state: SessionState::Running,
+            next_sample: 0,
+            next_sequence: 0,
+            loop_wrapped: false,
+            last_gap: None,
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AnalysisError {
     InvalidSampleRate,
@@ -231,6 +437,10 @@ pub enum AnalysisError {
     InvalidSample,
     InvalidConfiguration,
     UnsupportedSchemaVersion { version: u16 },
+    InvalidEvent,
+    CounterDiscontinuity,
+    SessionResetRequired,
+    DuplicateStart,
 }
 
 impl fmt::Display for AnalysisError {
