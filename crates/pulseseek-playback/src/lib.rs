@@ -1,5 +1,6 @@
 mod resampling;
 
+mod analysis_capture;
 mod control;
 mod engine;
 mod error;
@@ -9,6 +10,7 @@ mod musical_spectrum;
 mod visualization;
 mod worker;
 
+pub use analysis_capture::*;
 pub use control::*;
 pub use engine::*;
 pub use error::*;
