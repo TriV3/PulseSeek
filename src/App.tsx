@@ -79,6 +79,9 @@ const clamp = (value: number, minimum: number, maximum: number) =>
 function App() {
   const [waveformSize, setWaveformSize] = useState(38);
   const [browserSize, setBrowserSize] = useState(24);
+  const [lowerWorkspace, setLowerWorkspace] = useState<"browser" | "meters">(
+    "browser",
+  );
   const [waveformResetRevision, setWaveformResetRevision] = useState(0);
   const [fileSort, setFileSort] = useState<FileSort>(DEFAULT_FILE_SORT);
   const [searchQuery, setSearchQuery] = useState("");
@@ -221,6 +224,32 @@ function App() {
       })[next].current?.focus();
     },
     [sidebarView],
+  );
+
+  const lowerWorkspaceTabRef = useRef<HTMLButtonElement | null>(null);
+  const metersWorkspaceTabRef = useRef<HTMLButtonElement | null>(null);
+
+  const handleWorkspaceTabKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>) => {
+      const workspaces = ["browser", "meters"] as const;
+      const current = workspaces.indexOf(lowerWorkspace);
+      let next: (typeof workspaces)[number] | null = null;
+      if (event.key === "Home") next = "browser";
+      if (event.key === "End") next = "meters";
+      if (event.key === "ArrowLeft")
+        next =
+          workspaces[(current + workspaces.length - 1) % workspaces.length];
+      if (event.key === "ArrowRight")
+        next = workspaces[(current + 1) % workspaces.length];
+      if (!next) return;
+      event.preventDefault();
+      setLowerWorkspace(next);
+      ({
+        browser: lowerWorkspaceTabRef,
+        meters: metersWorkspaceTabRef,
+      })[next].current?.focus();
+    },
+    [lowerWorkspace],
   );
 
   const handleCompactTabKeyDown = useCallback(
@@ -1112,7 +1141,43 @@ function App() {
             )}
           </div>
           <div
+            className="lower-workspace-tabs"
+            role="tablist"
+            aria-label="Lower workspaces"
+          >
+            <button
+              ref={lowerWorkspaceTabRef}
+              id="lower-workspace-tab-browser"
+              type="button"
+              role="tab"
+              aria-controls="lower-workspace-panel-browser"
+              aria-selected={lowerWorkspace === "browser"}
+              tabIndex={lowerWorkspace === "browser" ? 0 : -1}
+              onClick={() => setLowerWorkspace("browser")}
+              onKeyDown={handleWorkspaceTabKeyDown}
+            >
+              Browser workspace
+            </button>
+            <button
+              ref={metersWorkspaceTabRef}
+              id="lower-workspace-tab-meters"
+              type="button"
+              role="tab"
+              aria-controls="lower-workspace-panel-meters"
+              aria-selected={lowerWorkspace === "meters"}
+              tabIndex={lowerWorkspace === "meters" ? 0 : -1}
+              onClick={() => setLowerWorkspace("meters")}
+              onKeyDown={handleWorkspaceTabKeyDown}
+            >
+              Meters workspace
+            </button>
+          </div>
+          <div
+            id="lower-workspace-panel-browser"
             className="browser-workspace"
+            role="tabpanel"
+            aria-labelledby="lower-workspace-tab-browser"
+            hidden={lowerWorkspace !== "browser"}
             style={{
               gridTemplateColumns: compactMode
                 ? "1fr"
@@ -1372,6 +1437,18 @@ function App() {
               <section className="app-content">{fileListSection}</section>
             )}
           </div>
+          <section
+            id="lower-workspace-panel-meters"
+            className="meters-workspace"
+            role="tabpanel"
+            aria-labelledby="lower-workspace-tab-meters"
+            hidden={lowerWorkspace !== "meters"}
+          >
+            <div className="meters-empty-state">
+              <h2>Meters</h2>
+              <p>Meter tiles will appear here in a future update.</p>
+            </div>
+          </section>
         </section>
       </div>
       <ShortcutEditor

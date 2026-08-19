@@ -170,6 +170,62 @@ describe("application shell", () => {
     expect(screen.queryByRole("tab", { name: "File list" })).toBeNull();
   });
 
+  it("switches lower Browser and Meters workspaces without remounting Browser", () => {
+    render(<App />);
+
+    const browserWorkspaceTab = screen.getByRole("tab", {
+      name: "Browser workspace",
+    });
+    const metersWorkspaceTab = screen.getByRole("tab", {
+      name: "Meters workspace",
+    });
+    const browserWorkspace = screen.getByRole("tabpanel", {
+      name: "Browser workspace",
+    });
+
+    expect(browserWorkspaceTab).toHaveAttribute("aria-selected", "true");
+    expect(browserWorkspace).toBeVisible();
+    expect(
+      screen.getByRole("tab", { name: "Browser", hidden: true }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(metersWorkspaceTab);
+    expect(metersWorkspaceTab).toHaveAttribute("aria-selected", "true");
+    expect(
+      screen.getByRole("tabpanel", { name: "Meters workspace" }),
+    ).toBeVisible();
+    expect(browserWorkspace).not.toBeVisible();
+    expect(
+      screen.getByRole("tab", { name: "Browser", hidden: true }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(browserWorkspaceTab);
+    expect(browserWorkspaceTab).toHaveAttribute("aria-selected", "true");
+    expect(browserWorkspace).toBeVisible();
+  });
+
+  it("navigates lower workspaces with keyboard and preserves focus", () => {
+    render(<App />);
+
+    const browserWorkspaceTab = screen.getByRole("tab", {
+      name: "Browser workspace",
+    });
+    const metersWorkspaceTab = screen.getByRole("tab", {
+      name: "Meters workspace",
+    });
+
+    fireEvent.keyDown(browserWorkspaceTab, { key: "ArrowRight" });
+    expect(metersWorkspaceTab).toHaveFocus();
+    expect(metersWorkspaceTab).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.keyDown(metersWorkspaceTab, { key: "Home" });
+    expect(browserWorkspaceTab).toHaveFocus();
+    expect(browserWorkspaceTab).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.keyDown(browserWorkspaceTab, { key: "End" });
+    expect(metersWorkspaceTab).toHaveFocus();
+  });
+
   it("shares the sidebar between keyboard-accessible browser tabs", () => {
     render(<App />);
 
